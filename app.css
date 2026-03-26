@@ -1,0 +1,4487 @@
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --line: #d7d9de;
+  --text: #102033;
+  --muted: #667085;
+  --brand: #1d4d7a;
+  --brand-2: #3c779f;
+  --accent: #dbe7f0;
+  --entry: #e9d8b7;
+  --soft: #f9fafb;
+  --danger: #b42318;
+  --success: #027a48;
+  --warning: #b54708;
+  --shadow: 0 12px 28px rgba(16, 32, 51, 0.08);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  background: linear-gradient(180deg, #eef2f6 0%, #f7f7f8 100%);
+  color: var(--text);
+}
+button, input, select, textarea { font: inherit; }
+.shell {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 18px;
+}
+.topbar, .hero-card, .workspace-card, .module-card, .form-card, .table-card, .summary-card, .record-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+.topbar {
+  padding: 18px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.brand-wrap { display: flex; align-items: center; gap: 14px; }
+.logo {
+  width: 54px; height: 54px; border-radius: 16px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  color: white; display:flex; align-items:center; justify-content:center;
+  font-weight: 800;
+}
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.topbar h1 { font-size: 22px; margin: 4px 0 0; }
+.top-actions { display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
+.inline-field { display:flex; flex-direction:column; gap:6px; }
+.inline-field span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.inline-field.compact select { min-width: 220px; }
+select, input, textarea {
+  width: 100%; border-radius: 12px; border: 1px solid var(--line);
+  padding: 12px 14px; background: white; color: var(--text);
+}
+.entry-input, textarea.entry-input, select.entry-input { background: var(--entry); }
+.display-field {
+  min-height: 47px; border-radius: 12px; border:1px solid var(--line);
+  background:white; padding: 12px 14px; display:flex; align-items:center; font-weight:600;
+}
+textarea { min-height: 92px; resize: vertical; }
+button {
+  border: 0; border-radius: 12px; padding: 11px 16px; cursor:pointer;
+  background: linear-gradient(135deg, var(--brand), var(--brand-2)); color:white; font-weight:700;
+}
+button.secondary { background: #eef2f6; color: var(--text); }
+button.ghost-btn { background: transparent; color: var(--brand); border:1px solid #c8d6e3; }
+button.danger { background: var(--danger); }
+button.success { background: var(--success); }
+button.warning { background: var(--warning); }
+button:disabled { opacity: .55; cursor:not-allowed; }
+.hero-card {
+  margin-top: 18px; padding: 22px; display:flex; justify-content:space-between; align-items:flex-start; gap:16px;
+}
+.section-label { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 700; }
+.hero-title { font-size: 30px; font-weight: 800; margin-top: 6px; }
+.hero-sub { margin-top: 8px; color: var(--muted); max-width: 720px; line-height: 1.55; }
+.hero-stats { display:grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap:12px; min-width: 360px; }
+.summary-card { padding: 16px; }
+.summary-card .value { font-size: 24px; font-weight: 800; margin-top: 6px; }
+.summary-card .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+.module-grid { margin-top:18px; display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:14px; }
+.module-card {
+  padding: 18px; cursor:pointer; transition: transform .18s ease, border-color .18s ease;
+  min-height: 145px; position:relative;
+}
+.module-card:hover { transform: translateY(-2px); }
+.module-card.active { border-color: var(--brand); box-shadow: 0 14px 32px rgba(29,77,122,.14); }
+.module-card.disabled { opacity: .55; }
+.module-card .module-title { font-weight: 800; font-size: 18px; margin-top: 10px; }
+.module-card .module-desc { color: var(--muted); font-size: 13px; margin-top: 8px; line-height: 1.45; }
+.module-icon {
+  width: 46px; height: 46px; border-radius: 14px; display:flex; align-items:center; justify-content:center;
+  background: #edf4fb; color: var(--brand); font-size: 22px;
+}
+.workspace-card { margin-top:18px; padding: 20px; }
+.workspace-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-end; margin-bottom: 18px; }
+.workspace-head h2 { margin: 4px 0 0; font-size: 28px; }
+.global-search { width: 300px; }
+.tool-tabs { display:flex; flex-wrap:wrap; gap:10px; margin-bottom: 18px; }
+.tool-tab { background:#eef2f6; color: var(--text); }
+.tool-tab.active { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: white; }
+.layout-grid.two { display:grid; grid-template-columns: 1.2fr .8fr; gap:18px; }
+.layout-grid.three { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:18px; }
+.form-card, .table-card, .record-card { padding: 18px; }
+.form-card h3, .table-card h3, .record-card h3 { margin:0 0 14px; font-size: 18px; }
+.form-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; }
+.form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.form-grid.one { grid-template-columns: 1fr; }
+
+.cs-form-grid{align-items:end}
+.cs-form-grid .field-wide{grid-column:span 1}
+.cs-form-grid .field-account,.cs-form-grid .field-phone,.cs-form-grid .field-bvn,.cs-form-grid .field-id,.cs-form-grid .field-search,.cs-form-grid .field-submit,.cs-form-grid .field-photo-upload{max-width:100%}
+.cs-form-grid .field-account .entry-input,.cs-form-grid .field-account .display-field{max-width:140px}
+.cs-form-grid .field-phone .entry-input,.cs-form-grid .field-phone .display-field{max-width:180px}
+.cs-form-grid .field-bvn .entry-input,.cs-form-grid .field-bvn .display-field{max-width:180px}
+.cs-form-grid .field-id .entry-input,.cs-form-grid .field-id .display-field{max-width:220px}
+.cs-form-grid .field-search button,.cs-form-grid .field-submit button{width:100%;max-width:180px;white-space:nowrap}
+.cs-form-grid .field-photo-upload .entry-input{max-width:220px}
+.modal-cs-grid{align-items:start}
+.modal-cs-grid .field-wide,.modal-cs-grid .field-status{grid-column:span 1}
+.modal-cs-grid .field-account .display-field{max-width:140px}
+.modal-cs-grid .field-phone .display-field{max-width:180px}
+.modal-cs-grid .field-bvn .display-field{max-width:180px}
+.modal-cs-grid .field-id .display-field{max-width:220px}
+.approval-photo-stack{display:flex;flex-direction:column;gap:12px;align-items:flex-start;margin-top:8px}
+.approval-photo-panel.hidden{display:none}
+.approval-photo-box{width:140px;height:140px}
+.field label { display:block; margin-bottom: 7px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.action-row { display:flex; gap:10px; flex-wrap:wrap; margin-top: 16px; }
+.lookup-card {
+  display:grid; grid-template-columns: 110px 1fr; gap:18px; align-items:start;
+  padding: 16px; border:1px solid var(--line); border-radius: 18px; background: var(--soft);
+}
+.photo-box {
+  width: 110px; height: 110px; border-radius: 18px; background:#eef2f6; border:1px dashed #cdd5df;
+  display:flex; align-items:center; justify-content:center; color: var(--muted); overflow:hidden;
+}
+.photo-box img { width:100%; height:100%; object-fit:cover; }
+.info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; }
+.info-item { background: white; border:1px solid var(--line); border-radius: 14px; padding: 12px; }
+.info-item .k { font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+.info-item .v { font-weight: 700; }
+.table-wrap { overflow:auto; border:1px solid var(--line); border-radius: 16px; }
+.table { width:100%; border-collapse: collapse; min-width: 820px; }
+.table th, .table td { padding: 12px 10px; border-bottom: 1px solid #ebeef2; text-align:left; font-size: 13px; }
+.table th { background:#f8fafc; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.table tr:hover td { background: #fafcff; }
+.badge { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; font-size:12px; font-weight:700; }
+.badge.pending { background:#fff1e8; color: var(--warning); }
+.badge.approved { background:#e9f9f0; color: var(--success); }
+.badge.rejected { background:#fdecea; color: var(--danger); }
+.muted { color: var(--muted); }
+.stack { display:flex; flex-direction:column; gap:14px; }
+.note { font-size: 13px; color: var(--muted); line-height: 1.5; }
+.kpi-row { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:14px; margin-bottom: 18px; }
+.kpi { background: #f8fafc; border:1px solid var(--line); border-radius:16px; padding:14px; }
+.kpi .label { color: var(--muted); font-size: 12px; font-weight:700; text-transform: uppercase; }
+.kpi .number { font-size: 22px; font-weight:800; margin-top:8px; }
+.modal-back {
+  position: fixed; inset:0; background: rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center;
+  padding: 18px; z-index: 9999;
+}
+.hidden { display:none !important; }
+.modal {
+  width: min(980px, 100%); max-height: 90vh; overflow:auto; background:white; border-radius: 22px; border:1px solid var(--line); box-shadow: var(--shadow);
+}
+.modal-head, .modal-actions { padding: 18px 20px; display:flex; align-items:center; justify-content:space-between; }
+.modal-head { border-bottom: 1px solid var(--line); }
+.modal-head h3 { margin:0; }
+.modal-body { padding: 20px; }
+.icon-btn { background: transparent; color: var(--muted); border:1px solid var(--line); }
+.modal-actions { border-top:1px solid var(--line); gap:10px; justify-content:flex-end; }
+.toast {
+  position: fixed; right: 18px; bottom: 18px; background: var(--text); color: white; padding: 12px 16px; border-radius: 14px; z-index: 10001;
+}
+.linklike { color: var(--brand); cursor:pointer; text-decoration: underline; }
+.upload-list { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+.upload-pill { padding:8px 12px; border-radius:999px; background:#edf4fb; border:1px solid #d5e3ef; font-size:12px; }
+@media (max-width: 1120px) {
+  .module-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layout-grid.two, .layout-grid.three, .kpi-row, .hero-card { grid-template-columns:1fr; flex-direction:column; }
+  .hero-stats { min-width: 100%; }
+}
+@media (max-width: 760px) {
+  .topbar, .workspace-head { flex-direction: column; align-items: stretch; }
+  .form-grid, .info-grid { grid-template-columns: 1fr; }
+  .module-grid { grid-template-columns:1fr; }
+  .global-search { width:100%; }
+}
+
+.theme-select{min-width:170px;border-radius:12px;border:1px solid var(--line);padding:11px 14px;background:var(--panel);color:var(--text)}
+.summary-card.clickable{cursor:pointer;transition:transform .15s ease, box-shadow .15s ease}
+.summary-card.clickable:hover{transform:translateY(-2px)}
+.action-inline{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.filter-chip{background:#eef2f6;color:var(--text)}
+.filter-chip.active{background:linear-gradient(135deg, var(--brand), var(--brand-2));color:white}
+.mono-note{font-family: ui-monospace, SFMono-Regular, Menlo, monospace;font-size:12px;color:var(--muted)}
+.row-actions{display:flex;gap:8px;flex-wrap:wrap}
+small.status-flagged{color:var(--danger);font-weight:700}
+small.status-balanced{color:var(--success);font-weight:700}
+body[data-theme="ducess-sheet"]{--bg:#e8efe9;--panel:#f6f7f2;--line:#c8cec5;--text:#17342f;--muted:#6d7d74;--brand:#11535a;--brand-2:#2c7b79;--accent:#dde8df;--entry:#e5d6ac;--soft:#f3f5ef;--shadow:0 12px 28px rgba(17,83,90,.10)}
+body[data-theme="ocean"]{--bg:#edf6fb;--panel:#ffffff;--line:#cfe0ea;--text:#0f2840;--muted:#5b7487;--brand:#0a5a7f;--brand-2:#2c8db4;--accent:#dff0f7;--entry:#e7d4b2;--soft:#f7fbfd;--shadow:0 12px 28px rgba(10,90,127,.10)}
+body[data-theme="dark-slate"]{--bg:#0f1720;--panel:#16202b;--line:#243241;--text:#edf2f7;--muted:#9fb0c1;--brand:#2f8ea7;--brand-2:#66b7c7;--accent:#1f2b37;--entry:#7d6c49;--soft:#1a2633;--danger:#ef6b6b;--success:#53c68c;--warning:#f3a65a;--shadow:none}
+body[data-theme="dark-slate"] .display-field, body[data-theme="dark-slate"] select, body[data-theme="dark-slate"] input, body[data-theme="dark-slate"] textarea {background:#1b2734;color:var(--text);border-color:var(--line)}
+body[data-theme="neutral-stone"]{--bg:#f1f0ec;--panel:#fffdfa;--line:#d8d2c6;--text:#2c2a27;--muted:#726d64;--brand:#77614b;--brand-2:#9a8165;--accent:#ebe5da;--entry:#e2d3b8;--soft:#faf7f1;--shadow:0 12px 24px rgba(80,64,40,.08)}
+
+.balance-negative{color: var(--danger)!important;}
+.theme-cycle-btn{min-width:180px;text-align:center;}
+body[data-theme="ducess-sheet"]{--bg:#0d0b10;--panel:#050507;--line:#5f1111;--text:#f7f4ea;--muted:#d8c8c8;--brand:#6b0000;--brand-2:#00eaff;--accent:#160b14;--entry:#efcfd1;--soft:#0c1014;--danger:#ff7070;--success:#53c68c;--warning:#f3a65a;}
+body[data-theme="ducess-sheet"] button.secondary, body[data-theme="ducess-sheet"] .tool-tab, body[data-theme="ducess-sheet"] .filter-chip{background:#f2ebea;color:#1b1515;border:1px solid #d8b9b9;}
+body[data-theme="ducess-sheet"] .module-card, body[data-theme="ducess-sheet"] .workspace-card, body[data-theme="ducess-sheet"] .hero-card, body[data-theme="ducess-sheet"] .topbar{background:#000;border-color:#5f1111;}
+body[data-theme="ducess-sheet"] .module-desc, body[data-theme="ducess-sheet"] .hero-sub, body[data-theme="ducess-sheet"] .section-label, body[data-theme="ducess-sheet"] .muted, body[data-theme="ducess-sheet"] .note, body[data-theme="ducess-sheet"] .topbar h1, body[data-theme="ducess-sheet"] .eyebrow{color:#e2dada;}
+body[data-theme="ducess-sheet"] button.ghost-btn, body[data-theme="ducess-sheet"] .icon-btn{color:#fff;border-color:#7f4b4b;background:#2a1010;}
+body[data-theme="dark-slate"] button.secondary, body[data-theme="dark-slate"] .tool-tab, body[data-theme="dark-slate"] .filter-chip{background:#253243;color:#f6fbff;border:1px solid #3b4d62;}
+body[data-theme="dark-slate"] .icon-btn, body[data-theme="dark-slate"] button.ghost-btn{color:#f6fbff;border-color:#4b637d;background:#1b2734;}
+body[data-theme="dark-slate"] .linklike{color:#8fd8ff;}
+
+body[data-theme="ducess-sheet"] select,
+body[data-theme="ducess-sheet"] input,
+body[data-theme="ducess-sheet"] textarea,
+body[data-theme="ducess-sheet"] .display-field{background:#1a1111;color:#f7f4ea;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] select option{background:#1a1111;color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .kpi{background:#130b0b;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] .kpi .label, body[data-theme="ducess-sheet"] .kpi .number{color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .table th{background:#f5eded;color:#4e0e0e;}
+body[data-theme="ducess-sheet"] .table tr:hover td{background:#201414;color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .table td{color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .inline-field span{color:#f0dede;}
+body[data-theme="ducess-sheet"] ::placeholder{color:#d9c9c9;opacity:1;}
+
+
+body[data-theme="ducess-sheet"] .topbar select,
+body[data-theme="ducess-sheet"] .topbar input,
+body[data-theme="ducess-sheet"] .topbar .theme-select{background:#f5eded;color:#2c0909;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] .topbar select option{background:#f5eded;color:#2c0909;}
+body[data-theme="ducess-sheet"] .table tr:hover td{background:#f5eded;color:#2c0909;}
+body[data-theme="ducess-sheet"] .toast{background:#f5eded;color:#2c0909;border:1px solid #7a2a2a;}
+body[data-theme="ducess-sheet"] .modal{background:#fffdfa;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] .modal-head h3,
+body[data-theme="ducess-sheet"] .modal .field label,
+body[data-theme="ducess-sheet"] .modal .note,
+body[data-theme="ducess-sheet"] .modal .muted,
+body[data-theme="ducess-sheet"] .modal .kpi .label,
+body[data-theme="ducess-sheet"] .modal .kpi .number{color:#2c0909;}
+body[data-theme="ducess-sheet"] .modal .entry-input,
+body[data-theme="ducess-sheet"] .modal input,
+body[data-theme="ducess-sheet"] .modal textarea,
+body[data-theme="ducess-sheet"] .modal select{background:#f7ead0;color:#2c0909;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] .modal .display-field{background:#fffdfa;color:#2c0909;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] .modal .kpi{background:#fff7f1;border-color:#d8b9b9;}
+body[data-theme="ducess-sheet"] .summary-card .label,
+body[data-theme="ducess-sheet"] .summary-card .number,
+body[data-theme="ducess-sheet"] .summary-card .muted,
+body[data-theme="ducess-sheet"] .table-card h3,
+body[data-theme="ducess-sheet"] .table td,
+body[data-theme="ducess-sheet"] .table th{color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .table th{background:#4e0e0e;color:#6ff8ff;}
+body[data-theme="ducess-sheet"] .summary-card{background:#1a0f0f;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] .summary-card .label{color:#e8d6d6;}
+body[data-theme="ducess-sheet"] .summary-card .number{color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .summary-card .muted{color:#eadede;}
+
+/* Stabilization patch */
+.action-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+body[data-theme="dark-slate"] .table tr:hover td{background:#223344;color:#f6fbff;}
+body[data-theme="dark-slate"] .topbar select,body[data-theme="dark-slate"] .topbar input,body[data-theme="dark-slate"] .topbar .theme-select{background:#1b2734;color:#f6fbff;border-color:#4b637d;}
+body[data-theme="dark-slate"] select option{background:#1b2734;color:#f6fbff;}
+body[data-theme="ducess-sheet"] .table tr:hover td, body[data-theme="ducess-sheet"] .table tr:hover td *{background:#f5eded;color:#2c0909 !important;}
+body[data-theme="ducess-sheet"] .topbar select,body[data-theme="ducess-sheet"] .topbar input,body[data-theme="ducess-sheet"] .topbar .theme-select,body[data-theme="ducess-sheet"] .inline-field.compact select{background:#f5eded;color:#2c0909;border-color:#7a2a2a;}
+body[data-theme="ducess-sheet"] .table td, body[data-theme="ducess-sheet"] .table td *{color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .summary-card, body[data-theme="ducess-sheet"] .summary-card *{color:#f7f4ea;}
+body[data-theme="ducess-sheet"] .kpi .label{color:#f1dede;}
+body[data-theme="ducess-sheet"] .kpi .number{color:#f7f4ea;}
+/* Better credit/debit alignment */
+.workspace-card .layout-grid.two{align-items:start}
+.workspace-card .form-grid.three{grid-template-columns:1fr 1fr 1fr}
+.workspace-card .form-grid.three .field:nth-child(8){grid-column:span 2}
+.workspace-card .form-grid.three .field:nth-child(9){grid-column:span 1}
+.workspace-card .form-grid.three input#txDetails{min-width:100%;}
+
+
+.field label{white-space:nowrap;}
+.journal-grid{align-items:start;}
+.journal-grid .span-two{grid-column: span 2;}
+body[data-theme="dark-slate"] .modal{background:var(--panel);color:var(--text);border-color:var(--line);}
+body[data-theme="dark-slate"] .modal-head, body[data-theme="dark-slate"] .modal-actions{border-color:var(--line);}
+body[data-theme="dark-slate"] .modal h3, body[data-theme="dark-slate"] .modal .field label, body[data-theme="dark-slate"] .modal .note, body[data-theme="dark-slate"] .modal .display-field{color:var(--text);}
+body[data-theme="dark-slate"] .modal .kpi{background:#1b2734;border-color:#314255;}
+body[data-theme="dark-slate"] .modal .kpi .label{color:#cdd8e4;}
+body[data-theme="dark-slate"] .modal .kpi .number{color:#f5fbff;}
+body[data-theme="dark-slate"] .modal .entry-input{background:#1b2734;color:var(--text);border-color:#314255;}
+body[data-theme="dark-slate"] .modal button.secondary{background:#253243;color:#f6fbff;border:1px solid #3b4d62;}
+body[data-theme="dark-slate"] .modal .icon-btn{background:#1b2734;color:#f6fbff;border-color:#4b637d;}
+
+
+/* Final dark-theme consistency fixes */
+.layout-grid.two > * { min-width: 0; }
+.table-card, .form-card, .record-card, .workspace-card { min-width: 0; }
+.table-wrap { max-width: 100%; }
+
+body[data-theme="dark-slate"] .lookup-card{background:#13202b;border-color:#314255;}
+body[data-theme="dark-slate"] .photo-box{background:#1b2734;border-color:#314255;color:#cdd8e4;}
+body[data-theme="dark-slate"] .info-item{background:#1b2734;border-color:#314255;color:#f6fbff;}
+body[data-theme="dark-slate"] .info-item .k{color:#cdd8e4;}
+body[data-theme="dark-slate"] .info-item .v{color:#f6fbff;}
+body[data-theme="dark-slate"] .kpi{background:#1b2734;border-color:#314255;}
+body[data-theme="dark-slate"] .kpi .label{color:#cdd8e4;}
+body[data-theme="dark-slate"] .kpi .number{color:#f6fbff;}
+body[data-theme="dark-slate"] .modal h3, body[data-theme="dark-slate"] .modal .field label, body[data-theme="dark-slate"] .modal .note{color:#e7eef6;}
+body[data-theme="dark-slate"] .table th{background:#eef2f7;color:#6b7c8d;}
+body[data-theme="dark-slate"] .table tr:hover td, body[data-theme="dark-slate"] .table tr:hover td *{background:#223344;color:#f6fbff !important;}
+body[data-theme="dark-slate"] .display-field{color:#f6fbff;}
+
+
+/* final dark/journal polish */
+body[data-theme="dark-slate"] .toast{background:#eef6ff;color:#0f2033;border:1px solid #5ab6d6;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+body[data-theme="dark-slate"] .info-item{background:#1b2734;border-color:#314255;}
+body[data-theme="dark-slate"] .info-item .k{color:#cdd8e4;}
+body[data-theme="dark-slate"] .info-item .v{color:#f6fbff;}
+body[data-theme="dark-slate"] .display-field{color:#f6fbff;}
+body[data-theme="dark-slate"] .photo-box{background:#1b2734;border-color:#314255;color:#cdd8e4;}
+.lookup-card.right-photo{grid-template-columns:1fr 110px;}
+.lookup-card.right-photo .stack{order:1;}
+.lookup-card.right-photo .photo-box{order:2; justify-self:end;}
+.journal-layout{grid-template-columns:minmax(360px,.88fr) minmax(0,1.12fr);}
+.journal-grid .field label{white-space:nowrap;}
+.journal-grid{align-items:start;}
+.journal-card .table-wrap{overflow-x:visible;}
+.journal-card .journal-table{min-width:0;table-layout:fixed;width:100%;}
+.journal-card .journal-table th,.journal-card .journal-table td{white-space:nowrap;}
+.journal-card .journal-table th:nth-child(1),.journal-card .journal-table td:nth-child(1){width:52px;}
+.journal-card .journal-table th:nth-child(2),.journal-card .journal-table td:nth-child(2){width:30%;}
+.journal-card .journal-table th:nth-child(3),.journal-card .journal-table td:nth-child(3){width:23%;}
+.journal-card .journal-table th:nth-child(4),.journal-card .journal-table td:nth-child(4){width:18%;}
+.journal-card .journal-table th:nth-child(5),.journal-card .journal-table td:nth-child(5){width:90px;text-align:right;}
+@media (max-width: 1120px){.journal-layout{grid-template-columns:1fr;}}
+
+/* Journal approval patch */
+.journal-layout{grid-template-columns:minmax(300px,.78fr) minmax(0,1.22fr);align-items:start;gap:18px;}
+.compact-journal-grid{grid-template-columns:minmax(120px,.9fr) minmax(110px,.8fr) minmax(120px,.9fr);gap:14px 16px;align-items:start;}
+.compact-journal-grid .field.short .entry-input,.compact-journal-grid .field.short .display-field{max-width:180px;}
+.compact-journal-grid .action-field button{width:100%;white-space:nowrap;}
+.compact-journal-grid .span-two{grid-column: span 2;}
+.journal-card .table-wrap{overflow-x:auto;}
+.journal-card .journal-table{min-width:640px;width:100%;table-layout:auto;}
+.journal-card .journal-table th,.journal-card .journal-table td{white-space:nowrap;}
+.journal-card .journal-table th:nth-child(2),.journal-card .journal-table td:nth-child(2){min-width:180px;}
+.journal-card .journal-table th:nth-child(3),.journal-card .journal-table td:nth-child(3){min-width:130px;}
+.journal-card .journal-table th:nth-child(4),.journal-card .journal-table td:nth-child(4){min-width:90px;}
+body[data-theme="dark-slate"] .table tr:hover td button,
+body[data-theme="dark-slate"] .table tr:hover td .success,
+body[data-theme="dark-slate"] .table tr:hover td .danger,
+body[data-theme="dark-slate"] .table tr:hover td .warning{opacity:1;filter:none;}
+body[data-theme="dark-slate"] .table tr:hover td .success{background:#53c68c;color:#10211a;}
+body[data-theme="dark-slate"] .table tr:hover td .danger{background:#ef6b6b;color:#2b0e0e;}
+body[data-theme="dark-slate"] .table tr:hover td .warning{background:#f3a65a;color:#241608;}
+@media (max-width: 1120px){.journal-layout{grid-template-columns:1fr;}.compact-journal-grid{grid-template-columns:1fr 1fr;}.compact-journal-grid .span-two{grid-column:1 / -1;}}
+@media (max-width: 760px){.compact-journal-grid{grid-template-columns:1fr;}}
+
+/* Overhaul phase 1 */
+.tellering-sheet{background:#000;border:1px solid var(--line);border-radius:18px;padding:14px;color:#fff}
+.sheet-super{font-size:14px;letter-spacing:.18em;text-transform:uppercase;color:#fff;text-align:center;margin-bottom:4px}
+.sheet-title{font-size:28px;font-weight:800;text-align:center;color:#fff;margin-bottom:10px}
+.sheet-grid{display:grid;gap:8px;align-items:center}
+.credit-sheet-grid{grid-template-columns:180px 1fr 170px 170px;}
+.check-grid{grid-template-columns:180px 1fr 170px 170px 170px;}
+.sheet-label{font-size:16px;font-weight:700;color:#fff;white-space:nowrap}
+.sheet-label.inline-label{justify-self:end;padding-right:8px}
+.sheet-input{height:44px}
+.short-code{max-width:90px}
+.medium-amt{max-width:180px}
+.sheet-btn{height:44px;white-space:nowrap}
+.sheet-grid .display-field{min-height:44px;border-radius:0;background:#fff;color:#111;padding:10px 12px}
+.sheet-grid .entry-input{border-radius:0;background:#efcfd1;color:#111}
+.sheet-grid .span-3{grid-column:2 / span 3}
+.inline-photo{width:260px;height:110px;justify-self:start}
+.sheet-spacer{min-height:1px}
+.tellering-stack{display:flex;flex-direction:column;gap:14px}
+.tellering-lower.compact-layout{display:grid;grid-template-columns:minmax(320px, 420px) minmax(0,1fr);gap:16px;align-items:start}
+.compact-fields{grid-template-columns:1fr 1fr;align-items:start}
+.compact-fields .span-two{grid-column:1 / -1}
+.compact-fields .field:not(.span-two){max-width:100%}
+.compact-fields .field label{display:block;margin-bottom:8px}
+.tellering-entry-card .form-grid.two.compact-fields .field{min-width:0}
+.journal-pane{min-width:0}
+.journal-pane .table{min-width:unset;width:100%}
+.journal-pane .table-wrap{overflow-x:auto}
+.journal-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.kpi.small .number{font-size:18px}
+body[data-theme="dark-slate"] .tellering-sheet{background:#050c14;border-color:#243241}
+body[data-theme="dark-slate"] .sheet-label, body[data-theme="dark-slate"] .sheet-title, body[data-theme="dark-slate"] .sheet-super{color:#fff}
+body[data-theme="dark-slate"] .sheet-grid .display-field{background:#fff;color:#111}
+body[data-theme="dark-slate"] .sheet-grid .entry-input{background:#17283b;color:#eef5ff;border-color:#2f4b65}
+body[data-theme="ducess-sheet"] .tellering-sheet{background:#000;border-color:#5f1111}
+body[data-theme="ducess-sheet"] .sheet-grid .display-field{background:#fff;color:#111}
+body[data-theme="ducess-sheet"] .sheet-grid .entry-input{background:#efcfd1;color:#111;border-color:#7a2a2a}
+.approvals-sections .tool-tab{min-width:160px}
+@media (max-width: 1100px){
+  .credit-sheet-grid{grid-template-columns:160px 1fr 140px 140px;}
+  .check-grid{grid-template-columns:160px 1fr 140px 140px 140px;}
+  .tellering-lower.compact-layout{grid-template-columns:1fr;}
+}
+
+.stack-actions{display:flex;flex-direction:column;gap:8px;align-items:flex-start}.inline-actions{display:inline-flex;flex-direction:row;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap}.inline-actions button{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;flex:0 0 auto}
+
+
+/* Phase 2B Tellering redesign */
+.sheet-head-row{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:10px}.sheet-head-row.single-head{justify-content:flex-start}
+.running-float-chip{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;min-width:220px;padding:10px 14px;border:1px solid #7a2a2a;background:#120909;border-radius:0;color:#fff}
+.running-float-chip span{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#e9d6d6}
+.running-float-chip strong{font-size:24px;line-height:1.1}
+.sheet-title-check{margin-bottom:12px}
+.redesigned-check-grid{grid-template-columns:190px minmax(180px,300px) 130px 120px 140px;gap:8px 10px}
+.redesigned-journal-grid{grid-template-columns:190px minmax(220px,320px) 130px 170px;gap:8px 10px}
+.sheet-grid .value-wide{grid-column:2 / 6}
+.redesigned-journal-grid .value-wide{grid-column:2 / 5}
+.sheet-grid .value-short{max-width:280px}
+.sheet-photo-row{grid-column:1 / -1;display:grid;grid-template-columns:190px 280px;gap:10px;align-items:start;padding-top:4px}
+.inline-photo{width:280px;height:138px;border-radius:0}
+.amount-post-wrap{display:grid;grid-template-columns:minmax(120px,1fr) 120px;gap:10px;align-items:center}
+.tellering-entry-card .display-field,
+.tellering-entry-card .entry-input,
+.sheet-grid .display-field,
+.sheet-grid .entry-input,
+.sheet-btn,
+.running-float-chip{min-height:36px;height:36px}
+.sheet-grid .display-field,.sheet-grid .entry-input,.sheet-btn{padding:7px 10px}
+.sheet-btn{border-radius:0;padding:6px 10px}
+.sheet-grid .display-field,.sheet-grid .entry-input{border-radius:0}
+.sheet-label{font-size:15px}
+.tellering-lower.redesigned-tellering-lower{grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:18px}
+.tellering-entry-card{align-self:start}
+.spacious-journal-pane{padding:20px}
+.journal-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.journal-kpis .kpi.small{padding:12px 14px}
+.journal-kpis .kpi.small .number{font-size:20px}
+.running-kpi{border-width:2px}
+.journal-table-wrap{overflow-x:hidden}
+.journal-table{min-width:100%;table-layout:fixed}
+.journal-table th:nth-child(1), .journal-table td:nth-child(1){width:56px}
+.journal-table th:nth-child(2), .journal-table td:nth-child(2){width:28%}
+.journal-table th:nth-child(3), .journal-table td:nth-child(3){width:20%}
+.journal-table th:nth-child(4), .journal-table td:nth-child(4){width:16%}
+.journal-table th:nth-child(5), .journal-table td:nth-child(5){width:18%}
+.journal-table th:nth-child(6), .journal-table td:nth-child(6){width:110px}
+.journal-table td{word-break:break-word;white-space:normal}
+body[data-theme="ducess-sheet"] .running-float-chip{background:#efcfd1;color:#180d0d;border-color:#7a2a2a}
+body[data-theme="ducess-sheet"] .running-float-chip span{color:#4e0e0e}
+body[data-theme="dark-slate"] .running-float-chip{background:#17283b;border-color:#36506a;color:#eef5ff}
+body[data-theme="dark-slate"] .running-float-chip span{color:#c7d9ec}
+@media (max-width: 1080px){
+  .sheet-head-row{align-items:stretch;flex-direction:column}
+  .redesigned-check-grid,.redesigned-journal-grid{grid-template-columns:170px 1fr 120px 140px}
+  .redesigned-check-grid .value-wide,.redesigned-journal-grid .value-wide{grid-column:2 / 5}
+  .sheet-photo-row{grid-template-columns:170px 1fr}
+  .tellering-lower.redesigned-tellering-lower{grid-template-columns:1fr}
+  .journal-table-wrap{overflow-x:auto}
+}
+@media (max-width: 760px){
+  .redesigned-check-grid,.redesigned-journal-grid{grid-template-columns:1fr}
+  .sheet-grid .value-wide,.sheet-grid .value-short,.sheet-photo-row{grid-column:auto}
+  .sheet-photo-row{grid-template-columns:1fr}
+  .amount-post-wrap{grid-template-columns:1fr}
+  .journal-kpis{grid-template-columns:1fr}
+}
+
+@media (max-width: 980px){
+  .cs-form-grid .field-account .entry-input,.cs-form-grid .field-account .display-field,.cs-form-grid .field-phone .entry-input,.cs-form-grid .field-phone .display-field,.cs-form-grid .field-bvn .entry-input,.cs-form-grid .field-bvn .display-field,.cs-form-grid .field-id .entry-input,.cs-form-grid .field-id .display-field,.modal-cs-grid .field-account .display-field,.modal-cs-grid .field-phone .display-field,.modal-cs-grid .field-bvn .display-field,.modal-cs-grid .field-id .display-field,.cs-form-grid .field-search button,.cs-form-grid .field-submit button,.cs-form-grid .field-photo-upload .entry-input{max-width:100%}
+}
+
+
+/* Customer service modal redesign patch */
+.cs-sheet-card{max-width:920px;margin:0 auto;background:#000;border:1px solid var(--line);border-radius:18px;overflow:hidden;padding:0}
+body[data-theme="dark-slate"] .cs-sheet-card{background:#050c14;border-color:#243241}
+body[data-theme="ducess-sheet"] .cs-sheet-card{background:#000;border-color:#5f1111}
+.cs-sheet-title{background:#050505;color:#fff;text-align:center;font-size:24px;font-weight:800;line-height:1.05;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08);margin:0}
+.cs-sheet-grid{display:grid;gap:0;background:#050505;align-items:center}
+.opening-sheet-grid,.maintenance-sheet-grid{grid-template-columns:180px 150px 86px 150px 170px}
+.reactivation-sheet-grid{grid-template-columns:180px 150px 86px 120px 170px}
+.sheet-label-cell,.sheet-label-inline{background:#050505;color:#fff;font-size:13px;font-weight:800;display:flex;align-items:center;padding:0 8px;min-height:32px;border-right:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08);white-space:nowrap}
+.sheet-label-inline{justify-content:flex-start}
+.sheet-label-cell.blank{background:transparent;border-right:none;border-bottom:none}
+.sheet-input-cell{background:#efcfd1;padding:0;border-bottom:1px solid rgba(0,0,0,.18);min-height:32px}
+body[data-theme="dark-slate"] .sheet-input-cell{background:#17283b}
+.cs-sheet-input{width:100%;height:32px;min-height:32px;border:0;border-radius:0;background:transparent !important;color:inherit;box-shadow:none;padding:5px 8px;font-size:14px}
+.sheet-input-cell.wide{grid-column:2 / 6;max-width:none}
+.sheet-input-cell.nin{grid-column:2 / 3;max-width:150px}
+.sheet-input-cell.bvn{grid-column:4 / 6;max-width:320px}
+.sheet-input-cell.phone{grid-column:2 / 3;max-width:150px}
+.sheet-input-cell.account{grid-column:4 / 6;max-width:170px}
+.opening-sheet-grid>.sheet-input-cell.account,.maintenance-sheet-grid>.sheet-input-cell.account,.reactivation-sheet-grid>.sheet-input-cell.account{max-width:170px}
+.cs-inline-btn{min-height:32px;height:32px;border-radius:0;border:1px solid rgba(255,255,255,.08);width:100%;white-space:nowrap;padding:4px 8px;font-size:13px}
+.opening-sheet-grid .cs-generate-btn{height:32px}
+.maintenance-sheet-grid > .cs-inline-btn:nth-of-type(1),.reactivation-sheet-grid > .cs-inline-btn:nth-of-type(1){grid-column:3 / 4}
+.maintenance-sheet-grid > .cs-inline-btn:nth-of-type(2),.reactivation-sheet-grid > .cs-inline-btn:nth-of-type(2){grid-column:4 / 5}
+.maintenance-sheet-grid > .cs-inline-btn:nth-of-type(3),.reactivation-sheet-grid > .cs-inline-btn:nth-of-type(3){grid-column:5 / 6}
+.sheet-spread-actions{grid-column:5 / 6;display:flex;align-items:stretch;justify-content:flex-end;gap:6px;padding:0;background:#050505;min-height:32px}
+.compact-photo-upload{width:140px;display:flex;align-items:center}
+.compact-photo-upload .cs-sheet-input{background:rgba(255,255,255,.04) !important;border:1px solid rgba(255,255,255,.08)}
+.cs-generate-btn{width:auto;padding:0 8px;background:#050505;color:#efcfd1;font-size:12px}
+.cs-sheet-footer{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)}
+.cs-system-summary{display:flex;flex-wrap:wrap;gap:10px;color:var(--muted);font-size:12px}
+.cs-system-summary strong{color:var(--text)}
+.cs-sheet-note{font-size:11px;color:var(--muted);text-align:right}
+.reactivation-sheet-grid .sheet-input-cell.wide{grid-column:2 / 6}
+.reactivation-sheet-grid .sheet-label-cell.blank + .sheet-input-cell.wide{grid-column:2 / 6}
+.reactivation-card .cs-sheet-footer{padding-top:8px}
+.cs-sheet-card .action-row{padding:8px 10px 12px;margin:0}
+.cs-sheet-card .action-row button{height:32px;padding:4px 10px;border-radius:0}
+@media (max-width: 980px){
+  .cs-sheet-card{max-width:none}
+  .opening-sheet-grid,.maintenance-sheet-grid,.reactivation-sheet-grid{grid-template-columns:170px minmax(0,1fr)}
+  .sheet-input-cell.wide,.sheet-input-cell.nin,.sheet-input-cell.bvn,.sheet-input-cell.phone,.sheet-input-cell.account,.sheet-spread-actions{grid-column:2 / 3;max-width:none}
+  .sheet-label-inline{grid-column:1 / 2}
+  .maintenance-sheet-grid > .cs-inline-btn,.reactivation-sheet-grid > .cs-inline-btn{grid-column:2 / 3}
+}
+
+
+/* Customer service refinement patch */
+.cs-sheet-card{max-width:920px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;padding:0;color:var(--text);box-shadow:var(--shadow)}
+.cs-sheet-title{background:transparent;color:var(--text);text-align:center;font-size:28px;font-weight:800;line-height:1.05;padding:10px 10px;border-bottom:1px solid var(--line);margin:0}
+.cs-sheet-grid{display:grid;gap:0;background:transparent;align-items:center}
+.opening-sheet-grid,.maintenance-sheet-grid{grid-template-columns:200px 200px 110px 170px 140px}
+.reactivation-sheet-grid{grid-template-columns:200px 110px 110px 120px 120px}
+.sheet-label-cell,.sheet-label-inline{background:color-mix(in srgb, var(--panel) 82%, black 18%);color:var(--text);font-size:15px;font-weight:700;display:flex;align-items:center;padding:0 12px;min-height:42px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);white-space:nowrap}
+.sheet-label-inline.old-account-label{padding-left:18px;padding-right:18px;min-width:150px}
+.sheet-label-cell.blank{background:transparent;border-right:none;border-bottom:none}
+.sheet-input-cell{background:color-mix(in srgb, var(--panel) 60%, var(--brand) 40%);padding:0;border-bottom:1px solid var(--line);min-height:42px}
+.cs-sheet-input{width:100%;height:42px;min-height:42px;border:0;border-radius:0;background:transparent !important;color:inherit;box-shadow:none;padding:8px 12px;font-size:16px;font-weight:600}
+.sheet-input-cell.wide{grid-column:2 / 6;max-width:none}
+.sheet-input-cell.nin{grid-column:2 / 3;max-width:200px}
+.sheet-input-cell.bvn{grid-column:4 / 5;max-width:170px}
+.sheet-input-cell.phone{grid-column:2 / 3;max-width:200px}
+.sheet-input-cell.account{grid-column:4 / 5;max-width:110px}
+.opening-sheet-grid>.sheet-input-cell.account,.maintenance-sheet-grid>.sheet-input-cell.account{max-width:110px}
+.reactivation-sheet-grid>.sheet-input-cell.account{grid-column:2 / 3;max-width:110px}
+.compact-half{max-width:110px !important}
+.cs-inline-btn{min-height:42px;height:42px;border-radius:0;border:1px solid var(--line);width:100%;white-space:nowrap;padding:6px 10px;font-size:15px;font-weight:700}
+.maintenance-sheet-grid > .cs-inline-btn:nth-of-type(1),.reactivation-sheet-grid > .cs-inline-btn:nth-of-type(1){grid-column:3 / 4}
+.maintenance-sheet-grid > .cs-inline-btn:nth-of-type(2),.reactivation-sheet-grid > .cs-inline-btn:nth-of-type(2){grid-column:4 / 5}
+.maintenance-sheet-grid > .cs-inline-btn:nth-of-type(3),.reactivation-sheet-grid > .cs-inline-btn:nth-of-type(3){grid-column:5 / 6}
+.reactivate-btn{max-width:120px;justify-self:start}
+.sheet-spread-actions{grid-column:5 / 6;display:flex;align-items:stretch;justify-content:flex-start;gap:8px;padding:0;background:transparent;min-height:42px}
+.compact-photo-upload{width:42px;display:flex;align-items:center;overflow:hidden}
+.compact-photo-upload .cs-sheet-input{padding:4px;border:1px solid var(--line)}
+.cs-generate-btn{width:auto;padding:0 12px;background:transparent;color:var(--text);font-size:14px;border-color:var(--line)}
+.cs-sheet-footer{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid var(--line)}
+.cs-system-summary{display:flex;flex-wrap:wrap;gap:14px;color:var(--muted);font-size:13px}
+.cs-system-summary strong{color:var(--text)}
+.cs-sheet-note{font-size:13px;color:var(--muted);text-align:right}
+.cs-sheet-card .action-row{padding:10px 12px 14px;margin:0}
+.cs-sheet-card .action-row button{height:42px;padding:6px 14px;border-radius:0;font-size:16px;font-weight:700}
+.cs-readonly{opacity:.92;cursor:not-allowed}
+body[data-theme="dark-slate"] .cs-sheet-card, body[data-theme="ducess-sheet"] .cs-sheet-card{background:#050c14;border-color:#243241;color:#eef5ff}
+body[data-theme="dark-slate"] .sheet-label-cell, body[data-theme="dark-slate"] .sheet-label-inline, body[data-theme="ducess-sheet"] .sheet-label-cell, body[data-theme="ducess-sheet"] .sheet-label-inline{background:#060d15;color:#eef5ff;border-color:#243241}
+body[data-theme="dark-slate"] .sheet-input-cell, body[data-theme="ducess-sheet"] .sheet-input-cell{background:#17283b;border-color:#243241}
+body[data-theme="dark-slate"] .cs-sheet-title, body[data-theme="ducess-sheet"] .cs-sheet-title{color:#fff;border-color:#243241}
+body[data-theme="dark-slate"] .compact-photo-upload .cs-sheet-input, body[data-theme="ducess-sheet"] .compact-photo-upload .cs-sheet-input{border-color:#243241}
+body[data-theme="dark-slate"] .cs-generate-btn, body[data-theme="ducess-sheet"] .cs-generate-btn{color:#eef5ff;border-color:#243241}
+@media (max-width: 980px){.opening-sheet-grid,.maintenance-sheet-grid,.reactivation-sheet-grid{grid-template-columns:180px minmax(0,1fr)} .sheet-input-cell.wide,.sheet-input-cell.nin,.sheet-input-cell.bvn,.sheet-input-cell.phone,.sheet-input-cell.account,.sheet-spread-actions{grid-column:2 / 3;max-width:none} .sheet-label-inline{grid-column:1 / 2} .maintenance-sheet-grid > .cs-inline-btn,.reactivation-sheet-grid > .cs-inline-btn{grid-column:2 / 3} .reactivate-btn{max-width:none}}
+
+/* customer service micro-refinement patch */
+.opening-sheet-grid,.maintenance-sheet-grid{grid-template-columns:200px 145px 110px 145px 145px;}
+.reactivation-sheet-grid{grid-template-columns:200px 72px 110px 110px 104px;}
+.sheet-label-cell,.sheet-label-inline{font-size:16px;font-weight:700;min-height:42px}
+.cs-sheet-input,.cs-inline-btn,.cs-sheet-card .action-row button{font-size:16px}
+.sheet-input-cell.nin{grid-column:2 / 3;max-width:145px;}
+.sheet-input-cell.bvn{grid-column:4 / 5;max-width:145px;}
+.sheet-input-cell.phone{grid-column:2 / 3;max-width:145px;}
+.sheet-input-cell.account{grid-column:5 / 6;max-width:145px;}
+.account-near-label{grid-column:2 / 3 !important;max-width:145px !important;}
+.reactivation-sheet-grid>.sheet-input-cell.account{grid-column:2 / 3;max-width:72px;}
+.reactivate-btn{max-width:104px;}
+.bvn-label{justify-content:center;padding-left:10px;padding-right:10px;}
+.old-account-label{justify-content:center;padding-left:14px !important;padding-right:14px !important;min-width:145px;}
+.sheet-spread-actions.opening-actions{grid-column:4 / 6;justify-content:flex-start;gap:8px;padding:6px 0;}
+.cs-inline-note{display:flex;align-items:center;min-height:42px;padding:0 12px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:14px;font-weight:700;white-space:nowrap;}
+.cs-generate-note{flex:1;min-width:280px;}
+.hidden-photo-input{display:none;}
+.cs-photo-btn{width:auto;min-width:122px;padding:0 12px;}
+.photo-status{min-width:130px;max-width:160px;overflow:hidden;text-overflow:ellipsis;}
+.compact-photo-upload{width:auto;}
+body[data-theme="dark-slate"] .cs-inline-note, body[data-theme="ducess-sheet"] .cs-inline-note{border-color:#243241;color:#c7d9ec;}
+@media (max-width: 980px){
+  .cs-generate-note,.photo-status,.cs-photo-btn{min-width:0;max-width:none;width:auto;}
+}
+
+/* Phase 2D final UI polish */
+.field{min-width:0}
+.field label{margin-bottom:6px;line-height:1.2}
+.form-grid{gap:12px}
+.action-row{align-items:center}
+.action-row button,
+.form-grid .entry-input,
+.form-grid select,
+.form-grid .display-field,
+.tool-tab,
+.filter-chip{min-height:42px}
+button,
+.tool-tab,
+.filter-chip,
+.icon-btn,
+.ghost-btn{
+  transition:background-color .16s ease,border-color .16s ease,color .16s ease,filter .16s ease,opacity .16s ease;
+}
+button:not(:disabled):hover,
+.tool-tab:hover,
+.filter-chip:hover,
+.icon-btn:hover,
+.ghost-btn:hover{filter:brightness(.98)}
+button:focus-visible,
+.tool-tab:focus-visible,
+.filter-chip:focus-visible,
+.icon-btn:focus-visible,
+.ghost-btn:focus-visible,
+.entry-input:focus-visible,
+select:focus-visible,
+textarea:focus-visible{
+  outline:2px solid color-mix(in srgb, var(--brand) 62%, white 38%);
+  outline-offset:1px;
+}
+
+/* Customer service grid tightening */
+.cs-sheet-card{max-width:980px}
+.cs-sheet-grid{width:100%}
+.opening-sheet-grid,.maintenance-sheet-grid{grid-template-columns:190px minmax(0,145px) 110px minmax(0,145px) minmax(0,145px)}
+.reactivation-sheet-grid{grid-template-columns:190px 82px 110px 110px 110px}
+.sheet-label-cell,.sheet-label-inline,.sheet-input-cell,.cs-inline-btn,.sheet-spread-actions{min-width:0}
+.sheet-label-cell,.sheet-label-inline{padding:0 10px}
+.sheet-input-cell{min-height:40px}
+.cs-sheet-input{height:40px;min-height:40px;padding:7px 10px}
+.cs-inline-btn,.cs-sheet-card .action-row button,.cs-inline-note{min-height:40px;height:40px}
+.sheet-input-cell.nin,.sheet-input-cell.bvn,.sheet-input-cell.phone,.sheet-input-cell.account,
+.opening-sheet-grid>.sheet-input-cell.account,.maintenance-sheet-grid>.sheet-input-cell.account,
+.reactivation-sheet-grid>.sheet-input-cell.account,
+.account-near-label{max-width:none !important}
+.bvn-label,.old-account-label{justify-content:flex-start;padding-left:10px !important;padding-right:10px !important;min-width:0}
+.sheet-spread-actions.opening-actions{gap:6px;padding:4px 0}
+.cs-inline-note{padding:0 10px}
+.cs-generate-note{min-width:0;flex:1}
+.photo-status{min-width:0;max-width:170px}
+.cs-sheet-footer{gap:10px;padding:9px 12px}
+.cs-system-summary{gap:10px 14px}
+.cs-sheet-card .action-row{padding:9px 12px 12px}
+
+/* Readability and hover safety by theme */
+body[data-theme="ducess-sheet"] button,
+body[data-theme="ducess-sheet"] .tool-tab,
+body[data-theme="ducess-sheet"] .filter-chip{border-color:#7a2a2a}
+body[data-theme="ducess-sheet"] button:not(.secondary):not(.ghost-btn){color:#fff}
+body[data-theme="ducess-sheet"] button.secondary:hover,
+body[data-theme="ducess-sheet"] .tool-tab:hover,
+body[data-theme="ducess-sheet"] .filter-chip:hover{background:#f5eded;color:#2c0909;border-color:#7a2a2a;filter:none}
+body[data-theme="ducess-sheet"] .action-row button,
+body[data-theme="ducess-sheet"] .row-actions button{box-shadow:none}
+body[data-theme="ducess-sheet"] .table tr:hover td button.secondary,
+body[data-theme="ducess-sheet"] .table tr:hover td .tool-tab{background:#f5eded;color:#2c0909;border-color:#7a2a2a;filter:none}
+
+body[data-theme="ocean"] button.secondary:hover,
+body[data-theme="neutral-stone"] button.secondary:hover{background:var(--accent);color:var(--text);filter:none}
+
+@media (max-width: 980px){
+  .opening-sheet-grid,.maintenance-sheet-grid,.reactivation-sheet-grid{grid-template-columns:180px minmax(0,1fr)}
+  .sheet-label-cell,.sheet-label-inline{padding:0 10px}
+  .sheet-spread-actions.opening-actions{grid-column:2 / 3;flex-wrap:wrap;padding:8px 0}
+  .photo-status{max-width:none}
+}
+
+
+/* Phase 2D follow-up polish */
+.phone-inline-label{justify-content:flex-start}
+.opening-sheet-grid .phone-inline-label,
+.maintenance-sheet-grid .phone-inline-label{grid-column:1 / 2}
+.opening-sheet-grid .old-account-label,
+.maintenance-sheet-grid .old-account-label{grid-column:3 / 5}
+.opening-sheet-grid .sheet-input-cell.phone,
+.maintenance-sheet-grid .sheet-input-cell.phone{grid-column:2 / 3}
+.opening-sheet-grid .sheet-input-cell.account,
+.maintenance-sheet-grid .sheet-input-cell.account{grid-column:5 / 6}
+
+.tool-tab,.filter-chip{transition:background-color .18s ease,color .18s ease,border-color .18s ease,box-shadow .18s ease}
+body[data-theme="ducess-sheet"] .tool-tab,
+body[data-theme="ducess-sheet"] .filter-chip{
+  background:#f4ece7;
+  color:#3a1611;
+  border:1px solid #8e4a3b;
+  box-shadow:none;
+}
+body[data-theme="ducess-sheet"] .tool-tab.active,
+body[data-theme="ducess-sheet"] .filter-chip.active{
+  background:linear-gradient(135deg,#8b3020,#b36549);
+  color:#fff;
+  border-color:#8b3020;
+}
+body[data-theme="ducess-sheet"] .tool-tab:hover,
+body[data-theme="ducess-sheet"] .filter-chip:hover{
+  background:#ead3cb;
+  color:#2b0f0b;
+  border-color:#8b3020;
+}
+body[data-theme="ducess-sheet"] .tool-tabs.approvals-sections .tool-tab{font-weight:700}
+
+.tellering-sheet{
+  background:var(--panel);
+  border:1px solid var(--line);
+  color:var(--text);
+  box-shadow:var(--shadow);
+}
+.sheet-super,.sheet-title,.sheet-label{color:var(--text)}
+.sheet-super{opacity:.78}
+.sheet-grid .display-field{
+  background:var(--soft);
+  color:var(--text);
+  border:1px solid var(--line);
+}
+.sheet-grid .entry-input{
+  background:color-mix(in srgb, var(--panel) 60%, var(--brand) 40%);
+  color:var(--text);
+  border:1px solid var(--line);
+}
+.sheet-btn{border:1px solid var(--line);font-weight:700}
+.tellering-entry-card,
+.spacious-journal-pane{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow)}
+.tellering-entry-card .display-field{background:var(--soft);border:1px solid var(--line);color:var(--text)}
+.tellering-entry-card .entry-input{background:color-mix(in srgb, var(--panel) 74%, var(--brand) 26%);color:var(--text)}
+
+.redesigned-check-grid{grid-template-columns:190px minmax(170px,220px) 120px 120px 120px;gap:10px}
+.redesigned-journal-grid{grid-template-columns:190px minmax(170px,220px) 130px minmax(230px,320px);gap:10px}
+.redesigned-check-grid .value-wide,
+.redesigned-journal-grid .value-wide{max-width:none}
+.redesigned-check-grid .value-wide{grid-column:2 / 4}
+.redesigned-check-grid [data-fill="phone"],
+.redesigned-check-grid [data-fill="balance"]{max-width:220px}
+.redesigned-journal-grid #txName{grid-column:2 / 4}
+.redesigned-journal-grid #txBalance{max-width:220px}
+.amount-post-wrap{grid-template-columns:minmax(120px,150px) 110px}
+.sheet-photo-row{grid-template-columns:190px 240px}
+.inline-photo{width:240px;height:128px}
+.tellering-entry-card .form-grid.two.compact-fields{gap:12px}
+.tellering-entry-card .field label{margin-bottom:6px}
+.spacious-journal-pane .action-row{margin-top:12px}
+
+body[data-theme="dark-slate"] .tellering-sheet{background:#050c14;border-color:#243241;color:#eef5ff}
+body[data-theme="dark-slate"] .sheet-super,
+body[data-theme="dark-slate"] .sheet-title,
+body[data-theme="dark-slate"] .sheet-label{color:#eef5ff}
+body[data-theme="dark-slate"] .sheet-grid .display-field{background:#eef3f8;color:#111;border-color:#243241}
+body[data-theme="dark-slate"] .sheet-grid .entry-input{background:#17283b;color:#eef5ff;border-color:#36506a}
+body[data-theme="dark-slate"] .tellering-entry-card,
+body[data-theme="dark-slate"] .spacious-journal-pane{background:var(--panel);border-color:#243241}
+body[data-theme="ducess-sheet"] .tellering-sheet{background:#fbf4ef;border-color:#caa999;color:#33120d}
+body[data-theme="ducess-sheet"] .sheet-super,
+body[data-theme="ducess-sheet"] .sheet-title,
+body[data-theme="ducess-sheet"] .sheet-label{color:#33120d}
+body[data-theme="ducess-sheet"] .sheet-grid .display-field{background:#fff;color:#2d120e;border-color:#d6b5a6}
+body[data-theme="ducess-sheet"] .sheet-grid .entry-input{background:#ead7cf;color:#2d120e;border-color:#c8947e}
+body[data-theme="ducess-sheet"] .tellering-entry-card,
+body[data-theme="ducess-sheet"] .spacious-journal-pane{background:#fffaf7;border-color:#d9b4a3;box-shadow:none}
+body[data-theme="ducess-sheet"] .sheet-btn{border-color:#b57862}
+body[data-theme="ducess-sheet"] .sheet-btn.secondary{background:#f7ede8;color:#35120c}
+body[data-theme="ducess-sheet"] .sheet-btn.secondary:hover{background:#ead6ce;color:#2c100c}
+body[data-theme="ducess-sheet"] .journal-kpis .kpi.small{border-color:#d9b4a3;background:#fffaf7}
+
+@media (max-width: 1080px){
+  .redesigned-check-grid{grid-template-columns:170px minmax(0,1fr) 110px 110px}
+  .redesigned-journal-grid{grid-template-columns:170px minmax(0,1fr) 120px 1fr}
+  .redesigned-check-grid .value-wide,.redesigned-journal-grid #txName{grid-column:2 / 4}
+  .sheet-photo-row{grid-template-columns:170px 1fr}
+}
+@media (max-width: 980px){
+  .opening-sheet-grid .phone-inline-label,.opening-sheet-grid .old-account-label,
+  .maintenance-sheet-grid .phone-inline-label,.maintenance-sheet-grid .old-account-label,
+  .opening-sheet-grid .sheet-input-cell.phone,.opening-sheet-grid .sheet-input-cell.account,
+  .maintenance-sheet-grid .sheet-input-cell.phone,.maintenance-sheet-grid .sheet-input-cell.account{grid-column:2 / 3}
+}
+
+
+/* Phase 2D micro polish - pass 2 */
+.opening-sheet-grid,
+.maintenance-sheet-grid{
+  grid-template-columns:190px minmax(0,150px) minmax(0,150px) minmax(0,150px) minmax(0,150px);
+}
+
+/* keep label/input spacing visually even across the NIN/BVN and Phone/Old Account rows */
+.opening-sheet-grid .bvn-label,
+.maintenance-sheet-grid .bvn-label,
+.opening-sheet-grid .old-account-label,
+.maintenance-sheet-grid .old-account-label{
+  grid-column:auto;
+  justify-content:flex-start;
+  padding-left:12px !important;
+  padding-right:12px !important;
+}
+.opening-sheet-grid .sheet-input-cell.bvn,
+.maintenance-sheet-grid .sheet-input-cell.bvn,
+.opening-sheet-grid .sheet-input-cell.account,
+.maintenance-sheet-grid .sheet-input-cell.account{
+  grid-column:auto;
+}
+.opening-sheet-grid .old-account-label,
+.maintenance-sheet-grid .old-account-label{
+  grid-column:3 / 4;
+}
+.opening-sheet-grid .sheet-input-cell.account,
+.maintenance-sheet-grid .sheet-input-cell.account{
+  grid-column:4 / 5;
+}
+.opening-sheet-grid .sheet-input-cell.phone,
+.maintenance-sheet-grid .sheet-input-cell.phone,
+.opening-sheet-grid .sheet-input-cell.nin,
+.maintenance-sheet-grid .sheet-input-cell.nin,
+.opening-sheet-grid .sheet-input-cell.bvn,
+.maintenance-sheet-grid .sheet-input-cell.bvn,
+.opening-sheet-grid .sheet-input-cell.account,
+.maintenance-sheet-grid .sheet-input-cell.account{
+  max-width:none;
+}
+
+/* stop focus highlight from bleeding into adjacent labels */
+.cs-sheet-input,
+.sheet-grid .entry-input{
+  outline:none;
+  box-shadow:none;
+}
+.cs-sheet-input:focus,
+.cs-sheet-input:focus-visible,
+.sheet-grid .entry-input:focus,
+.sheet-grid .entry-input:focus-visible{
+  outline:none;
+  box-shadow:inset 0 0 0 2px color-mix(in srgb, var(--brand) 62%, white 38%);
+  position:relative;
+  z-index:1;
+}
+
+/* give the opening bottom action strip enough room so the note does not clip */
+.sheet-spread-actions.opening-actions{
+  grid-column:1 / 6;
+  display:grid;
+  grid-template-columns:auto auto minmax(260px,1fr);
+  gap:8px;
+  align-items:center;
+  padding:6px 0 10px;
+}
+.cs-photo-btn{min-width:150px;}
+.photo-status{max-width:180px;}
+.cs-generate-note{
+  min-width:260px;
+  width:100%;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+}
+
+/* Tellering + Check Balance should follow the same compact layout rhythm as customer service */
+.tellering-sheet{
+  background:var(--panel) !important;
+  color:var(--text) !important;
+  border-color:var(--line) !important;
+}
+.sheet-super,
+.sheet-title,
+.sheet-label{color:var(--text) !important;}
+.sheet-grid .display-field{
+  background:var(--soft) !important;
+  color:var(--text) !important;
+  border:1px solid var(--line) !important;
+}
+.sheet-grid .entry-input{
+  background:color-mix(in srgb, var(--panel) 72%, var(--brand) 28%) !important;
+  color:var(--text) !important;
+  border:1px solid var(--line) !important;
+}
+body[data-theme="dark-slate"] .tellering-sheet{
+  background:#050c14 !important;
+  color:#eef5ff !important;
+  border-color:#243241 !important;
+}
+body[data-theme="dark-slate"] .sheet-super,
+body[data-theme="dark-slate"] .sheet-title,
+body[data-theme="dark-slate"] .sheet-label{color:#eef5ff !important;}
+body[data-theme="dark-slate"] .sheet-grid .display-field{background:#eef3f8 !important;color:#111 !important;border-color:#243241 !important;}
+body[data-theme="dark-slate"] .sheet-grid .entry-input{background:#17283b !important;color:#eef5ff !important;border-color:#36506a !important;}
+body[data-theme="ducess-sheet"] .tellering-sheet{
+  background:#fff7f2 !important;
+  color:#31120d !important;
+  border-color:#c8947e !important;
+}
+body[data-theme="ducess-sheet"] .sheet-super,
+body[data-theme="ducess-sheet"] .sheet-title,
+body[data-theme="ducess-sheet"] .sheet-label{color:#31120d !important;}
+body[data-theme="ducess-sheet"] .sheet-grid .display-field{background:#fff !important;color:#2d120e !important;border-color:#d2ad9c !important;}
+body[data-theme="ducess-sheet"] .sheet-grid .entry-input{background:#ecd4ca !important;color:#2d120e !important;border-color:#b97861 !important;}
+
+/* tighter, aligned tellering rows like the client sheet */
+.redesigned-check-grid{
+  grid-template-columns:190px minmax(220px,260px) 104px 104px 116px;
+  gap:10px 12px;
+}
+.redesigned-journal-grid{
+  grid-template-columns:190px minmax(260px,1fr) 110px 170px;
+  gap:10px 12px;
+}
+.redesigned-check-grid #lookupAcc,
+.redesigned-journal-grid #txAcc{
+  max-width:none;
+  width:100%;
+}
+.redesigned-check-grid .value-wide,
+.redesigned-journal-grid .value-wide{grid-column:2 / 5;}
+.redesigned-check-grid [data-fill="phone"],
+.redesigned-check-grid [data-fill="balance"],
+.redesigned-journal-grid #txBalance{
+  max-width:140px;
+}
+.redesigned-journal-grid .sheet-label.inline-label{
+  justify-self:start;
+  padding-right:0;
+  padding-left:2px;
+}
+.amount-post-wrap{
+  grid-template-columns:minmax(120px,140px) 110px;
+  justify-content:start;
+}
+
+/* stronger visibility for approvals theme tabs in ducess sheet */
+body[data-theme="ducess-sheet"] .tool-tabs.approvals-sections .tool-tab{
+  background:#fbf0ea;
+  color:#5b1d13;
+  border-color:#9b4a37;
+  opacity:1;
+}
+body[data-theme="ducess-sheet"] .tool-tabs.approvals-sections .tool-tab:hover,
+body[data-theme="ducess-sheet"] .tool-tabs.approvals-sections .tool-tab:focus-visible{
+  background:#efcdbf;
+  color:#31110c;
+  border-color:#9b4a37;
+  box-shadow:0 0 0 1px rgba(155,74,55,.15);
+}
+body[data-theme="ducess-sheet"] .tool-tabs.approvals-sections .tool-tab.active{
+  background:linear-gradient(135deg,#a4432f,#c96d4d);
+  color:#fff;
+  border-color:#8a3726;
+}
+
+@media (max-width: 980px){
+  .sheet-spread-actions.opening-actions{
+    grid-column:2 / 3;
+    grid-template-columns:1fr;
+  }
+  .cs-generate-note,
+  .photo-status,
+  .cs-photo-btn{max-width:none;width:100%;}
+}
+
+/* final micro polish overrides */
+.redesigned-check-grid{
+  grid-template-columns:190px minmax(220px,260px) 104px 104px 116px;
+  gap:8px 12px;
+}
+.redesigned-check-grid .value-wide{
+  grid-column:2 / 6;
+  max-width:none;
+}
+.redesigned-check-grid .check-info-indent{
+  grid-column:1 / 2;
+}
+.redesigned-check-grid .check-balance-stack{
+  grid-column:2 / 6;
+  display:grid;
+  gap:8px;
+  align-content:start;
+  justify-items:start;
+}
+.redesigned-check-grid .check-balance-meta-row{
+  display:grid;
+  grid-template-columns:170px 140px;
+  gap:10px;
+  align-items:center;
+  justify-content:start;
+}
+.redesigned-check-grid .check-inline-label{
+  justify-self:start;
+  padding-right:0;
+}
+.redesigned-check-grid .check-balance-meta-row .display-field{
+  width:140px;
+  max-width:140px;
+}
+.redesigned-check-grid .sheet-photo-row{
+  grid-column:1 / -1;
+}
+
+.maintenance-sheet-grid{
+  grid-template-columns:190px 82px 110px 110px 110px;
+}
+.maintenance-sheet-grid > .sheet-input-cell.account.account-near-label{
+  grid-column:2 / 3 !important;
+  width:82px;
+}
+.maintenance-sheet-grid > .sheet-input-cell.wide{
+  grid-column:2 / 6;
+}
+.maintenance-sheet-grid > .sheet-input-cell.nin{
+  grid-column:2 / 3;
+}
+.maintenance-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:4 / 5;
+}
+.maintenance-sheet-grid > .sheet-label-inline.phone-inline-label{
+  grid-column:1 / 2;
+}
+.maintenance-sheet-grid > .sheet-input-cell.phone{
+  grid-column:2 / 3;
+}
+.maintenance-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:3 / 5;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+  justify-content:flex-start;
+}
+.maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label){
+  grid-column:5 / 6;
+  width:110px;
+}
+.maintenance-sheet-grid > .sheet-input-cell.phone,
+.maintenance-sheet-grid > .sheet-input-cell.bvn,
+.maintenance-sheet-grid > .sheet-input-cell.nin,
+.maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label),
+.reactivation-sheet-grid > .sheet-input-cell.account{
+  width:100%;
+}
+
+body[data-theme="ducess-sheet"] .table tr:hover td button.secondary,
+body[data-theme="ducess-sheet"] .table tr:hover td button.success,
+body[data-theme="ducess-sheet"] .table tr:hover td button.danger,
+body[data-theme="ducess-sheet"] .table tr:hover td button.warning,
+body[data-theme="ducess-sheet"] .table tr:hover td .secondary,
+body[data-theme="ducess-sheet"] .table tr:hover td .success,
+body[data-theme="ducess-sheet"] .table tr:hover td .danger,
+body[data-theme="ducess-sheet"] .table tr:hover td .warning{
+  opacity:1 !important;
+  filter:none !important;
+}
+body[data-theme="ducess-sheet"] .table tr:hover td button.secondary,
+body[data-theme="ducess-sheet"] .table tr:hover td .secondary{
+  background:#fbf0ea !important;
+  color:#4b190f !important;
+  border-color:#9b4a37 !important;
+}
+body[data-theme="ducess-sheet"] .table tr:hover td button.success,
+body[data-theme="ducess-sheet"] .table tr:hover td .success{
+  background:#53c68c !important;
+  color:#10211a !important;
+  border-color:#2e9e67 !important;
+}
+body[data-theme="ducess-sheet"] .table tr:hover td button.danger,
+body[data-theme="ducess-sheet"] .table tr:hover td .danger{
+  background:#ff7070 !important;
+  color:#2b0e0e !important;
+  border-color:#d65353 !important;
+}
+body[data-theme="ducess-sheet"] .table tr:hover td button.warning,
+body[data-theme="ducess-sheet"] .table tr:hover td .warning{
+  background:#f3a65a !important;
+  color:#241608 !important;
+  border-color:#c9803d !important;
+}
+
+body[data-theme="ducess-sheet"] .cs-sheet-card{
+  background:#fff7f2 !important;
+  border-color:#c8947e !important;
+  color:#2d120e !important;
+  box-shadow:none;
+}
+body[data-theme="ducess-sheet"] .cs-sheet-title{
+  color:#31120d !important;
+  border-color:#d2ad9c !important;
+}
+body[data-theme="ducess-sheet"] .sheet-label-cell,
+body[data-theme="ducess-sheet"] .sheet-label-inline{
+  background:#fffaf7 !important;
+  color:#31120d !important;
+  border-color:#d2ad9c !important;
+}
+body[data-theme="ducess-sheet"] .sheet-input-cell{
+  background:#ecd4ca !important;
+  border-color:#c8947e !important;
+}
+body[data-theme="ducess-sheet"] .cs-sheet-input{
+  color:#2d120e !important;
+}
+body[data-theme="ducess-sheet"] .cs-inline-note,
+body[data-theme="ducess-sheet"] .cs-sheet-note,
+body[data-theme="ducess-sheet"] .cs-system-summary,
+body[data-theme="ducess-sheet"] .cs-system-summary strong{
+  color:#4b190f !important;
+  border-color:#c8947e !important;
+}
+body[data-theme="ducess-sheet"] .check-balance-sheet{
+  background:#fff7f2 !important;
+  color:#31120d !important;
+  border-color:#c8947e !important;
+}
+body[data-theme="ducess-sheet"] .check-balance-sheet .sheet-title,
+body[data-theme="ducess-sheet"] .check-balance-sheet .sheet-label{
+  color:#31120d !important;
+}
+body[data-theme="ducess-sheet"] .check-balance-sheet .sheet-grid .entry-input{
+  background:#ecd4ca !important;
+  color:#2d120e !important;
+  border-color:#b97861 !important;
+}
+body[data-theme="ducess-sheet"] .check-balance-sheet .sheet-grid .display-field,
+body[data-theme="ducess-sheet"] .check-balance-sheet .photo-box{
+  background:#fff !important;
+  color:#2d120e !important;
+  border-color:#d2ad9c !important;
+}
+
+@media (max-width: 980px){
+  .redesigned-check-grid{
+    grid-template-columns:170px minmax(0,1fr) 110px 110px;
+  }
+  .redesigned-check-grid .value-wide{
+    grid-column:2 / 5;
+  }
+  .redesigned-check-grid .check-balance-stack{
+    grid-column:2 / 5;
+  }
+  .redesigned-check-grid .check-balance-meta-row{
+    grid-template-columns:160px minmax(110px,140px);
+  }
+  .maintenance-sheet-grid{
+    grid-template-columns:180px minmax(0,1fr);
+  }
+  .maintenance-sheet-grid > .sheet-label-inline.phone-inline-label,
+  .maintenance-sheet-grid > .sheet-label-inline.old-account-label,
+  .maintenance-sheet-grid > .sheet-input-cell.phone,
+  .maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label),
+  .maintenance-sheet-grid > .sheet-input-cell.nin,
+  .maintenance-sheet-grid > .sheet-input-cell.bvn,
+  .maintenance-sheet-grid > .sheet-input-cell.account.account-near-label,
+  .maintenance-sheet-grid > .sheet-input-cell.wide,
+  .maintenance-sheet-grid > .cs-inline-btn{
+    grid-column:2 / 3 !important;
+    width:100%;
+    max-width:none !important;
+  }
+}
+
+/* final micro polish pass 2 */
+/* Check Balance: follow Account Reactivation spacing for account number/account name */
+.redesigned-check-grid{
+  grid-template-columns:190px 82px 110px 110px 110px;
+  gap:8px 12px;
+}
+.redesigned-check-grid #lookupAcc{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:none;
+}
+.redesigned-check-grid #lookupBtn{grid-column:3 / 4;}
+.redesigned-check-grid #searchPhotoBtn{grid-column:4 / 5;}
+.redesigned-check-grid #openStatementBtn{grid-column:5 / 6;}
+.redesigned-check-grid .value-wide{
+  grid-column:2 / 6;
+  width:100%;
+  max-width:none;
+}
+.redesigned-check-grid .check-balance-stack{
+  grid-column:2 / 6;
+}
+
+/* Account Opening: bring BVN and Old Account fields closer without changing the overall layout */
+.opening-sheet-grid{
+  grid-template-columns:180px minmax(0,150px) minmax(0,150px) minmax(0,150px) minmax(0,150px);
+}
+.opening-sheet-grid > .sheet-input-cell.nin{
+  grid-column:2 / 3;
+  max-width:160px;
+}
+.opening-sheet-grid > .sheet-label-inline.bvn-label{
+  grid-column:3 / 4;
+  padding-left:14px !important;
+}
+.opening-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:4 / 5;
+  width:100%;
+  max-width:none;
+  justify-self:start;
+}
+.opening-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:3 / 4;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+  justify-content:flex-start;
+}
+.opening-sheet-grid > .sheet-input-cell.account{
+  grid-column:4 / 5;
+  width:128px;
+  max-width:128px;
+  justify-self:start;
+}
+
+/* Account Maintenance: make NIN and Phone match BVN width and expose Old Account Number fully */
+.maintenance-sheet-grid > .sheet-input-cell.nin{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-label-inline.bvn-label{
+  grid-column:3 / 4;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+  justify-content:flex-start;
+  padding-left:14px !important;
+}
+.maintenance-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:4 / 5;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-input-cell.phone{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:3 / 5;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+  justify-content:flex-start;
+}
+.maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label){
+  grid-column:5 / 6;
+  width:72px;
+  max-width:72px;
+  justify-self:start;
+}
+
+@media (max-width: 980px){
+  .redesigned-check-grid{
+    grid-template-columns:170px minmax(0,1fr) 110px 110px;
+  }
+  .redesigned-check-grid #lookupAcc,
+  .redesigned-check-grid .value-wide,
+  .redesigned-check-grid .check-balance-stack,
+  .redesigned-check-grid #lookupBtn,
+  .redesigned-check-grid #searchPhotoBtn,
+  .redesigned-check-grid #openStatementBtn{
+    grid-column:2 / 3 !important;
+  }
+  .opening-sheet-grid > .sheet-label-inline.old-account-label,
+  .opening-sheet-grid > .sheet-input-cell.account,
+  .maintenance-sheet-grid > .sheet-input-cell.nin,
+  .maintenance-sheet-grid > .sheet-input-cell.bvn,
+  .maintenance-sheet-grid > .sheet-input-cell.phone,
+  .maintenance-sheet-grid > .sheet-label-inline.old-account-label,
+  .maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label){
+    grid-column:2 / 3 !important;
+    width:100% !important;
+    max-width:none !important;
+  }
+}
+
+/* DUCESS micro alignment patch - 2026-03-20 */
+.opening-sheet-grid{
+  grid-template-columns:190px 150px 150px 150px 150px;
+}
+.opening-sheet-grid > .sheet-input-cell.nin{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:none;
+}
+.opening-sheet-grid > .sheet-label-inline.bvn-label{
+  grid-column:3 / 4;
+  justify-content:flex-start;
+  padding-left:12px !important;
+  padding-right:12px !important;
+}
+.opening-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:4 / 5;
+  width:100%;
+  max-width:none;
+}
+.opening-sheet-grid > .sheet-label-inline.phone-inline-label{
+  grid-column:1 / 2;
+}
+.opening-sheet-grid > .sheet-input-cell.phone{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:none;
+}
+.opening-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:3 / 4;
+  justify-content:flex-start;
+  padding-left:12px !important;
+  padding-right:12px !important;
+  min-width:0;
+}
+.opening-sheet-grid > .sheet-input-cell.account{
+  grid-column:4 / 5;
+  width:110px;
+  max-width:110px;
+  justify-self:start;
+}
+
+.maintenance-sheet-grid{
+  grid-template-columns:190px 150px 150px 150px 150px;
+}
+.maintenance-sheet-grid > .sheet-input-cell.account.account-near-label{
+  grid-column:2 / 3 !important;
+  width:110px;
+  max-width:110px;
+}
+.maintenance-sheet-grid > .sheet-input-cell.wide{
+  grid-column:2 / 6;
+}
+.maintenance-sheet-grid > .sheet-input-cell.nin{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-label-inline.bvn-label{
+  grid-column:3 / 4;
+  justify-content:flex-start;
+  padding-left:12px !important;
+  padding-right:12px !important;
+}
+.maintenance-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:4 / 5;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-label-inline.phone-inline-label{
+  grid-column:1 / 2;
+}
+.maintenance-sheet-grid > .sheet-input-cell.phone{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:3 / 5;
+  justify-content:flex-start;
+  padding-left:12px !important;
+  padding-right:8px !important;
+  min-width:0;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+}
+.maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label){
+  grid-column:5 / 6;
+  width:96px;
+  max-width:96px;
+  justify-self:start;
+}
+
+@media (max-width: 980px){
+  .opening-sheet-grid,
+  .maintenance-sheet-grid{
+    grid-template-columns:180px minmax(0,1fr);
+  }
+  .opening-sheet-grid > .sheet-label-inline.bvn-label,
+  .opening-sheet-grid > .sheet-label-inline.phone-inline-label,
+  .opening-sheet-grid > .sheet-label-inline.old-account-label,
+  .opening-sheet-grid > .sheet-input-cell.nin,
+  .opening-sheet-grid > .sheet-input-cell.bvn,
+  .opening-sheet-grid > .sheet-input-cell.phone,
+  .opening-sheet-grid > .sheet-input-cell.account,
+  .maintenance-sheet-grid > .sheet-label-inline.bvn-label,
+  .maintenance-sheet-grid > .sheet-label-inline.phone-inline-label,
+  .maintenance-sheet-grid > .sheet-label-inline.old-account-label,
+  .maintenance-sheet-grid > .sheet-input-cell.nin,
+  .maintenance-sheet-grid > .sheet-input-cell.bvn,
+  .maintenance-sheet-grid > .sheet-input-cell.phone,
+  .maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label),
+  .maintenance-sheet-grid > .sheet-input-cell.account.account-near-label,
+  .maintenance-sheet-grid > .sheet-input-cell.wide,
+  .maintenance-sheet-grid > .cs-inline-btn{
+    grid-column:2 / 3 !important;
+    width:100% !important;
+    max-width:none !important;
+  }
+}
+
+/* DUCESS micro alignment patch 2 - 2026-03-20 */
+.opening-sheet-grid > .sheet-label-inline.bvn-label{
+  padding-right:8px !important;
+}
+.opening-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:4 / 5;
+  margin-left:-10px;
+}
+.opening-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:3 / 5;
+  padding-right:8px !important;
+}
+.opening-sheet-grid > .sheet-input-cell.account{
+  grid-column:5 / 6;
+  width:96px;
+  max-width:96px;
+  justify-self:start;
+}
+
+.maintenance-sheet-grid > .sheet-input-cell.nin{
+  grid-column:2 / 4;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-label-inline.bvn-label{
+  grid-column:4 / 5;
+}
+.maintenance-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:5 / 6;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-input-cell.phone{
+  grid-column:2 / 4;
+  width:100%;
+  max-width:none;
+}
+.maintenance-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:4 / 5;
+  padding-right:8px !important;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+}
+.maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label){
+  grid-column:5 / 6;
+  width:96px;
+  max-width:96px;
+  justify-self:start;
+}
+
+@media (max-width: 980px){
+  .opening-sheet-grid > .sheet-input-cell.bvn,
+  .opening-sheet-grid > .sheet-input-cell.account,
+  .maintenance-sheet-grid > .sheet-input-cell.nin,
+  .maintenance-sheet-grid > .sheet-input-cell.bvn,
+  .maintenance-sheet-grid > .sheet-input-cell.phone,
+  .maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label){
+    margin-left:0 !important;
+  }
+}
+
+
+/* FINAL MICRO PATCH - opening old account field only */
+.opening-sheet-grid > .sheet-input-cell.account{
+  margin-left:-28px;
+}
+@media (max-width: 980px){
+  .opening-sheet-grid > .sheet-input-cell.account{
+    margin-left:0 !important;
+  }
+}
+
+
+/* FINAL MICRO PATCH 2 - mirror Account Opening geometry in Account Maintenance */
+.maintenance-sheet-grid{
+  grid-template-columns:180px minmax(0,150px) minmax(0,150px) minmax(0,150px) minmax(0,150px);
+}
+.maintenance-sheet-grid > .sheet-input-cell.nin{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:160px;
+}
+.maintenance-sheet-grid > .sheet-label-inline.bvn-label{
+  grid-column:3 / 4;
+  padding-left:14px !important;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+  justify-content:flex-start;
+}
+.maintenance-sheet-grid > .sheet-input-cell.bvn{
+  grid-column:4 / 5;
+  width:100%;
+  max-width:none;
+  justify-self:start;
+}
+.maintenance-sheet-grid > .sheet-label-inline.phone-inline-label{
+  grid-column:1 / 2;
+}
+.maintenance-sheet-grid > .sheet-input-cell.phone{
+  grid-column:2 / 3;
+  width:100%;
+  max-width:160px;
+}
+.maintenance-sheet-grid > .sheet-label-inline.old-account-label{
+  grid-column:3 / 5;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+  justify-content:flex-start;
+  padding-right:8px !important;
+}
+.maintenance-sheet-grid > .sheet-input-cell.account:not(.account-near-label){
+  grid-column:5 / 6;
+  width:112px;
+  max-width:112px;
+  justify-self:start;
+}
+
+
+/* UI POLISH PATCH - make Account Opening and Account Maintenance match Account Reactivation width */
+.cs-sheet-card.opening-card,
+.cs-sheet-card.maintenance-card{
+  max-width:820px !important;
+}
+
+.opening-card .opening-sheet-grid,
+.maintenance-card .maintenance-sheet-grid{
+  grid-template-columns:170px 105px 96px 105px 105px !important;
+}
+
+.opening-card .sheet-label-cell,
+.opening-card .sheet-label-inline,
+.maintenance-card .sheet-label-cell,
+.maintenance-card .sheet-label-inline{
+  font-size:14px !important;
+  min-height:40px !important;
+  padding:0 10px !important;
+}
+
+.opening-card .sheet-input-cell,
+.maintenance-card .sheet-input-cell,
+.opening-card .cs-inline-btn,
+.maintenance-card .cs-inline-btn,
+.opening-card .cs-inline-note,
+.maintenance-card .cs-inline-note,
+.opening-card .action-row button,
+.maintenance-card .action-row button{
+  min-height:40px !important;
+  height:40px !important;
+}
+
+.opening-card .cs-sheet-title,
+.maintenance-card .cs-sheet-title{
+  font-size:24px !important;
+}
+
+.opening-card .sheet-input-cell.wide,
+.maintenance-card .sheet-input-cell.wide{
+  grid-column:2 / 6;
+}
+
+.opening-card .sheet-input-cell.nin,
+.opening-card .sheet-input-cell.phone,
+.maintenance-card .sheet-input-cell.nin,
+.maintenance-card .sheet-input-cell.phone{
+  max-width:105px !important;
+}
+
+.opening-card .sheet-input-cell.bvn,
+.maintenance-card .sheet-input-cell.bvn{
+  grid-column:4 / 5 !important;
+  max-width:105px !important;
+}
+
+.opening-card .sheet-input-cell.account,
+.maintenance-card .sheet-input-cell.account:not(.account-near-label){
+  grid-column:5 / 6 !important;
+  max-width:105px !important;
+  width:105px !important;
+  margin-left:0 !important;
+}
+
+.opening-card .sheet-label-inline.old-account-label,
+.maintenance-card .sheet-label-inline.old-account-label{
+  grid-column:3 / 5 !important;
+}
+
+.opening-card .sheet-spread-actions{
+  grid-column:2 / 6 !important;
+}
+
+.opening-card .cs-inline-note,
+.maintenance-card .cs-inline-note{
+  font-size:12px !important;
+  padding:0 10px !important;
+}
+
+@media (max-width: 980px){
+  .cs-sheet-card.opening-card,
+  .cs-sheet-card.maintenance-card{
+    max-width:none !important;
+  }
+}
+
+
+/* UI POLISH PATCH 2 - slightly widen NIN/BVN/Phone for 12 digits while keeping overall modal width */
+.opening-card .opening-sheet-grid,
+.maintenance-card .maintenance-sheet-grid{
+  grid-template-columns:170px 116px 90px 116px 89px !important;
+}
+
+.opening-card .sheet-input-cell.nin,
+.opening-card .sheet-input-cell.phone,
+.maintenance-card .sheet-input-cell.nin,
+.maintenance-card .sheet-input-cell.phone{
+  max-width:116px !important;
+  width:116px !important;
+}
+
+.opening-card .sheet-input-cell.bvn,
+.maintenance-card .sheet-input-cell.bvn{
+  max-width:116px !important;
+  width:116px !important;
+}
+
+.opening-card .sheet-label-inline.bvn-label,
+.maintenance-card .sheet-label-inline.bvn-label,
+.opening-card .sheet-label-inline.old-account-label,
+.maintenance-card .sheet-label-inline.old-account-label{
+  padding-left:12px !important;
+  padding-right:8px !important;
+}
+
+.opening-card .sheet-input-cell.account,
+.maintenance-card .sheet-input-cell.account:not(.account-near-label){
+  max-width:89px !important;
+  width:89px !important;
+}
+
+.opening-card .cs-sheet-input,
+.maintenance-card .cs-sheet-input{
+  padding-left:8px !important;
+  padding-right:8px !important;
+}
+
+/* FINAL DIGIT VISIBILITY PATCH - allow 12 digits in NIN/BVN/Phone without changing the modal look */
+.opening-card .opening-sheet-grid,
+.maintenance-card .maintenance-sheet-grid{
+  grid-template-columns:170px 128px 82px 128px 73px !important;
+}
+
+.opening-card .sheet-input-cell.nin,
+.opening-card .sheet-input-cell.phone,
+.maintenance-card .sheet-input-cell.nin,
+.maintenance-card .sheet-input-cell.phone,
+.opening-card .sheet-input-cell.bvn,
+.maintenance-card .sheet-input-cell.bvn{
+  width:128px !important;
+  max-width:128px !important;
+}
+
+.opening-card .sheet-input-cell.account,
+.maintenance-card .sheet-input-cell.account:not(.account-near-label){
+  width:73px !important;
+  max-width:73px !important;
+}
+
+.opening-card .sheet-label-inline.bvn-label,
+.maintenance-card .sheet-label-inline.bvn-label,
+.opening-card .sheet-label-inline.old-account-label,
+.maintenance-card .sheet-label-inline.old-account-label{
+  padding-left:10px !important;
+  padding-right:6px !important;
+}
+
+/* SURGICAL PATCH - shift Account Opening photo/status row left so full status text shows */
+.opening-card .sheet-spread-actions.opening-actions{
+  grid-column:1 / 6 !important;
+  grid-template-columns:170px auto auto minmax(260px,1fr) !important;
+}
+.opening-card .sheet-spread-actions.opening-actions::before{
+  content:"";
+  display:block;
+}
+.opening-card .sheet-spread-actions.opening-actions .cs-photo-btn{
+  grid-column:2 / 3;
+}
+.opening-card .sheet-spread-actions.opening-actions .hidden-photo-input{
+  grid-column:3 / 4;
+}
+.opening-card .sheet-spread-actions.opening-actions .photo-status{
+  grid-column:3 / 4;
+  max-width:none !important;
+}
+.opening-card .sheet-spread-actions.opening-actions .cs-generate-note{
+  grid-column:4 / 5;
+}
+@media (max-width: 980px){
+  .opening-card .sheet-spread-actions.opening-actions{
+    grid-column:2 / 3 !important;
+    grid-template-columns:auto auto minmax(0,1fr) !important;
+  }
+  .opening-card .sheet-spread-actions.opening-actions::before{
+    display:none;
+  }
+  .opening-card .sheet-spread-actions.opening-actions .cs-photo-btn,
+  .opening-card .sheet-spread-actions.opening-actions .hidden-photo-input,
+  .opening-card .sheet-spread-actions.opening-actions .photo-status,
+  .opening-card .sheet-spread-actions.opening-actions .cs-generate-note{
+    grid-column:auto;
+  }
+}
+
+/* FINAL SURGICAL OVERRIDE - Account Opening photo/status row */
+.opening-card .sheet-spread-actions.opening-actions{
+  grid-column:2 / 6 !important;
+  display:grid !important;
+  grid-template-columns:170px minmax(190px,max-content) minmax(260px,1fr) !important;
+  justify-content:start !important;
+  align-items:center !important;
+  gap:10px !important;
+  padding:6px 0 10px !important;
+}
+.opening-card .sheet-spread-actions.opening-actions::before{
+  display:none !important;
+  content:none !important;
+}
+.opening-card .sheet-spread-actions.opening-actions .cs-photo-btn{
+  grid-column:1 / 2 !important;
+}
+.opening-card .sheet-spread-actions.opening-actions .hidden-photo-input{
+  display:none !important;
+}
+.opening-card .sheet-spread-actions.opening-actions .photo-status{
+  grid-column:2 / 3 !important;
+  min-width:190px !important;
+  width:max-content !important;
+  max-width:none !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  white-space:nowrap !important;
+}
+.opening-card .sheet-spread-actions.opening-actions .cs-generate-note{
+  grid-column:3 / 4 !important;
+  min-width:260px !important;
+  width:100% !important;
+}
+@media (max-width: 980px){
+  .opening-card .sheet-spread-actions.opening-actions{
+    grid-column:2 / 3 !important;
+    grid-template-columns:1fr !important;
+  }
+  .opening-card .sheet-spread-actions.opening-actions .cs-photo-btn,
+  .opening-card .sheet-spread-actions.opening-actions .photo-status,
+  .opening-card .sheet-spread-actions.opening-actions .cs-generate-note{
+    grid-column:auto !important;
+    width:100% !important;
+    min-width:0 !important;
+  }
+}
+
+/* FINAL FRONT-END FIX - improve DUCESS theme readability for tabs, approvals badges, and secondary actions */
+body[data-theme="ducess-sheet"] .tool-tab:disabled,
+body[data-theme="ducess-sheet"] button.secondary:disabled,
+body[data-theme="ducess-sheet"] button.warning:disabled,
+body[data-theme="ducess-sheet"] button.success:disabled,
+body[data-theme="ducess-sheet"] button.danger:disabled{
+  opacity:1 !important;
+  filter:none !important;
+}
+
+body[data-theme="ducess-sheet"] .tool-tab:disabled,
+body[data-theme="ducess-sheet"] button.secondary:disabled{
+  background:#f7efe9 !important;
+  color:#5a2017 !important;
+  border-color:#9b4a37 !important;
+}
+
+body[data-theme="ducess-sheet"] .tool-tab.active:disabled,
+body[data-theme="ducess-sheet"] .tool-tab.active,
+body[data-theme="ducess-sheet"] .filter-chip.active{
+  color:#fff !important;
+}
+
+body[data-theme="ducess-sheet"] .badge{
+  border:1px solid transparent;
+  font-weight:800;
+}
+body[data-theme="ducess-sheet"] .badge.pending{
+  background:#fff1e8 !important;
+  color:#6e240f !important;
+  border-color:#d8a087 !important;
+}
+body[data-theme="ducess-sheet"] .badge.approved{
+  background:#e9f9f0 !important;
+  color:#115a37 !important;
+  border-color:#79c79b !important;
+}
+body[data-theme="ducess-sheet"] .badge.rejected{
+  background:#fdecea !important;
+  color:#8f1f1f !important;
+  border-color:#e4a2a2 !important;
+}
+
+body[data-theme="ducess-sheet"] .table-card .secondary,
+body[data-theme="ducess-sheet"] .table-card button.secondary{
+  background:#fbf0ea;
+  color:#4b190f;
+  border-color:#9b4a37;
+}
+body[data-theme="ducess-sheet"] .table-card .secondary:hover,
+body[data-theme="ducess-sheet"] .table-card button.secondary:hover{
+  background:#efcdbf;
+  color:#2f110c;
+  border-color:#9b4a37;
+}
+
+/* FINAL FRONT-END FIX 2 - strengthen DUCESS readability for Customer Service and Tellering tabs */
+body[data-theme="ducess-sheet"] .tool-tabs:not(.approvals-sections) .tool-tab:disabled,
+body[data-theme="ducess-sheet"] .tool-tabs:not(.approvals-sections) .tool-tab[disabled]{
+  opacity:1 !important;
+  filter:none !important;
+  background:#fbf3ee !important;
+  color:#5a2017 !important;
+  -webkit-text-fill-color:#5a2017 !important;
+  border-color:#9b4a37 !important;
+  box-shadow:none !important;
+}
+
+body[data-theme="ducess-sheet"] .tool-tabs:not(.approvals-sections) .tool-tab.active,
+body[data-theme="ducess-sheet"] .tool-tabs:not(.approvals-sections) .tool-tab.active:disabled,
+body[data-theme="ducess-sheet"] .tool-tabs:not(.approvals-sections) .tool-tab.active[disabled]{
+  background:linear-gradient(135deg,#8b3020,#b36549) !important;
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+  border-color:#8b3020 !important;
+}
+
+body[data-theme="ducess-sheet"] .tool-tabs:not(.approvals-sections) .tool-tab:hover,
+body[data-theme="ducess-sheet"] .tool-tabs:not(.approvals-sections) .tool-tab:focus-visible{
+  color:#2b0f0b !important;
+  -webkit-text-fill-color:#2b0f0b !important;
+}
+
+/* DUCESS disabled-tab readability fix */
+body[data-theme="ducess-sheet"] .tool-tab:disabled,
+body[data-theme="ducess-sheet"] button.secondary:disabled,
+body[data-theme="ducess-sheet"] .filter-chip:disabled{
+  opacity:1;
+  color:#4e0e0e;
+  background:#f5eded;
+  border-color:#c98f8f;
+  cursor:not-allowed;
+}
+body[data-theme="ducess-sheet"] .tool-tab.active:disabled,
+body[data-theme="ducess-sheet"] button.secondary.active:disabled{
+  color:#fff;
+  background:linear-gradient(135deg, #b65438, #c46a4a);
+  border-color:#c46a4a;
+}
+
+/* SURGICAL PATCH - DUCESS theme tab readability for Customer Service and Tellering */
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab,
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab:disabled,
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab[disabled]{
+  opacity:1 !important;
+  filter:none !important;
+  background:#f6efeb !important;
+  color:#4a1a12 !important;
+  -webkit-text-fill-color:#4a1a12 !important;
+  border:1px solid #b46d5b !important;
+  box-shadow:none !important;
+  text-shadow:none !important;
+}
+
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab:hover,
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab:focus-visible{
+  background:#edd9d1 !important;
+  color:#2f0f0a !important;
+  -webkit-text-fill-color:#2f0f0a !important;
+  border-color:#9a4e3d !important;
+}
+
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab.active,
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab.active:disabled,
+body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sections) .tool-tab.active[disabled]{
+  background:linear-gradient(135deg,#a44730,#c06c4c) !important;
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+  border-color:#a44730 !important;
+}
+
+/* Mobile-only modal/workspace layout stabilization patch */
+@media (max-width: 680px){
+  .workspace-card,
+  .form-card,
+  .tellering-sheet,
+  .cs-sheet-card{
+    min-width:0;
+  }
+
+  /* Customer service forms: force clean single-column stacking */
+  .opening-sheet-grid,
+  .maintenance-sheet-grid,
+  .reactivation-sheet-grid{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:0 !important;
+  }
+  .opening-sheet-grid > *,
+  .maintenance-sheet-grid > *,
+  .reactivation-sheet-grid > *{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+  }
+  .sheet-label-cell,
+  .sheet-label-inline{
+    min-height:38px !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+  }
+  .sheet-input-cell,
+  .cs-inline-btn,
+  .cs-inline-note,
+  .cs-sheet-input,
+  .cs-photo-btn,
+  .cs-generate-note,
+  .photo-status{
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+  }
+  .sheet-spread-actions.opening-actions{
+    grid-column:1 / -1 !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:8px !important;
+    padding:8px 0 10px !important;
+  }
+  .cs-generate-note,
+  .photo-status{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+  }
+  .cs-sheet-footer{
+    flex-direction:column !important;
+    align-items:stretch !important;
+  }
+  .cs-sheet-note{
+    text-align:left !important;
+  }
+
+  /* Check balance: stack controls and info vertically */
+  .redesigned-check-grid{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:10px !important;
+  }
+  .redesigned-check-grid > *{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+  }
+  .redesigned-check-grid .value-wide,
+  .redesigned-check-grid .value-short,
+  .redesigned-check-grid [data-fill="phone"],
+  .redesigned-check-grid [data-fill="balance"]{
+    max-width:none !important;
+    width:100% !important;
+  }
+  .redesigned-check-grid .check-balance-stack{
+    justify-items:stretch !important;
+  }
+  .redesigned-check-grid .check-balance-meta-row{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:6px !important;
+    width:100% !important;
+  }
+  .redesigned-check-grid .check-inline-label{
+    padding-left:0 !important;
+  }
+  .sheet-photo-row{
+    grid-template-columns:minmax(0,1fr) !important;
+  }
+  .inline-photo{
+    width:100% !important;
+    max-width:100% !important;
+    height:auto !important;
+    min-height:140px;
+  }
+
+  /* Tellering: one-column mobile sheet */
+  .redesigned-journal-grid{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:10px !important;
+  }
+  .redesigned-journal-grid > *{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+  }
+  .redesigned-journal-grid .value-wide,
+  .redesigned-journal-grid #txName,
+  .redesigned-journal-grid #txBalance,
+  .redesigned-journal-grid #txAcc{
+    width:100% !important;
+    max-width:none !important;
+  }
+  .redesigned-journal-grid .sheet-label.inline-label{
+    justify-self:start !important;
+    padding-left:0 !important;
+  }
+  .amount-post-wrap{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:8px !important;
+  }
+  .journal-kpis{
+    grid-template-columns:minmax(0,1fr) !important;
+  }
+  .tellering-lower.compact-layout,
+  .tellering-lower.redesigned-tellering-lower{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:12px !important;
+  }
+  .tellering-entry-card .form-grid.two.compact-fields{
+    grid-template-columns:minmax(0,1fr) !important;
+  }
+
+  /* Customer-service / tellering tab rows should wrap instead of squeezing */
+  .tool-tabs{
+    display:flex !important;
+    flex-wrap:wrap !important;
+    gap:10px !important;
+  }
+  .tool-tab{
+    flex:1 1 calc(50% - 10px);
+    min-width:140px;
+  }
+}
+
+/* MOBILE STRUCTURE PATCH - 2026-03-23
+   Purpose: clean stacking for customer-service sheets, check balance, and tellering on phones
+   while leaving desktop layout intact. */
+@media (max-width: 680px){
+  .workspace-card{padding:16px;}
+
+  /* Check Balance: force a true vertical flow */
+  .check-balance-sheet .redesigned-check-grid{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:10px !important;
+  }
+  .check-balance-sheet .redesigned-check-grid > *{
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+  .check-balance-sheet .sheet-label,
+  .check-balance-sheet .check-inline-label{
+    white-space:normal !important;
+    padding:0 !important;
+    justify-self:start !important;
+  }
+  .check-balance-sheet .check-balance-stack,
+  .check-balance-sheet .check-balance-meta-row,
+  .check-balance-sheet .sheet-photo-row{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:8px !important;
+    width:100% !important;
+  }
+  .check-balance-sheet .inline-photo{
+    width:100% !important;
+    max-width:100% !important;
+    min-height:150px !important;
+  }
+  .check-balance-sheet .action-row button{
+    width:100%;
+  }
+
+  /* Account Opening / Maintenance / Reactivation: replace compressed grid with stacked rows */
+  .opening-card .opening-sheet-grid,
+  .maintenance-card .maintenance-sheet-grid,
+  .reactivation-card .reactivation-sheet-grid{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:0 !important;
+  }
+  .opening-card .opening-sheet-grid > *,
+  .maintenance-card .maintenance-sheet-grid > *,
+  .reactivation-card .reactivation-sheet-grid > *{
+    grid-column:auto !important;
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+    justify-self:stretch !important;
+  }
+  .opening-card .sheet-label-cell,
+  .opening-card .sheet-label-inline,
+  .maintenance-card .sheet-label-cell,
+  .maintenance-card .sheet-label-inline,
+  .reactivation-card .sheet-label-cell,
+  .reactivation-card .sheet-label-inline{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    min-height:40px !important;
+    padding:10px 12px !important;
+    border-right:none !important;
+  }
+  .opening-card .sheet-input-cell,
+  .maintenance-card .sheet-input-cell,
+  .reactivation-card .sheet-input-cell,
+  .opening-card .cs-inline-btn,
+  .maintenance-card .cs-inline-btn,
+  .reactivation-card .cs-inline-btn,
+  .opening-card .cs-inline-note,
+  .maintenance-card .cs-inline-note,
+  .reactivation-card .cs-inline-note{
+    min-height:44px !important;
+  }
+  .opening-card .sheet-spread-actions.opening-actions{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:8px !important;
+    padding:10px 0 !important;
+  }
+  .opening-card .photo-status,
+  .opening-card .cs-generate-note{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+  }
+  .maintenance-card .cs-sheet-footer,
+  .reactivation-card .cs-sheet-footer{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:10px !important;
+  }
+
+  /* Tellering: vertical entry area + horizontally scrollable journal table */
+  .journal-sheet .redesigned-journal-grid{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:10px !important;
+  }
+  .journal-sheet .redesigned-journal-grid > *{
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+  .journal-sheet .sheet-label,
+  .journal-sheet .sheet-label.inline-label{
+    white-space:normal !important;
+    padding:0 !important;
+    justify-self:start !important;
+  }
+  .journal-sheet .amount-post-wrap{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:8px !important;
+  }
+  .tellering-lower.compact-layout,
+  .tellering-lower.redesigned-tellering-lower{
+    grid-template-columns:1fr !important;
+  }
+  .journal-kpis{
+    grid-template-columns:1fr !important;
+  }
+  .journal-pane .journal-table-wrap{
+    overflow-x:auto !important;
+    -webkit-overflow-scrolling:touch;
+  }
+  .journal-pane .journal-table{
+    min-width:700px !important;
+    table-layout:auto !important;
+  }
+  .journal-pane .journal-table th,
+  .journal-pane .journal-table td{
+    white-space:nowrap !important;
+    word-break:normal !important;
+  }
+
+  /* Tabs on mobile */
+  .tool-tab{
+    min-height:54px;
+  }
+}
+
+/* RESPONSIVE / MOBILE FRONTEND LOCK PATCH - FINAL */
+@media (max-width: 700px){
+  html, body{
+    overflow-x:hidden;
+  }
+
+  .shell{
+    padding:12px;
+  }
+
+  .topbar,
+  .hero-card,
+  .workspace-card,
+  .form-card,
+  .table-card,
+  .record-card,
+  .summary-card,
+  .tellering-sheet,
+  .cs-sheet-card,
+  .journal-pane,
+  .tellering-entry-card{
+    min-width:0 !important;
+  }
+
+  .workspace-card,
+  .form-card,
+  .table-card,
+  .record-card,
+  .tellering-sheet,
+  .cs-sheet-card,
+  .journal-pane{
+    padding-left:14px !important;
+    padding-right:14px !important;
+  }
+
+  .workspace-head{
+    align-items:stretch !important;
+  }
+
+  .workspace-right,
+  .global-search{
+    width:100% !important;
+  }
+
+  .tool-tabs{
+    display:grid !important;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:10px !important;
+  }
+
+  .tool-tab,
+  .approvals-sections .tool-tab{
+    min-width:0 !important;
+    width:100% !important;
+    min-height:56px !important;
+    white-space:normal !important;
+    line-height:1.2 !important;
+    text-align:center !important;
+    padding:12px 10px !important;
+  }
+
+  .action-row,
+  .modal-actions{
+    flex-direction:column !important;
+    align-items:stretch !important;
+  }
+
+  .action-row button,
+  .modal-actions button{
+    width:100% !important;
+    min-width:0 !important;
+    white-space:normal !important;
+  }
+
+  .modal-back{
+    padding:10px !important;
+    align-items:flex-start !important;
+  }
+
+  .modal{
+    width:100% !important;
+    max-width:100% !important;
+    max-height:calc(100vh - 20px) !important;
+    border-radius:18px !important;
+  }
+
+  .modal-head,
+  .modal-body,
+  .modal-actions{
+    padding-left:14px !important;
+    padding-right:14px !important;
+  }
+
+  .modal-body .form-grid,
+  .modal-body .layout-grid,
+  .modal-body .info-grid,
+  .modal-body .lookup-card{
+    grid-template-columns:minmax(0, 1fr) !important;
+  }
+
+  .modal-body .display-field,
+  .modal-body input,
+  .modal-body textarea,
+  .modal-body select{
+    min-width:0 !important;
+    max-width:100% !important;
+  }
+
+  /* Check Balance */
+  .check-balance-sheet .redesigned-check-grid{
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:10px !important;
+  }
+
+  .check-balance-sheet .redesigned-check-grid > *,
+  .check-balance-sheet .redesigned-check-grid .value-wide,
+  .check-balance-sheet .redesigned-check-grid .value-short,
+  .check-balance-sheet .redesigned-check-grid .check-balance-stack,
+  .check-balance-sheet .redesigned-check-grid .check-balance-meta-row,
+  .check-balance-sheet .redesigned-check-grid .sheet-photo-row{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+  }
+
+  .check-balance-sheet .check-balance-stack,
+  .check-balance-sheet .check-balance-meta-row,
+  .check-balance-sheet .sheet-photo-row{
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:8px !important;
+  }
+
+  .check-balance-sheet .sheet-label,
+  .check-balance-sheet .check-inline-label{
+    white-space:normal !important;
+    line-height:1.25 !important;
+    padding:0 !important;
+  }
+
+  .check-balance-sheet #lookupBtn,
+  .check-balance-sheet #searchPhotoBtn,
+  .check-balance-sheet #openStatementBtn,
+  .check-balance-sheet #searchByNameBtn{
+    width:100% !important;
+  }
+
+  .check-balance-sheet .inline-photo{
+    width:100% !important;
+    max-width:100% !important;
+    height:auto !important;
+    min-height:160px !important;
+  }
+
+  /* Customer service forms */
+  .opening-card .opening-sheet-grid,
+  .maintenance-card .maintenance-sheet-grid,
+  .reactivation-card .reactivation-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:0 !important;
+  }
+
+  .opening-card .opening-sheet-grid > *,
+  .maintenance-card .maintenance-sheet-grid > *,
+  .reactivation-card .reactivation-sheet-grid > *{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+  }
+
+  .opening-card .sheet-label-cell,
+  .opening-card .sheet-label-inline,
+  .maintenance-card .sheet-label-cell,
+  .maintenance-card .sheet-label-inline,
+  .reactivation-card .sheet-label-cell,
+  .reactivation-card .sheet-label-inline{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    min-height:40px !important;
+    padding:10px 12px !important;
+    line-height:1.2 !important;
+    border-right:none !important;
+  }
+
+  .opening-card .sheet-input-cell,
+  .maintenance-card .sheet-input-cell,
+  .reactivation-card .sheet-input-cell,
+  .opening-card .cs-inline-btn,
+  .maintenance-card .cs-inline-btn,
+  .reactivation-card .cs-inline-btn,
+  .opening-card .sheet-spread-actions,
+  .maintenance-card .sheet-spread-actions,
+  .reactivation-card .sheet-spread-actions,
+  .opening-card .cs-inline-note,
+  .maintenance-card .cs-inline-note,
+  .reactivation-card .cs-inline-note{
+    min-height:44px !important;
+    max-width:100% !important;
+  }
+
+  .opening-card .sheet-input-cell input,
+  .maintenance-card .sheet-input-cell input,
+  .reactivation-card .sheet-input-cell input{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+  }
+
+  .opening-card .sheet-spread-actions.opening-actions{
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:8px !important;
+    padding:10px 0 !important;
+  }
+
+  .opening-card .cs-photo-btn,
+  .opening-card .photo-status,
+  .opening-card .cs-generate-note,
+  .maintenance-card .cs-inline-btn,
+  .reactivation-card .cs-inline-btn{
+    width:100% !important;
+    white-space:normal !important;
+    text-align:left !important;
+  }
+
+  .maintenance-card .cs-sheet-footer,
+  .reactivation-card .cs-sheet-footer,
+  .cs-system-summary{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:8px !important;
+    align-items:stretch !important;
+  }
+
+  .cs-sheet-note{
+    text-align:left !important;
+  }
+
+  /* Tellering entry and journal */
+  .journal-sheet .redesigned-journal-grid{
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:10px !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > *,
+  .journal-sheet .redesigned-journal-grid #txAcc,
+  .journal-sheet .redesigned-journal-grid #txName,
+  .journal-sheet .redesigned-journal-grid #txBalance,
+  .journal-sheet .redesigned-journal-grid .value-wide,
+  .journal-sheet .redesigned-journal-grid .amount-post-wrap{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+  }
+
+  .journal-sheet .sheet-label,
+  .journal-sheet .sheet-label.inline-label{
+    white-space:normal !important;
+    line-height:1.2 !important;
+    padding:0 !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:8px !important;
+  }
+
+  .tellering-lower.compact-layout,
+  .tellering-lower.redesigned-tellering-lower,
+  .tellering-entry-card .form-grid.two.compact-fields,
+  .journal-kpis{
+    grid-template-columns:minmax(0, 1fr) !important;
+  }
+
+  .journal-kpis .number{
+    font-size:18px !important;
+  }
+
+  .journal-pane .journal-table-wrap,
+  .table-wrap{
+    overflow-x:auto !important;
+    overflow-y:hidden !important;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .journal-pane .journal-table{
+    min-width:760px !important;
+    width:max-content !important;
+    table-layout:auto !important;
+  }
+
+  .journal-pane .journal-table th,
+  .journal-pane .journal-table td{
+    white-space:nowrap !important;
+    word-break:normal !important;
+    vertical-align:middle !important;
+  }
+
+  .journal-pane .journal-table th:nth-child(2),
+  .journal-pane .journal-table td:nth-child(2){
+    min-width:150px !important;
+  }
+
+  .journal-pane .journal-table th:nth-child(3),
+  .journal-pane .journal-table td:nth-child(3){
+    min-width:120px !important;
+  }
+
+  .journal-pane .journal-table th:nth-child(5),
+  .journal-pane .journal-table td:nth-child(5){
+    min-width:140px !important;
+  }
+
+  .journal-pane .journal-table th:nth-child(6),
+  .journal-pane .journal-table td:nth-child(6){
+    min-width:110px !important;
+  }
+
+  /* General tables on mobile */
+  .table{
+    min-width:700px !important;
+  }
+
+  .table th,
+  .table td{
+    white-space:nowrap !important;
+    word-break:normal !important;
+    line-height:1.25 !important;
+  }
+}
+
+/* MOBILE LAYOUT CORRECTION PATCH - 2026-03-23
+   Replace over-aggressive flex stacking with explicit mobile grid placement
+   for customer service + tellering check balance layouts. Desktop untouched. */
+@media (max-width: 680px){
+  /* Shared sheet cards */
+  .cs-sheet-card,
+  .check-balance-sheet,
+  .journal-sheet,
+  .tellering-sheet{
+    min-width:0;
+    overflow-x:hidden;
+  }
+
+  .cs-sheet-card .entry-input,
+  .check-balance-sheet .entry-input,
+  .journal-sheet .entry-input,
+  .cs-sheet-card .sheet-btn,
+  .check-balance-sheet .sheet-btn,
+  .journal-sheet .sheet-btn,
+  .cs-sheet-card .display-field,
+  .check-balance-sheet .display-field,
+  .journal-sheet .display-field{
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    box-sizing:border-box;
+  }
+
+  /* CHECK BALANCE: label/value two-column flow */
+  .check-balance-sheet .redesigned-check-grid{
+    display:grid !important;
+    grid-template-columns:minmax(92px,112px) minmax(0,1fr) !important;
+    gap:10px 12px !important;
+    align-items:center !important;
+  }
+  .check-balance-sheet .redesigned-check-grid > *{
+    min-width:0 !important;
+    max-width:none !important;
+    width:auto !important;
+    margin:0 !important;
+  }
+  .check-balance-sheet .redesigned-check-grid > :nth-child(1){grid-column:1;grid-row:1;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(2){grid-column:2;grid-row:1;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(3){grid-column:2;grid-row:2;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(4){grid-column:2;grid-row:3;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(5){grid-column:2;grid-row:4;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(6){grid-column:1;grid-row:5;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(7){grid-column:2;grid-row:5;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(8){display:none !important;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(9){grid-column:1 / -1;grid-row:6;}
+  .check-balance-sheet .redesigned-check-grid > :nth-child(10){grid-column:1 / -1;grid-row:7;}
+  .check-balance-sheet .check-balance-stack,
+  .check-balance-sheet .check-balance-meta-row,
+  .check-balance-sheet .sheet-photo-row{
+    display:grid !important;
+    grid-template-columns:minmax(92px,112px) minmax(0,1fr) !important;
+    gap:10px 12px !important;
+    align-items:center !important;
+    width:100% !important;
+  }
+  .check-balance-sheet .sheet-label,
+  .check-balance-sheet .check-inline-label{
+    white-space:normal !important;
+    line-height:1.15 !important;
+    padding:0 !important;
+    min-height:auto !important;
+  }
+  .check-balance-sheet .value-wide,
+  .check-balance-sheet .value-short{
+    min-height:50px;
+    display:flex;
+    align-items:center;
+  }
+  .check-balance-sheet .inline-photo{
+    width:100% !important;
+    max-width:100% !important;
+    min-height:160px !important;
+    height:auto !important;
+  }
+  .check-balance-sheet .action-row,
+  .check-balance-sheet .action-row button{
+    width:100%;
+  }
+
+  /* ACCOUNT OPENING: explicit paired rows */
+  .opening-card .opening-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(118px,132px) minmax(0,1fr) !important;
+    gap:0 !important;
+    align-items:stretch !important;
+  }
+  .opening-card .opening-sheet-grid > *{
+    grid-column:auto !important;
+    width:auto !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+  .opening-card .opening-sheet-grid > :nth-child(1){grid-column:1;grid-row:1;}
+  .opening-card .opening-sheet-grid > :nth-child(2){grid-column:2;grid-row:1;}
+  .opening-card .opening-sheet-grid > :nth-child(3){grid-column:1;grid-row:2;}
+  .opening-card .opening-sheet-grid > :nth-child(4){grid-column:2;grid-row:2;}
+  .opening-card .opening-sheet-grid > :nth-child(5){grid-column:1;grid-row:3;}
+  .opening-card .opening-sheet-grid > :nth-child(6){grid-column:2;grid-row:3;}
+  .opening-card .opening-sheet-grid > :nth-child(7){grid-column:1;grid-row:4;}
+  .opening-card .opening-sheet-grid > :nth-child(8){grid-column:2;grid-row:4;}
+  .opening-card .opening-sheet-grid > :nth-child(9){grid-column:1;grid-row:5;}
+  .opening-card .opening-sheet-grid > :nth-child(10){grid-column:2;grid-row:5;}
+  .opening-card .opening-sheet-grid > :nth-child(11){grid-column:1;grid-row:6;}
+  .opening-card .opening-sheet-grid > :nth-child(12){grid-column:1 / -1;grid-row:7;display:grid !important;grid-template-columns:1fr !important;gap:8px !important;padding:12px 0 8px !important;}
+
+  /* ACCOUNT MAINTENANCE */
+  .maintenance-card .maintenance-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(118px,132px) minmax(0,1fr) !important;
+    gap:0 !important;
+    align-items:stretch !important;
+  }
+  .maintenance-card .maintenance-sheet-grid > *{
+    grid-column:auto !important;
+    width:auto !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+  .maintenance-card .maintenance-sheet-grid > :nth-child(1){grid-column:1;grid-row:1;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(2){grid-column:2;grid-row:1;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(3){grid-column:2;grid-row:2;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(4){grid-column:2;grid-row:3;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(5){grid-column:2;grid-row:4;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(6){grid-column:1;grid-row:5;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(7){grid-column:2;grid-row:5;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(8){grid-column:1;grid-row:6;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(9){grid-column:2;grid-row:6;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(10){grid-column:1;grid-row:7;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(11){grid-column:2;grid-row:7;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(12){grid-column:1;grid-row:8;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(13){grid-column:2;grid-row:8;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(14){grid-column:1;grid-row:9;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(15){grid-column:2;grid-row:9;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(16){grid-column:1;grid-row:10;}
+  .maintenance-card .maintenance-sheet-grid > :nth-child(17){grid-column:2;grid-row:10;}
+
+  /* ACCOUNT REACTIVATION */
+  .reactivation-card .reactivation-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(118px,132px) minmax(0,1fr) !important;
+    gap:0 !important;
+    align-items:stretch !important;
+  }
+  .reactivation-card .reactivation-sheet-grid > *{
+    grid-column:auto !important;
+    width:auto !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+  .reactivation-card .reactivation-sheet-grid > :nth-child(1){grid-column:1;grid-row:1;}
+  .reactivation-card .reactivation-sheet-grid > :nth-child(2){grid-column:2;grid-row:1;}
+  .reactivation-card .reactivation-sheet-grid > :nth-child(3){grid-column:2;grid-row:2;}
+  .reactivation-card .reactivation-sheet-grid > :nth-child(4){grid-column:2;grid-row:3;}
+  .reactivation-card .reactivation-sheet-grid > :nth-child(5){grid-column:2;grid-row:4;}
+  .reactivation-card .reactivation-sheet-grid > :nth-child(6){grid-column:1;grid-row:5;}
+  .reactivation-card .reactivation-sheet-grid > :nth-child(7){grid-column:2;grid-row:5;}
+  .reactivation-card .reactivation-sheet-grid > :nth-child(8){display:none !important;}
+
+  .opening-card .sheet-label-cell,
+  .opening-card .sheet-label-inline,
+  .maintenance-card .sheet-label-cell,
+  .maintenance-card .sheet-label-inline,
+  .reactivation-card .sheet-label-cell,
+  .reactivation-card .sheet-label-inline{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    min-height:52px !important;
+    display:flex !important;
+    align-items:center !important;
+    padding:10px 12px !important;
+    line-height:1.15 !important;
+    border-right:none !important;
+  }
+  .opening-card .sheet-input-cell,
+  .maintenance-card .sheet-input-cell,
+  .reactivation-card .sheet-input-cell,
+  .opening-card .cs-inline-btn,
+  .maintenance-card .cs-inline-btn,
+  .reactivation-card .cs-inline-btn,
+  .opening-card .cs-inline-note,
+  .maintenance-card .cs-inline-note,
+  .reactivation-card .cs-inline-note{
+    min-height:52px !important;
+  }
+  .opening-card .sheet-input-cell,
+  .maintenance-card .sheet-input-cell,
+  .reactivation-card .sheet-input-cell{
+    display:flex !important;
+    align-items:center !important;
+  }
+  .opening-card .sheet-spread-actions.opening-actions{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:8px !important;
+  }
+  .maintenance-card .cs-sheet-footer,
+  .reactivation-card .cs-sheet-footer{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:10px !important;
+  }
+
+  /* Tellering entry forms: keep clean two-column pairing on mobile */
+  .journal-sheet .redesigned-journal-grid{
+    display:grid !important;
+    grid-template-columns:minmax(92px,112px) minmax(0,1fr) !important;
+    gap:10px 12px !important;
+    align-items:center !important;
+  }
+  .journal-sheet .redesigned-journal-grid > *{
+    min-width:0 !important;
+    max-width:none !important;
+    width:auto !important;
+    margin:0 !important;
+  }
+  .journal-sheet .redesigned-journal-grid .sheet-label,
+  .journal-sheet .redesigned-journal-grid .sheet-label.inline-label{
+    white-space:normal !important;
+    line-height:1.15 !important;
+    padding:0 !important;
+  }
+  .journal-sheet .redesigned-journal-grid .value-wide,
+  .journal-sheet .redesigned-journal-grid #txName,
+  .journal-sheet .redesigned-journal-grid #txBalance,
+  .journal-sheet .redesigned-journal-grid #txAcc{
+    grid-column:2 !important;
+    width:100% !important;
+    max-width:100% !important;
+  }
+  .journal-sheet .amount-post-wrap,
+  .journal-sheet .action-row{
+    grid-column:1 / -1 !important;
+  }
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:8px !important;
+  }
+  .journal-kpis{grid-template-columns:1fr !important;}
+  .journal-pane .journal-table-wrap{overflow-x:auto !important;-webkit-overflow-scrolling:touch;}
+  .journal-pane .journal-table{min-width:720px !important;table-layout:auto !important;}
+  .journal-pane .journal-table th,
+  .journal-pane .journal-table td{white-space:nowrap !important;word-break:normal !important;}
+}
+
+/* final mobile hotfix: account opening + maintenance only */
+@media (max-width: 700px){
+  .opening-card .opening-sheet-grid,
+  .maintenance-card .maintenance-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:0 !important;
+    align-items:stretch !important;
+  }
+
+  .opening-card .opening-sheet-grid > *,
+  .maintenance-card .maintenance-sheet-grid > *{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+
+  .opening-card .sheet-label-cell,
+  .opening-card .sheet-label-inline,
+  .maintenance-card .sheet-label-cell,
+  .maintenance-card .sheet-label-inline{
+    display:flex !important;
+    align-items:center !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    line-height:1.15 !important;
+    min-height:44px !important;
+    padding:10px 12px !important;
+    border-right:none !important;
+    justify-content:flex-start !important;
+  }
+
+  .opening-card .sheet-input-cell,
+  .maintenance-card .sheet-input-cell,
+  .opening-card .sheet-input-cell.wide,
+  .maintenance-card .sheet-input-cell.wide,
+  .opening-card .sheet-input-cell.nin,
+  .opening-card .sheet-input-cell.bvn,
+  .opening-card .sheet-input-cell.phone,
+  .opening-card .sheet-input-cell.account,
+  .maintenance-card .sheet-input-cell.nin,
+  .maintenance-card .sheet-input-cell.bvn,
+  .maintenance-card .sheet-input-cell.phone,
+  .maintenance-card .sheet-input-cell.account,
+  .maintenance-card .sheet-input-cell.account.account-near-label{
+    display:block !important;
+    min-height:44px !important;
+    padding:0 !important;
+  }
+
+  .opening-card .sheet-input-cell input,
+  .maintenance-card .sheet-input-cell input{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    display:block !important;
+  }
+
+  .opening-card .sheet-spread-actions.opening-actions{
+    grid-column:1 / -1 !important;
+    display:grid !important;
+    grid-template-columns:minmax(0, 1fr) !important;
+    gap:10px !important;
+    padding:12px 0 10px !important;
+  }
+
+  .opening-card .opening-sheet-grid > :nth-child(1),
+  .opening-card .opening-sheet-grid > :nth-child(2),
+  .opening-card .opening-sheet-grid > :nth-child(3),
+  .opening-card .opening-sheet-grid > :nth-child(4),
+  .opening-card .opening-sheet-grid > :nth-child(5),
+  .opening-card .opening-sheet-grid > :nth-child(6),
+  .opening-card .opening-sheet-grid > :nth-child(7),
+  .opening-card .opening-sheet-grid > :nth-child(8),
+  .opening-card .opening-sheet-grid > :nth-child(9),
+  .opening-card .opening-sheet-grid > :nth-child(10),
+  .opening-card .opening-sheet-grid > :nth-child(11),
+  .opening-card .opening-sheet-grid > :nth-child(12),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(1),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(2),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(3),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(4),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(5),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(6),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(7),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(8),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(9),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(10),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(11),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(12),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(13),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(14),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(15),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(16),
+  .maintenance-card .maintenance-sheet-grid > :nth-child(17){
+    grid-column:1 / -1 !important;
+    grid-row:auto !important;
+  }
+
+  .maintenance-card .cs-inline-btn{
+    width:100% !important;
+    max-width:100% !important;
+    white-space:normal !important;
+    text-align:left !important;
+    min-height:48px !important;
+  }
+
+  .opening-card .cs-photo-btn,
+  .opening-card .photo-status,
+  .opening-card .cs-generate-note{
+    width:100% !important;
+    max-width:100% !important;
+    white-space:normal !important;
+    text-align:left !important;
+  }
+}
+
+/* maintenance-only mobile lock patch v5 */
+@media (max-width: 980px){
+  .cs-sheet-card.maintenance-card{
+    overflow:hidden !important;
+  }
+
+  .maintenance-card .maintenance-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:0 !important;
+    align-items:stretch !important;
+    width:100% !important;
+  }
+
+  .maintenance-card .maintenance-sheet-grid > *{
+    grid-column:1 / -1 !important;
+    justify-self:stretch !important;
+    align-self:stretch !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+
+  .maintenance-card .sheet-label-cell,
+  .maintenance-card .sheet-label-inline{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    min-height:44px !important;
+    padding:10px 14px !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    line-height:1.15 !important;
+    border-right:none !important;
+  }
+
+  .maintenance-card .sheet-input-cell,
+  .maintenance-card .sheet-input-cell.wide,
+  .maintenance-card .sheet-input-cell.nin,
+  .maintenance-card .sheet-input-cell.bvn,
+  .maintenance-card .sheet-input-cell.phone,
+  .maintenance-card .sheet-input-cell.account,
+  .maintenance-card .sheet-input-cell.account.account-near-label,
+  .maintenance-card .sheet-input-cell.account:not(.account-near-label){
+    display:block !important;
+    min-height:44px !important;
+    padding:0 !important;
+  }
+
+  .maintenance-card .sheet-input-cell input,
+  .maintenance-card .cs-sheet-input{
+    display:block !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    box-sizing:border-box !important;
+  }
+
+  .maintenance-card .cs-inline-btn{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-height:46px !important;
+    height:auto !important;
+    white-space:normal !important;
+    text-align:center !important;
+  }
+
+  .maintenance-card .cs-inline-note,
+  .maintenance-card .action-row,
+  .maintenance-card .action-row button{
+    width:100% !important;
+    max-width:100% !important;
+    box-sizing:border-box !important;
+  }
+}
+
+/* FINAL MOBILE LOCK - Account Maintenance only */
+@media (max-width: 680px){
+  .maintenance-card .maintenance-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:8px !important;
+    align-items:stretch !important;
+  }
+
+  .maintenance-card .maintenance-sheet-grid > *{
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    justify-self:stretch !important;
+    align-self:stretch !important;
+    margin:0 !important;
+    float:none !important;
+  }
+
+  .maintenance-card .sheet-label-cell,
+  .maintenance-card .sheet-label-inline,
+  .maintenance-card .sheet-input-cell,
+  .maintenance-card .cs-inline-btn,
+  .maintenance-card .cs-inline-note{
+    display:block !important;
+    box-sizing:border-box !important;
+    flex:none !important;
+  }
+
+  .maintenance-card .sheet-label-cell,
+  .maintenance-card .sheet-label-inline{
+    min-height:auto !important;
+    padding:10px 12px !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    border-right:none !important;
+  }
+
+  .maintenance-card .sheet-input-cell{
+    min-height:auto !important;
+    padding:0 !important;
+  }
+
+  .maintenance-card .sheet-input-cell .cs-sheet-input,
+  .maintenance-card .sheet-input-cell input,
+  .maintenance-card .sheet-input-cell textarea,
+  .maintenance-card .sheet-input-cell select{
+    display:block !important;
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    box-sizing:border-box !important;
+  }
+
+  .maintenance-card .cs-inline-btn{
+    width:100% !important;
+    min-height:44px !important;
+  }
+
+  .maintenance-card .cs-sheet-footer{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:10px !important;
+  }
+}
+
+/* ABSOLUTE FINAL MOBILE FIX - ACCOUNT MAINTENANCE ONLY */
+@media (max-width: 760px){
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid{
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-auto-flow:row !important;
+    grid-auto-rows:auto !important;
+    gap:8px !important;
+    width:100% !important;
+    max-width:100% !important;
+    align-items:stretch !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > *{
+    grid-column:1 / -1 !important;
+    grid-row:auto !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    justify-self:stretch !important;
+    align-self:stretch !important;
+    margin:0 !important;
+    float:none !important;
+    transform:none !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-label-cell,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-label-inline{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    min-height:44px !important;
+    padding:10px 12px !important;
+    line-height:1.15 !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    box-sizing:border-box !important;
+    border-right:none !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.wide,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.nin,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.bvn,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.phone,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.account,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.account-near-label,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .cs-inline-btn{
+    display:block !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    min-height:44px !important;
+    box-sizing:border-box !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell{
+    padding:0 !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell input,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell .cs-sheet-input{
+    display:block !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    box-sizing:border-box !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .cs-inline-btn{
+    white-space:normal !important;
+    text-align:center !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(1){order:1 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(2){order:2 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(3){order:3 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(4){order:4 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(5){order:5 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(6){order:6 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(7){order:7 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(8){order:8 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(9){order:9 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(10){order:10 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(11){order:11 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(12){order:12 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(13){order:13 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(14){order:14 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(15){order:15 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(16){order:16 !important;}
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > :nth-child(17){order:17 !important;}
+
+  .cs-sheet-card.maintenance-card .cs-sheet-footer{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:10px !important;
+  }
+}
+
+/* SURGICAL MOBILE FIX - ACCOUNT MAINTENANCE ONLY */
+@media (max-width: 760px){
+  .cs-sheet-card.maintenance-card{
+    width:100% !important;
+    max-width:100% !important;
+    overflow-x:hidden !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:8px !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    overflow-x:hidden !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > *{
+    display:block !important;
+    flex:0 0 auto !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    margin:0 !important;
+    grid-column:auto !important;
+    grid-row:auto !important;
+    justify-self:stretch !important;
+    align-self:stretch !important;
+    transform:none !important;
+    float:none !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-label-cell,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-label-inline{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    min-height:42px !important;
+    padding:10px 12px !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    border-right:none !important;
+    box-sizing:border-box !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.wide,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.nin,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.bvn,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.phone,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.account,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell.account-near-label{
+    padding:0 !important;
+    min-height:42px !important;
+    box-sizing:border-box !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell input,
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .sheet-input-cell .cs-sheet-input{
+    display:block !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    box-sizing:border-box !important;
+  }
+
+  .cs-sheet-card.maintenance-card .maintenance-sheet-grid > .cs-inline-btn{
+    display:block !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-height:42px !important;
+    white-space:normal !important;
+    text-align:center !important;
+  }
+}
+
+/* FINAL SURGICAL PATCH - TELLERING CREDIT/DEBIT ENTRY SHEET ONLY */
+.journal-sheet{
+  max-width:940px;
+}
+
+.journal-sheet .redesigned-journal-grid{
+  display:grid !important;
+  grid-template-columns:190px 90px 140px 170px !important;
+  gap:12px 14px !important;
+  align-items:center !important;
+  max-width:860px;
+}
+
+.journal-sheet .redesigned-journal-grid > *{
+  min-width:0;
+}
+
+.journal-sheet .redesigned-journal-grid > :nth-child(1){grid-column:1;grid-row:1;}
+.journal-sheet .redesigned-journal-grid > :nth-child(2){grid-column:2;grid-row:1;width:90px;max-width:90px;justify-self:start;}
+.journal-sheet .redesigned-journal-grid > :nth-child(3){grid-column:3;grid-row:1;width:140px;max-width:140px;justify-self:start;}
+.journal-sheet .redesigned-journal-grid > :nth-child(4){grid-column:4;grid-row:1;width:170px;max-width:170px;justify-self:start;}
+
+.journal-sheet .redesigned-journal-grid > :nth-child(5){grid-column:1;grid-row:2;}
+.journal-sheet .redesigned-journal-grid > :nth-child(6){grid-column:2 / 5;grid-row:2;width:100%;max-width:none;}
+.journal-sheet .redesigned-journal-grid > :nth-child(7),
+.journal-sheet .redesigned-journal-grid > :nth-child(8){display:none !important;}
+
+.journal-sheet .redesigned-journal-grid > :nth-child(9){grid-column:1;grid-row:3;}
+.journal-sheet .redesigned-journal-grid > :nth-child(10){grid-column:2;grid-row:3;width:140px;max-width:140px;justify-self:start;}
+.journal-sheet .redesigned-journal-grid > :nth-child(11){grid-column:3;grid-row:3;width:max-content;justify-self:start;}
+.journal-sheet .redesigned-journal-grid > :nth-child(12){grid-column:4;grid-row:3;justify-self:start;}
+
+.journal-sheet .sheet-label,
+.journal-sheet .sheet-label.inline-label{
+  white-space:nowrap !important;
+  line-height:1.15 !important;
+  padding:0 !important;
+}
+
+.journal-sheet #txName{
+  width:100% !important;
+  max-width:none !important;
+}
+
+.journal-sheet #txAcc{
+  width:90px !important;
+  max-width:90px !important;
+}
+
+.journal-sheet #txBalance{
+  width:140px !important;
+  max-width:140px !important;
+  min-width:140px;
+}
+
+.journal-sheet .amount-post-wrap{
+  display:grid !important;
+  grid-template-columns:140px 108px !important;
+  gap:14px !important;
+  align-items:center !important;
+  justify-content:start !important;
+}
+
+.journal-sheet #txAmount{
+  width:140px !important;
+  max-width:140px !important;
+}
+
+@media (max-width: 760px){
+  .journal-sheet{
+    max-width:100% !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:1fr !important;
+    gap:8px !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(1),
+  .journal-sheet .redesigned-journal-grid > :nth-child(2),
+  .journal-sheet .redesigned-journal-grid > :nth-child(3),
+  .journal-sheet .redesigned-journal-grid > :nth-child(4),
+  .journal-sheet .redesigned-journal-grid > :nth-child(5),
+  .journal-sheet .redesigned-journal-grid > :nth-child(6),
+  .journal-sheet .redesigned-journal-grid > :nth-child(9),
+  .journal-sheet .redesigned-journal-grid > :nth-child(10),
+  .journal-sheet .redesigned-journal-grid > :nth-child(11),
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    grid-column:auto !important;
+    grid-row:auto !important;
+    width:100% !important;
+    max-width:none !important;
+    justify-self:stretch !important;
+  }
+
+  .journal-sheet .sheet-label,
+  .journal-sheet .sheet-label.inline-label{
+    white-space:normal !important;
+    font-size:13px !important;
+  }
+
+  .journal-sheet #txAcc,
+  .journal-sheet #txBalance,
+  .journal-sheet #txAmount{
+    width:100% !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    grid-template-columns:1fr 1fr !important;
+    gap:8px !important;
+    width:100% !important;
+  }
+
+  .journal-sheet .sheet-btn{
+    min-width:0 !important;
+    padding:10px 10px !important;
+    font-size:13px !important;
+    width:100% !important;
+  }
+}
+
+
+/* Credit/Debit micro-fix: amount label visibility, name width, and stable mobile layout */
+.journal-sheet .redesigned-journal-grid{
+  grid-template-columns:190px 120px 185px 225px !important;
+  gap:10px 18px !important;
+}
+.journal-sheet #txAcc{
+  width:100% !important;
+  max-width:120px !important;
+}
+.journal-sheet #txSearch{
+  width:100% !important;
+}
+.journal-sheet #txJournalAdd{
+  width:100% !important;
+}
+.journal-sheet #txName{
+  min-width:0 !important;
+  width:100% !important;
+  max-width:none !important;
+}
+.journal-sheet #txBalance{
+  width:100% !important;
+  max-width:185px !important;
+  min-width:185px !important;
+}
+.journal-sheet .sheet-label.inline-label{
+  justify-self:start !important;
+  text-align:left !important;
+  padding-right:0 !important;
+  padding-left:2px !important;
+}
+.journal-sheet .amount-post-wrap{
+  grid-template-columns:185px 110px !important;
+  gap:18px !important;
+}
+.journal-sheet #txAmount{
+  width:100% !important;
+  max-width:185px !important;
+}
+
+@media (max-width: 760px){
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:1fr 1fr !important;
+    gap:8px 12px !important;
+    align-items:center !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(1),
+  .journal-sheet .redesigned-journal-grid > :nth-child(5),
+  .journal-sheet .redesigned-journal-grid > :nth-child(7),
+  .journal-sheet .redesigned-journal-grid > :nth-child(9){
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:none !important;
+    justify-self:stretch !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(2),
+  .journal-sheet .redesigned-journal-grid > :nth-child(6),
+  .journal-sheet .redesigned-journal-grid > :nth-child(8),
+  .journal-sheet .redesigned-journal-grid > :nth-child(10){
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:none !important;
+    justify-self:stretch !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(3){
+    grid-column:1 / 2 !important;
+    width:100% !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(4){
+    grid-column:2 / 3 !important;
+    width:100% !important;
+  }
+  .journal-sheet .sheet-label,
+  .journal-sheet .sheet-label.inline-label{
+    white-space:normal !important;
+    font-size:13px !important;
+    line-height:1.1 !important;
+    padding-left:0 !important;
+  }
+  .journal-sheet .amount-post-wrap{
+    grid-template-columns:1fr 1fr !important;
+    gap:12px !important;
+    width:100% !important;
+  }
+  .journal-sheet #txAcc,
+  .journal-sheet #txBalance,
+  .journal-sheet #txAmount,
+  .journal-sheet #txName,
+  .journal-sheet #txSearch,
+  .journal-sheet #txJournalAdd,
+  .journal-sheet #txPostSingle{
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+  }
+}
+
+/* Final surgical credit/debit spacing patch */
+.journal-sheet .redesigned-journal-grid{
+  grid-template-columns:190px 120px 185px 225px !important;
+  gap:10px 18px !important;
+}
+
+.journal-sheet #txJournalAdd{
+  margin-left:-6px !important;
+}
+
+.journal-sheet .sheet-label.inline-label{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-end !important;
+  justify-self:stretch !important;
+  width:100% !important;
+  min-width:max-content !important;
+  text-align:right !important;
+  white-space:nowrap !important;
+  overflow:visible !important;
+  padding:0 10px 0 0 !important;
+}
+
+.journal-sheet .amount-post-wrap{
+  grid-template-columns:185px 110px !important;
+  gap:18px !important;
+}
+
+@media (max-width: 760px){
+  .journal-sheet #txJournalAdd{
+    margin-left:0 !important;
+  }
+
+  .journal-sheet .sheet-label.inline-label{
+    justify-content:flex-start !important;
+    justify-self:stretch !important;
+    width:100% !important;
+    min-width:0 !important;
+    text-align:left !important;
+    white-space:normal !important;
+    padding:0 !important;
+  }
+}
+
+/* Final micro-spacing patch: desktop only */
+.journal-sheet #txJournalAdd{
+  margin-left:-18px !important;
+}
+
+.journal-sheet .redesigned-journal-grid > :nth-child(11),
+.journal-sheet .redesigned-journal-grid > :nth-child(12){
+  margin-left:-18px !important;
+}
+
+@media (max-width: 760px){
+  .journal-sheet #txJournalAdd,
+  .journal-sheet .redesigned-journal-grid > :nth-child(11),
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    margin-left:0 !important;
+  }
+}
+
+/* Ultra-surgical credit/debit spacing correction */
+@media (min-width: 761px){
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:190px 58px 150px 190px !important;
+    gap:10px 10px !important;
+  }
+
+  .journal-sheet #txAcc{
+    width:58px !important;
+    max-width:58px !important;
+    min-width:58px !important;
+  }
+
+  .journal-sheet #txSearch{
+    width:150px !important;
+    max-width:150px !important;
+  }
+
+  .journal-sheet #txJournalAdd{
+    width:190px !important;
+    max-width:190px !important;
+    margin-left:0 !important;
+  }
+
+  .journal-sheet #txBalance{
+    width:140px !important;
+    max-width:140px !important;
+    min-width:140px !important;
+  }
+
+  .journal-sheet .sheet-label.inline-label{
+    width:auto !important;
+    min-width:0 !important;
+    justify-self:start !important;
+    justify-content:flex-start !important;
+    text-align:left !important;
+    padding:0 !important;
+    margin-left:-8px !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    grid-template-columns:150px 110px !important;
+    gap:12px !important;
+    margin-left:-22px !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    max-width:150px !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(11),
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    margin-left:0 !important;
+  }
+}
+
+/* Credit/Debit final micro-fix: match Check Balance account width and restore Amount label */
+@media (min-width: 761px){
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:190px 82px 150px 190px !important;
+    gap:10px 12px !important;
+  }
+
+  .journal-sheet #txAcc{
+    width:82px !important;
+    max-width:82px !important;
+    min-width:82px !important;
+  }
+
+  .journal-sheet #txSearch{
+    width:150px !important;
+    max-width:150px !important;
+  }
+
+  .journal-sheet #txJournalAdd{
+    width:190px !important;
+    max-width:190px !important;
+    margin-left:-4px !important;
+  }
+
+  .journal-sheet #txBalance{
+    width:140px !important;
+    max-width:140px !important;
+    min-width:140px !important;
+  }
+
+  .journal-sheet .sheet-label.inline-label{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    justify-self:start !important;
+    width:auto !important;
+    min-width:max-content !important;
+    text-align:left !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+    color:var(--text) !important;
+    opacity:1 !important;
+    visibility:visible !important;
+    padding:0 !important;
+    margin-left:-22px !important;
+    position:relative !important;
+    z-index:2 !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    grid-template-columns:150px 110px !important;
+    gap:8px !important;
+    margin-left:-34px !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    max-width:150px !important;
+  }
+}
+
+/* Credit/Debit ultra-surgical patch: force Amount label visible without moving layout */
+.journal-sheet .redesigned-journal-grid > :nth-child(11){
+  position:relative !important;
+  color:transparent !important;
+}
+.journal-sheet .redesigned-journal-grid > :nth-child(11)::before{
+  content:"Amount";
+  color:var(--text) !important;
+  position:relative;
+  display:inline-block;
+  font:inherit;
+  opacity:1 !important;
+  visibility:visible !important;
+}
+
+/* Credit/Debit amount label restore: keep layout unchanged, show real label text */
+.journal-sheet .redesigned-journal-grid > :nth-child(11){
+  color:var(--text) !important;
+  opacity:1 !important;
+  visibility:visible !important;
+  font-size:16px !important;
+  line-height:1.2 !important;
+}
+.journal-sheet .redesigned-journal-grid > :nth-child(11)::before{
+  content:none !important;
+}
+
+
+/* Final amount-label restore patch */
+.journal-sheet .redesigned-journal-grid > :nth-child(11),
+.journal-sheet .redesigned-journal-grid > :nth-child(11) span{
+  color:var(--text) !important;
+  opacity:1 !important;
+  visibility:visible !important;
+  display:flex !important;
+  align-items:center !important;
+}
+body[data-theme="dark-slate"] .journal-sheet .redesigned-journal-grid > :nth-child(11),
+body[data-theme="dark-slate"] .journal-sheet .redesigned-journal-grid > :nth-child(11) span{
+  color:#eef5ff !important;
+}
+body[data-theme="ducess-sheet"] .journal-sheet .redesigned-journal-grid > :nth-child(11),
+body[data-theme="ducess-sheet"] .journal-sheet .redesigned-journal-grid > :nth-child(11) span{
+  color:#31120d !important;
+}
+
+
+/* Surgical fix: restore Amount label in Credit/Debit without altering layout */
+.journal-sheet .amount-inline-label{
+  color:var(--text) !important;
+  opacity:1 !important;
+  visibility:visible !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-end !important;
+  white-space:nowrap !important;
+  font-size:16px !important;
+  line-height:1.2 !important;
+}
+body[data-theme="dark-slate"] .journal-sheet .amount-inline-label{
+  color:#eef5ff !important;
+}
+body[data-theme="ducess-sheet"] .journal-sheet .amount-inline-label{
+  color:#31120d !important;
+}
+@media (max-width: 760px){
+  .journal-sheet .amount-inline-label{
+    justify-content:flex-start !important;
+    width:100% !important;
+    padding:0 !important;
+  }
+}
+
+
+/* Forced restore: show Amount label inside the amount/post row without touching other UI */
+.journal-sheet .amount-post-wrap{
+  grid-template-columns:auto minmax(120px,150px) 110px !important;
+}
+.journal-sheet .forced-amount-label{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-start !important;
+  white-space:nowrap !important;
+  color:var(--text) !important;
+  opacity:1 !important;
+  visibility:visible !important;
+  font:inherit !important;
+}
+body[data-theme="dark-slate"] .journal-sheet .forced-amount-label{
+  color:#eef5ff !important;
+}
+body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
+  color:#31120d !important;
+}
+@media (max-width: 760px){
+  .journal-sheet .amount-post-wrap{
+    grid-template-columns:1fr !important;
+  }
+  .journal-sheet .forced-amount-label{
+    display:block !important;
+    margin-bottom:6px !important;
+  }
+}
+
+/* Final polish patch: tighten Available Balance to Amount, match Amount/Post spacing,
+   extend Account Name slightly, and keep Amount visible on mobile. */
+@media (min-width: 761px){
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:190px 140px 150px 190px !important;
+    gap:10px 12px !important;
+  }
+
+  .journal-sheet #txAcc{
+    width:82px !important;
+    max-width:82px !important;
+    min-width:82px !important;
+  }
+
+  .journal-sheet #txSearch{
+    width:150px !important;
+    max-width:150px !important;
+  }
+
+  .journal-sheet #txJournalAdd{
+    width:190px !important;
+    max-width:190px !important;
+    margin-left:0 !important;
+  }
+
+  .journal-sheet #txName{
+    grid-column:2 / 5 !important;
+    width:100% !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet #txBalance{
+    width:140px !important;
+    max-width:140px !important;
+    min-width:140px !important;
+  }
+
+  .journal-sheet .amount-inline-label{
+    display:none !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    grid-column:3 / 5 !important;
+    display:grid !important;
+    grid-template-columns:auto 150px 110px !important;
+    gap:12px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    margin-left:0 !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .forced-amount-label{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    white-space:nowrap !important;
+    margin:0 !important;
+    color:var(--text) !important;
+    opacity:1 !important;
+    visibility:visible !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    max-width:150px !important;
+  }
+
+  .journal-sheet #txPostSingle{
+    width:110px !important;
+    max-width:110px !important;
+    margin-left:0 !important;
+  }
+}
+
+@media (max-width: 760px){
+  .journal-sheet .amount-inline-label{
+    display:none !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    grid-column:1 / -1 !important;
+    display:grid !important;
+    grid-template-columns:1fr 1fr !important;
+    gap:12px !important;
+    width:100% !important;
+    margin-left:0 !important;
+  }
+
+  .journal-sheet .forced-amount-label{
+    grid-column:1 / -1 !important;
+    display:block !important;
+    margin:0 0 6px 0 !important;
+    color:var(--text) !important;
+    opacity:1 !important;
+    visibility:visible !important;
+    white-space:nowrap !important;
+  }
+
+  .journal-sheet #txAmount,
+  .journal-sheet #txPostSingle{
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+  }
+}
+
+/* ===== Credit/Debit final correction v5 ===== */
+@media (min-width: 761px){
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:190px 82px 150px 190px !important;
+    gap:10px 12px !important;
+    max-width:648px !important;
+    width:648px !important;
+    align-items:center !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(1){grid-column:1 !important;grid-row:1 !important;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(2){grid-column:2 !important;grid-row:1 !important;width:82px !important;max-width:82px !important;min-width:82px !important;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(3){grid-column:3 !important;grid-row:1 !important;width:150px !important;max-width:150px !important;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(4){grid-column:4 !important;grid-row:1 !important;width:190px !important;max-width:190px !important;margin-left:0 !important;}
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(5){grid-column:1 !important;grid-row:2 !important;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(6){
+    grid-column:2 / 5 !important;
+    grid-row:2 !important;
+    width:100% !important;
+    max-width:none !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(7),
+  .journal-sheet .redesigned-journal-grid > :nth-child(8),
+  .journal-sheet .redesigned-journal-grid > :nth-child(11),
+  .journal-sheet .amount-inline-label{
+    display:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(9){grid-column:1 !important;grid-row:3 !important;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(10){
+    grid-column:2 !important;
+    grid-row:3 !important;
+    width:140px !important;
+    max-width:140px !important;
+    min-width:140px !important;
+    margin:0 !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    grid-column:3 / 5 !important;
+    grid-row:3 !important;
+    justify-self:start !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet #txName{
+    width:100% !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:max-content 150px 110px !important;
+    gap:12px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:100% !important;
+    max-width:none !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet .forced-amount-label{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    margin:0 !important;
+    white-space:nowrap !important;
+    color:var(--text) !important;
+    opacity:1 !important;
+    visibility:visible !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    max-width:150px !important;
+    min-width:150px !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet #txPostSingle{
+    width:110px !important;
+    max-width:110px !important;
+    min-width:110px !important;
+    margin:0 !important;
+  }
+}
+
+@media (max-width: 760px){
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:1fr 1fr !important;
+    gap:8px 12px !important;
+    max-width:none !important;
+    width:100% !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(1),
+  .journal-sheet .redesigned-journal-grid > :nth-child(4),
+  .journal-sheet .redesigned-journal-grid > :nth-child(5),
+  .journal-sheet .redesigned-journal-grid > :nth-child(6),
+  .journal-sheet .redesigned-journal-grid > :nth-child(9),
+  .journal-sheet .redesigned-journal-grid > :nth-child(10),
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    grid-column:1 / -1 !important;
+    width:100% !important;
+    max-width:none !important;
+    justify-self:stretch !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(2){
+    grid-column:1 / 2 !important;
+    grid-row:auto !important;
+    width:100% !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(3){
+    grid-column:2 / 3 !important;
+    grid-row:auto !important;
+    width:100% !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(7),
+  .journal-sheet .redesigned-journal-grid > :nth-child(8),
+  .journal-sheet .redesigned-journal-grid > :nth-child(11),
+  .journal-sheet .amount-inline-label{
+    display:none !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:1fr 1fr !important;
+    gap:12px !important;
+    width:100% !important;
+    margin:0 !important;
+    align-items:center !important;
+  }
+
+  .journal-sheet .forced-amount-label{
+    display:block !important;
+    grid-column:1 / -1 !important;
+    margin:0 0 6px 0 !important;
+    color:var(--text) !important;
+    opacity:1 !important;
+    visibility:visible !important;
+    white-space:nowrap !important;
+  }
+
+  .journal-sheet #txAmount,
+  .journal-sheet #txPostSingle{
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+}
+
+/* Desktop-only surgical fix: make Amount fully visible without touching other rows */
+@media (min-width: 761px){
+  .journal-sheet .amount-inline-label{
+    display:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    margin-left:10px !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:72px 150px 110px !important;
+    gap:18px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .forced-amount-label{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    width:72px !important;
+    min-width:72px !important;
+    max-width:72px !important;
+    margin:0 !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+    opacity:1 !important;
+    visibility:visible !important;
+    color:var(--text) !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    min-width:150px !important;
+    max-width:150px !important;
+  }
+
+  .journal-sheet #txPostSingle{
+    width:110px !important;
+    min-width:110px !important;
+    max-width:110px !important;
+  }
+}
+
+/* Desktop-only final surgical patch: fully reveal Amount in Credit/Debit without touching other UI */
+@media (min-width: 761px){
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    margin-left:26px !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:72px 150px 110px !important;
+    gap:12px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet .forced-amount-label{
+    width:72px !important;
+    min-width:72px !important;
+    max-width:72px !important;
+    margin:0 !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+  }
+}
+
+/* Desktop micro-fix v8: fully reveal Amount by shifting only that row slightly right */
+@media (min-width: 761px){
+  .journal-sheet .forced-amount-label{
+    display:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(11){
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    width:72px !important;
+    min-width:72px !important;
+    max-width:72px !important;
+    margin-left:18px !important;
+    overflow:visible !important;
+    white-space:nowrap !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    margin-left:18px !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:150px 110px !important;
+    gap:18px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    min-width:150px !important;
+    max-width:150px !important;
+  }
+
+  .journal-sheet #txPostSingle{
+    width:110px !important;
+    min-width:110px !important;
+    max-width:110px !important;
+  }
+}
+
+/* Desktop micro-fix v9: separate Amount label from input and shift only that row slightly right */
+@media (min-width: 761px){
+  .journal-sheet .forced-amount-label{
+    display:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(11){
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    width:86px !important;
+    min-width:86px !important;
+    max-width:86px !important;
+    margin-left:24px !important;
+    margin-right:0 !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    margin-left:30px !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:150px 110px !important;
+    gap:16px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:auto !important;
+    max-width:none !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    min-width:150px !important;
+    max-width:150px !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet #txPostSingle{
+    width:110px !important;
+    min-width:110px !important;
+    max-width:110px !important;
+    margin:0 !important;
+  }
+}
+
+
+/* FINAL FORCEFUL PATCH: desktop Credit/Debit amount row only */
+@media (min-width: 761px){
+  .journal-sheet .forced-amount-label{display:none !important;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(11){
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    grid-column:3 !important;
+    grid-row:3 !important;
+    width:96px !important;
+    min-width:96px !important;
+    max-width:96px !important;
+    margin:0 0 0 34px !important;
+    padding:0 !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+    text-align:left !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    grid-column:4 !important;
+    grid-row:3 !important;
+    margin:0 0 0 18px !important;
+    justify-self:start !important;
+  }
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:160px 110px !important;
+    gap:12px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:auto !important;
+    max-width:none !important;
+    margin:0 !important;
+  }
+  .journal-sheet #txAmount{
+    width:160px !important;
+    min-width:160px !important;
+    max-width:160px !important;
+    margin:0 !important;
+  }
+  .journal-sheet #txPostSingle{
+    width:110px !important;
+    min-width:110px !important;
+    max-width:110px !important;
+    margin:0 !important;
+  }
+}
+
+@media (max-width: 760px){
+  .journal-sheet .forced-amount-label{display:none !important;}
+  .journal-sheet .amount-inline-label{display:block !important;}
+}
+
+
+/* ABSOLUTE FINAL DESKTOP OVERRIDE: CREDIT/DEBIT AMOUNT LABEL + FIELD SEPARATION */
+@media (min-width: 761px){
+  .journal-sheet .redesigned-journal-grid{
+    display:grid !important;
+    grid-template-columns:190px 90px 150px 70px 272px !important;
+    gap:12px 14px !important;
+    align-items:center !important;
+    max-width:900px !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(1){grid-column:1;grid-row:1;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(2){grid-column:2;grid-row:1;width:90px !important;max-width:90px !important;min-width:90px !important;justify-self:start;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(3){grid-column:3;grid-row:1;width:150px !important;max-width:150px !important;justify-self:start;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(4){grid-column:4 / 6;grid-row:1;width:190px !important;max-width:190px !important;justify-self:start;margin:0 !important;}
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(5){grid-column:1;grid-row:2;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(6){grid-column:2 / 6;grid-row:2;width:100% !important;max-width:none !important;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(7),
+  .journal-sheet .redesigned-journal-grid > :nth-child(8){display:none !important;}
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(9){grid-column:1;grid-row:3;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(10){grid-column:2;grid-row:3;width:140px !important;max-width:140px !important;min-width:140px !important;justify-self:start;}
+  .journal-sheet .redesigned-journal-grid > :nth-child(11){
+    grid-column:4;grid-row:3;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    justify-self:start !important;
+    width:70px !important;
+    min-width:70px !important;
+    max-width:70px !important;
+    margin:0 !important;
+    padding:0 !important;
+    text-align:left !important;
+    white-space:nowrap !important;
+    color:var(--text) !important;
+    opacity:1 !important;
+    visibility:visible !important;
+    position:static !important;
+    z-index:auto !important;
+    overflow:visible !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    grid-column:5;grid-row:3;
+    justify-self:start !important;
+    width:272px !important;
+    max-width:272px !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet #txAcc{width:90px !important;max-width:90px !important;min-width:90px !important;}
+  .journal-sheet #txSearch{width:150px !important;max-width:150px !important;}
+  .journal-sheet #txJournalAdd{width:190px !important;max-width:190px !important;margin:0 !important;}
+  .journal-sheet #txBalance{width:140px !important;max-width:140px !important;min-width:140px !important;}
+  .journal-sheet .amount-post-wrap{
+    display:grid !important;
+    grid-template-columns:150px 110px !important;
+    gap:12px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:272px !important;
+    max-width:272px !important;
+    margin:0 !important;
+    padding:0 !important;
+  }
+  .journal-sheet #txAmount{width:150px !important;max-width:150px !important;min-width:150px !important;}
+  .journal-sheet #txPostSingle{width:110px !important;max-width:110px !important;min-width:110px !important;margin:0 !important;}
+}
+
+/* 2026-03-24 surgical desktop fix: fully reveal Amount label in Credit/Debit row only */
+@media (min-width: 761px){
+  .journal-sheet .redesigned-journal-grid{
+    grid-template-columns:190px 90px 150px 86px 256px !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(11){
+    grid-column:4 !important;
+    width:86px !important;
+    min-width:86px !important;
+    max-width:86px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    overflow:visible !important;
+    white-space:nowrap !important;
+    margin:0 !important;
+    padding:0 !important;
+  }
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    grid-column:5 !important;
+    width:256px !important;
+    min-width:256px !important;
+    max-width:256px !important;
+  }
+  .journal-sheet .amount-post-wrap{
+    grid-template-columns:134px 110px !important;
+    gap:12px !important;
+    width:256px !important;
+    min-width:256px !important;
+    max-width:256px !important;
+  }
+  .journal-sheet #txAmount{
+    width:134px !important;
+    min-width:134px !important;
+    max-width:134px !important;
+  }
+}
+
+/* 2026-03-24 v13 hard override: render Amount label in the existing gap without moving layout */
+@media (min-width: 761px){
+  .journal-sheet .amount-inline-label{
+    display:none !important;
+  }
+
+  .journal-sheet .redesigned-journal-grid > :nth-child(12){
+    grid-column:4 !important;
+    grid-row:3 !important;
+    margin:0 !important;
+    justify-self:start !important;
+    overflow:visible !important;
+  }
+
+  .journal-sheet .amount-post-wrap{
+    position:relative !important;
+    display:grid !important;
+    grid-template-columns:150px 110px !important;
+    gap:12px !important;
+    align-items:center !important;
+    justify-content:start !important;
+    width:272px !important;
+    min-width:272px !important;
+    max-width:272px !important;
+    margin:0 !important;
+    padding:0 !important;
+    overflow:visible !important;
+  }
+
+  .journal-sheet .amount-post-wrap::before{
+    content:"Amount" !important;
+    position:absolute !important;
+    left:-86px !important;
+    top:50% !important;
+    transform:translateY(-50%) !important;
+    width:72px !important;
+    min-width:72px !important;
+    max-width:72px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+    color:var(--text) !important;
+    opacity:1 !important;
+    visibility:visible !important;
+    z-index:5 !important;
+    pointer-events:none !important;
+  }
+
+  .journal-sheet #txBalance{
+    position:relative !important;
+    z-index:1 !important;
+  }
+
+  .journal-sheet #txAmount{
+    width:150px !important;
+    min-width:150px !important;
+    max-width:150px !important;
+    margin:0 !important;
+  }
+
+  .journal-sheet #txPostSingle{
+    width:110px !important;
+    min-width:110px !important;
+    max-width:110px !important;
+    margin:0 !important;
+  }
+}
+
+
+@media (max-width: 640px){
+  #modalBack .modal[data-modal-title="Resolve Close of Day"] .modal-actions{
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+    gap:10px !important;
+    align-items:stretch !important;
+  }
+
+  #modalBack .modal[data-modal-title="Resolve Close of Day"] .modal-actions button{
+    width:100% !important;
+  }
+}
+
+
+/* COD UI micro-width patch: slightly widen central COD modal and give the Note field a touch more room on desktop only */
+@media (min-width: 901px){
+  #modalBack .modal[data-modal-title="Central Close of Day"]{
+    width:min(1048px, 100%);
+    overflow-x:hidden;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table-wrap{
+    overflow-x:auto;
+    overflow-y:hidden;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table th:nth-child(9),
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table td:nth-child(9){
+    min-width:96px;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table th:nth-child(12),
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table td:nth-child(12){
+    min-width:120px;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] [data-cod-actual]{
+    min-width:96px;
+    width:96px;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] [data-cod-note]{
+    min-width:120px;
+    width:120px;
+    max-width:120px;
+  }
+}
+
+
+/* COD mobile note field stabilization: keep mobile layout intact while making NOTE usable */
+@media (max-width: 640px){
+  #modalBack .modal[data-modal-title="Central Close of Day"]{
+    overflow-x:hidden !important;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table-wrap{
+    overflow-x:auto !important;
+    overflow-y:hidden !important;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table th:nth-child(12),
+  #modalBack .modal[data-modal-title="Central Close of Day"] .table td:nth-child(12){
+    min-width:92px !important;
+  }
+
+  #modalBack .modal[data-modal-title="Central Close of Day"] [data-cod-note]{
+    display:block;
+    width:92px !important;
+    min-width:92px !important;
+    max-width:92px !important;
+    box-sizing:border-box;
+  }
+}
