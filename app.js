@@ -165,6 +165,40 @@
   const state = bootstrapState();
   state.ui = state.ui || { module: 'customer_service', tool: 'check_balance', selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'all', from: '', to: '' }, operationalFilter: { preset: 'all', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering' };
   ensureState();
+  // 🔥 LOAD STAFF FROM SUPABASE (SAFE OVERRIDE)
+(async function loadStaffFromBackend() {
+  try {
+    if (!gateway || !runtimeConfig?.useSupabaseBackend) return;
+
+    const res = await fetch(`${runtimeConfig.supabase.url}/rest/v1/staff`, {
+      headers: {
+        apikey: runtimeConfig.supabase.anonKey,
+        Authorization: `Bearer ${runtimeConfig.supabase.anonKey}`
+      }
+    });
+
+    const data = await res.json();
+
+    if (Array.isArray(data) && data.length) {
+      state.staff = data.map((s, index) => ({
+        id: s.id || `st_${index}`,
+        name: s.full_name,
+        role: s.role_code,
+        active: s.is_active
+      }));
+
+      if (!state.staff.find(s => s.id === state.activeStaffId)) {
+        state.activeStaffId = state.staff[0]?.id || null;
+      }
+
+      console.log("✅ Staff loaded from Supabase");
+    }
+
+  } catch (err) {
+    console.warn("⚠️ Failed to load staff from backend, using seed()", err);
+  }
+})();
+
   if (isSupabaseApprovalMode()) {
     syncAllSharedStateFromGateway();
     setupRealtimeSubscriptions();
