@@ -4485,3 +4485,91 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
     box-sizing:border-box;
   }
 }
+
+/* Surgical patch: journal field note upload control */
+.visually-hidden-file-input{
+  position:absolute !important;
+  width:1px !important;
+  height:1px !important;
+  padding:0 !important;
+  margin:-1px !important;
+  overflow:hidden !important;
+  clip:rect(0,0,0,0) !important;
+  white-space:nowrap !important;
+  border:0 !important;
+}
+
+.journal-submit-row{
+  align-items:center;
+}
+
+.journal-submit-row .file-trigger-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin:0;
+  cursor:pointer;
+}
+
+.compact-file-name{
+  display:inline-block;
+  min-width:0;
+  max-width:220px;
+  font-size:12px;
+  color:var(--muted);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  vertical-align:middle;
+}
+
+.journal-attachment-review{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin:2px 0 12px;
+}
+
+.journal-attachment-card{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  border:1px solid var(--line);
+  background:var(--panel);
+  padding:10px 12px;
+}
+
+.journal-attachment-meta{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+}
+
+.journal-attachment-meta strong,
+.journal-attachment-meta span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+@media (max-width: 760px){
+  .journal-submit-row{
+    align-items:stretch;
+  }
+
+  .journal-submit-row > *{
+    width:100%;
+  }
+
+  .compact-file-name{
+    max-width:none;
+    text-align:left;
+  }
+
+  .journal-attachment-card{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+}
