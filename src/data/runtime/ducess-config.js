@@ -1,10 +1,10 @@
 window.__DUCESS_CONFIG__ = Object.assign(
   {
-    useSupabaseBackend: false,
+    useSupabaseBackend: true,
     storageKey: 'duces_enterprise_ledger_v1',
     supabase: {
-      url: '',
-      anonKey: '',
+      url: 'https://ghhqlxwuvqilusisieom.supabase.co',
+      anonKey: 'sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I',
       staffEmailMode: 'synthetic_suffix',
       syntheticEmailSuffix: '@ducess.local',
       staffTable: 'staff',
