@@ -716,6 +716,9 @@ async function submitDebtRepayment(_payload) {
 async function listTempGrants(_staffId) {
   return defaultResult.ok([]);
 }
+function subscribeRealtime() {
+  return () => {};
+}
 
 
     function isoAtMidday(dateValue) {
