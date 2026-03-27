@@ -238,6 +238,78 @@
   };
 }
 
+async function submitCod(_payload) {
+  return {
+    ok: true,
+    data: {
+      id: null,
+      staffId: null,
+      businessDate: null,
+      openingBalance: 0,
+      floatTopUps: 0,
+      effectiveOpeningBalance: 0,
+      totalCredits: 0,
+      totalDebits: 0,
+      netBookBalance: 0,
+      remainingBalance: 0,
+      expectedCash: 0,
+      actualCash: 0,
+      variance: 0,
+      overdraw: 0,
+      status: 'submitted'
+    }
+  };
+}
+
+async function listCodSubmissions(_filters) {
+  return {
+    ok: true,
+    data: []
+  };
+}
+
+async function getCodSubmissionById(_codId) {
+  return {
+    ok: true,
+    data: null
+  };
+}
+
+async function resolveCod(_payload) {
+  return {
+    ok: true,
+    data: {
+      id: null,
+      codSubmissionId: null,
+      finalAgreedAmount: 0,
+      adjustment: 0,
+      debtAmount: 0,
+      resolutionNote: ''
+    }
+  };
+}
+
+async function listDebts(_filters) {
+  return {
+    ok: true,
+    data: []
+  };
+}
+
+async function getDebtById(_debtId) {
+  return {
+    ok: true,
+    data: null
+  };
+}
+
+async function submitDebtRepayment(_payload) {
+  return {
+    ok: true,
+    data: null
+  };
+}
+  
   function createLocalAdapter(options = {}) {
     const config = mergeConfig(options);
     const storageKey = config.storageKey || 'duces_enterprise_ledger_v1';
