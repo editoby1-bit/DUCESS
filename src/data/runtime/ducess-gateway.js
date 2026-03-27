@@ -222,6 +222,22 @@
     };
   }
 
+  async function getCodPreview(_payload) {
+  return {
+    ok: true,
+    data: {
+      openingBalance: 0,
+      floatTopUps: 0,
+      effectiveOpeningBalance: 0,
+      totalCredits: 0,
+      totalDebits: 0,
+      netBookBalance: 0,
+      remainingBalance: 0,
+      expectedCash: 0
+    }
+  };
+}
+
   function createLocalAdapter(options = {}) {
     const config = mergeConfig(options);
     const storageKey = config.storageKey || 'duces_enterprise_ledger_v1';
