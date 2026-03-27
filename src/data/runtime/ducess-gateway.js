@@ -712,6 +712,10 @@ async function submitDebtRepayment(_payload) {
         entityId: row.entity_id || row.entityId || '',
       };
     }
+    // PASTE THIS RIGHT HERE
+async function listTempGrants(_staffId) {
+  return defaultResult.ok([]);
+}
 
 
     function isoAtMidday(dateValue) {
