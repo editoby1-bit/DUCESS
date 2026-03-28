@@ -1035,7 +1035,10 @@ function subscribeRealtime() {
     }
 
     async function submitApprovalRequest(payload = {}) {
-      if (!canUseSupabase()) return local.approvals.submitApprovalRequest(payload);
+      // FORCE Supabase (temporary debug override)
+if (!canUseSupabase()) {
+  console.warn("⚠️ Falling back to local, but forcing Supabase instead");
+}
       const insertPayload = {
         request_type: payload.requestType || payload.type || '',
         status: 'pending',
