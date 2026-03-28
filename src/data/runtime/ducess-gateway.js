@@ -1049,7 +1049,11 @@ if (!canUseSupabase()) {
         entity_type: payload.entityType || payload.entity_type || null,
         entity_id: payload.entityId || payload.entity_id || null,
       };
-      const { data, error: insertError } = await client.from(approvalRequestsTable).insert(insertPayload).select(approvalRequestsSelect).single();
+      const { data, error: insertError } = await client
+  .from(approvalRequestsTable)
+  .insert([insertPayload])
+  .select(approvalRequestsSelect)
+  .single();
       if (insertError) return defaultResult.err('APPROVAL_CREATE_FAILED', 'Could not create approval request in Supabase.', insertError);
       return defaultResult.ok(normalizeApprovalRecord(data));
     }
