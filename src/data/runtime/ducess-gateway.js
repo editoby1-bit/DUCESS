@@ -895,6 +895,68 @@ function subscribeRealtime() {
     async function performDirectPostingForApproval(requestRow, approver, decisionNote) {
       const type = requestRow?.request_type || requestRow?.type || '';
       const payload = requestRow?.payload || {};
+      if (type === 'account_opening') {
+  const existing = await client
+    .from(customersTable)
+    .select(customersSelect)
+    .eq('full_name', payload.fullName || payload.name || '')
+    .eq('phone', payload.phone || '')
+    .limit(1)
+    .maybeSingle();
+
+  if (existing.error) {
+    return defaultResult.err('CUSTOMER_LOOKUP_FAILED', 'Could not verify existing customer before posting approval.', existing.error);
+  }
+
+  if (existing.data) {
+    return defaultResult.ok({
+      posted: true,
+      requestType: type,
+      transactions: [],
+      cashLedger: null,
+      customer: existing.data,
+      decisionNote: decisionNote || '',
+      alreadyPosted: true
+    });
+  }
+
+  const customerRow = {
+    customer_number: null,
+    account_number: null,
+    old_account_number: payload.oldAccountNumber || payload.old_account_number || '',
+    full_name: payload.fullName || payload.name || '',
+    address: payload.address || '',
+    nin: payload.nin || '',
+    bvn: payload.bvn || '',
+    phone: payload.phone || '',
+    photo_path: payload.photo || payload.photo_path || '',
+    status: 'active',
+    linked_staff_id: requestRow.requested_by_staff_id || null,
+    account_type: 'customer',
+    created_at: new Date().toISOString(),
+    is_active: true
+  };
+
+  const inserted = await client
+    .from(customersTable)
+    .insert([customerRow])
+    .select(customersSelect)
+    .maybeSingle();
+
+  if (inserted.error) {
+    return defaultResult.err('CUSTOMER_CREATE_FAILED', 'Could not create customer from approved account opening.', inserted.error);
+  }
+
+  return defaultResult.ok({
+    posted: true,
+    requestType: type,
+    transactions: [],
+    cashLedger: null,
+    customer: inserted.data,
+    decisionNote: decisionNote || ''
+  });
+}
+
       const postable = ['customer_credit', 'customer_debit', 'customer_credit_journal', 'customer_debit_journal', 'float_topup', 'float_declaration', 'debt_repayment'];
       if (!postable.includes(type)) {
         return defaultResult.ok({ posted: false, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '' });
