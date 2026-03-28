@@ -1613,10 +1613,12 @@
       };
       if (!payload.name || !payload.address || !payload.phone || !payload.nin || !payload.bvn) return showToast('Complete all required fields');
       confirmAction('Submit account opening request?', () => {
-        createRequest('account_opening', payload);
-        render();
-        showToast('Account opening sent for approval');
-      });
+  submitApprovalThroughGateway('account_opening', payload).then((result) => {
+    if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+    render();
+    showToast('Account opening sent for approval');
+  });
+});
     };
   }
 
@@ -1665,28 +1667,38 @@
       showToast(prefix === 'reactivation' ? 'Account details are now editable' : 'You can now edit and save the account details');
     };
     byId(`${prefix}Submit`).onclick = () => {
-      const c = getSelectedCustomer() || getCustomerByAccountNo(byId(`${prefix}Acc`).value);
-      if (!c) return showToast('Search for an account first');
-      if (prefix === 'maintenance') {
-        createRequest('account_maintenance', {
-          customerId: c.id,
-          accountNumber: c.accountNumber,
-          patch: {
-            name: byId(`${prefix}Name`).value.trim(),
-            address: byId(`${prefix}Address`).value.trim(),
-            phone: byId(`${prefix}Phone`)?.value.trim() || c.phone,
-            nin: byId(`${prefix}Nin`)?.value.trim() || c.nin,
-            bvn: byId(`${prefix}Bvn`)?.value.trim() || c.bvn,
-            oldAccountNumber: byId(`${prefix}OldAccount`)?.value.trim() || (c.oldAccountNumber || '')
-          }
-        });
-        showToast('Maintenance request sent for approval');
-      } else {
-        createRequest('account_reactivation', { customerId: c.id, accountNumber: c.accountNumber });
-        showToast('Reactivation request sent for approval');
+  const c = getSelectedCustomer() || getCustomerByAccountNo(byId(`${prefix}Acc`).value);
+  if (!c) return showToast('Search for an account first');
+
+  if (prefix === 'maintenance') {
+    const payload = {
+      customerId: c.id,
+      accountNumber: c.accountNumber,
+      patch: {
+        name: byId(`${prefix}Name`).value.trim(),
+        address: byId(`${prefix}Address`).value.trim(),
+        phone: byId(`${prefix}Phone`)?.value.trim() || c.phone,
+        nin: byId(`${prefix}Nin`)?.value.trim() || c.nin,
+        bvn: byId(`${prefix}Bvn`)?.value.trim() || c.bvn,
+        oldAccountNumber: byId(`${prefix}OldAccount`)?.value.trim() || (c.oldAccountNumber || '')
       }
-      render();
     };
+
+    submitApprovalThroughGateway('account_maintenance', payload).then((result) => {
+      if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+      render();
+      showToast('Maintenance request sent for approval');
+    });
+  } else {
+    const payload = { customerId: c.id, accountNumber: c.accountNumber };
+
+    submitApprovalThroughGateway('account_reactivation', payload).then((result) => {
+      if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+      render();
+      showToast('Reactivation request sent for approval');
+    });
+  }
+};
   }
 
   function bindStatement() {
