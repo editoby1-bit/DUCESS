@@ -1035,6 +1035,7 @@ function subscribeRealtime() {
     }
 
     async function submitApprovalRequest(payload = {}) {
+      console.log("submitApprovalRequest HIT", payload);
       // FORCE Supabase (temporary debug override)
 if (!canUseSupabase()) {
   console.warn("⚠️ Falling back to local, but forcing Supabase instead");
@@ -1124,6 +1125,7 @@ if (!canUseSupabase()) {
     }
 
     async function submitAccountOpening(payload = {}) {
+      console.log("submitAccountOpening HIT", payload);
       return submitApprovalRequest({
         requestType: 'account_opening',
         requestedByStaffId: payload.openedByStaffId || payload.requestedByStaffId || '',
