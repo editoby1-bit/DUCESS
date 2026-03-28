@@ -1904,11 +1904,9 @@ if (!canUseSupabase()) {
     };
   }
   function createGateway(options = {}) {
-    const config = mergeConfig(options);
-    const adapter = config.useSupabaseBackend || config.activeAdapter === 'supabase' ? 'supabase' : 'local';
-    if (adapter === 'supabase') return createSupabaseAdapter(config);
-    return createLocalAdapter(config);
-  }
+  const config = mergeConfig(options);
+  return createSupabaseAdapter(config);
+}
 
   global.DucessGateway = {
     createGateway,
