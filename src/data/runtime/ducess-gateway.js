@@ -1,4 +1,5 @@
 (function (global) {
+  console.log("DUCESS GATEWAY LOADED", Date.now());
   const defaultResult = {
     ok(data) { return { ok: true, data }; },
     err(code, message, details) { return { ok: false, error: { code, message, details } }; }
