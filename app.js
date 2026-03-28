@@ -462,7 +462,9 @@
     return state.customers.filter(c => c.name.toLowerCase().includes(q) || c.accountNumber.includes(q));
   }
 
-  function isSupabaseApprovalMode() { return gateway?.__meta?.adapter === 'supabase' && gateway?.approvals; }
+  function isSupabaseApprovalMode() {
+  return true;
+}
 
   async function syncApprovalsFromGateway(filters = {}) {
     if (!isSupabaseApprovalMode() || !gateway.approvals?.listApprovalRequests) return defaultResultOk(state.approvals || []);
