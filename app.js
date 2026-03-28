@@ -651,9 +651,16 @@
   }
 
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
+    console.log("submitApprovalThroughGateway HIT", { type, payload, meta });
+
     if (!isSupabaseApprovalMode()) return defaultResultOk(createRequest(type, payload, meta));
     const staff = currentStaff();
     let result;
+    console.log("ACCOUNT OPENING BRANCH CHECK", {
+  type,
+  hasGatewayCustomers: !!gateway.customers,
+  hasSubmitAccountOpening: !!gateway.customers?.submitAccountOpening
+});
     if (type === 'account_opening' && gateway.customers?.submitAccountOpening) {
       result = await gateway.customers.submitAccountOpening({
         fullName: payload.name, phone: payload.phone, address: payload.address, nin: payload.nin, bvn: payload.bvn, photoRef: payload.photo || null, openedByStaffId: staff?.id || '', requestedByName: staff?.name || 'System'
