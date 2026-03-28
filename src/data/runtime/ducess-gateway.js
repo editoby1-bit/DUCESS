@@ -1036,29 +1036,37 @@ function subscribeRealtime() {
     }
 
     async function submitApprovalRequest(payload = {}) {
-      console.log("submitApprovalRequest HIT", payload);
-      // FORCE Supabase (temporary debug override)
-if (!canUseSupabase()) {
-  console.warn("⚠️ Falling back to local, but forcing Supabase instead");
+  console.log("submitApprovalRequest HIT", payload);
+  // FORCE Supabase (temporary debug override)
+  if (!canUseSupabase()) {
+    console.warn("⚠️ Falling back to local, but forcing Supabase instead");
+  }
+
+  const insertPayload = {
+    request_type: payload.requestType || payload.type || '',
+    status: 'pending',
+    payload: clone(payload.payload || {}),
+    requested_by_staff_id: payload.requestedByStaffId || payload.requested_by_staff_id || '',
+    requested_by_name: payload.requestedByName || payload.requested_by_name || '',
+    requested_at: new Date().toISOString(),
+    entity_type: payload.entityType || payload.entity_type || null,
+    entity_id: payload.entityId || payload.entity_id || null,
+  };
+
+  console.log("APPROVAL INSERT PAYLOAD", insertPayload);
+  console.log("APPROVAL TABLE", approvalRequestsTable);
+
+  const { data, error: insertError } = await client
+    .from(approvalRequestsTable)
+    .insert([insertPayload])
+    .select(approvalRequestsSelect)
+    .single();
+
+  console.log("APPROVAL INSERT RESULT", { data, insertError });
+
+  if (insertError) return defaultResult.err('APPROVAL_CREATE_FAILED', 'Could not create approval request in Supabase.', insertError);
+  return defaultResult.ok(normalizeApprovalRecord(data));
 }
-      const insertPayload = {
-        request_type: payload.requestType || payload.type || '',
-        status: 'pending',
-        payload: clone(payload.payload || {}),
-        requested_by_staff_id: payload.requestedByStaffId || payload.requested_by_staff_id || '',
-        requested_by_name: payload.requestedByName || payload.requested_by_name || '',
-        requested_at: new Date().toISOString(),
-        entity_type: payload.entityType || payload.entity_type || null,
-        entity_id: payload.entityId || payload.entity_id || null,
-      };
-      const { data, error: insertError } = await client
-  .from(approvalRequestsTable)
-  .insert([insertPayload])
-  .select(approvalRequestsSelect)
-  .single();
-      if (insertError) return defaultResult.err('APPROVAL_CREATE_FAILED', 'Could not create approval request in Supabase.', insertError);
-      return defaultResult.ok(normalizeApprovalRecord(data));
-    }
 
     async function approveRequest(payload = {}) {
       if (!canUseSupabase()) return local.approvals.approveRequest(payload);
