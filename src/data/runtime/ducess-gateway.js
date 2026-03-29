@@ -897,58 +897,72 @@ function subscribeRealtime() {
   const payload = requestRow?.payload || {};
 
   if (type === 'account_opening') {
-    const existing = await client
-      .from(customersTable)
-      .select(customersSelect)
-      .eq('full_name', payload.fullName || payload.name || '')
-      .eq('phone', payload.phone || '')
-      .limit(1)
-      .maybeSingle();
+  const customerSelectSafe = 'id, account_number, full_name, phone, status, created_at';
 
-    if (existing.error) {
-      return defaultResult.err('CUSTOMER_LOOKUP_FAILED', 'Could not verify existing customer before posting approval.', existing.error);
-    }
+  const fullName = payload.fullName || payload.name || '';
+  const phone = payload.phone || '';
 
-    if (existing.data) {
-      return defaultResult.ok({
-        posted: true,
-        requestType: type,
-        transactions: [],
-        cashLedger: null,
-        customer: existing.data,
-        decisionNote: decisionNote || '',
-        alreadyPosted: true
-      });
-    }
+  const existing = await client
+    .from(customersTable)
+    .select(customerSelectSafe)
+    .eq('full_name', fullName)
+    .eq('phone', phone)
+    .limit(1)
+    .maybeSingle();
 
-    const customerRow = {
-  full_name: payload.fullName || payload.name || '',
-  address: payload.address || '',
-  nin: payload.nin || '',
-  bvn: payload.bvn || '',
-  phone: payload.phone || '',
-  created_at: new Date().toISOString()
-};
+  if (existing.error) {
+    return defaultResult.err(
+      'CUSTOMER_LOOKUP_FAILED',
+      'Could not verify existing customer before posting approval.',
+      existing.error
+    );
+  }
 
-    const inserted = await client
-      .from(customersTable)
-      .insert([customerRow])
-      .select(customersSelect)
-      .maybeSingle();
-
-    if (inserted.error) {
-      return defaultResult.err('CUSTOMER_CREATE_FAILED', 'Could not create customer from approved account opening.', inserted.error);
-    }
-
+  if (existing.data) {
     return defaultResult.ok({
       posted: true,
       requestType: type,
       transactions: [],
       cashLedger: null,
-      customer: inserted.data,
-      decisionNote: decisionNote || ''
+      customer: existing.data,
+      decisionNote: decisionNote || '',
+      alreadyPosted: true
     });
   }
+
+  const generatedAccountNumber = String(Date.now()).slice(-10);
+
+  const customerRow = {
+    account_number: generatedAccountNumber,
+    full_name: fullName,
+    phone: phone,
+    status: 'active',
+    created_at: new Date().toISOString()
+  };
+
+  const inserted = await client
+    .from(customersTable)
+    .insert([customerRow])
+    .select(customerSelectSafe)
+    .maybeSingle();
+
+  if (inserted.error) {
+    return defaultResult.err(
+      'CUSTOMER_CREATE_FAILED',
+      'Could not create customer from approved account opening.',
+      inserted.error
+    );
+  }
+
+  return defaultResult.ok({
+    posted: true,
+    requestType: type,
+    transactions: [],
+    cashLedger: null,
+    customer: inserted.data,
+    decisionNote: decisionNote || ''
+  });
+}
 
       const postable = ['customer_credit', 'customer_debit', 'customer_credit_journal', 'customer_debit_journal', 'float_topup', 'float_declaration', 'debt_repayment'];
       if (!postable.includes(type)) {
