@@ -922,21 +922,13 @@ function subscribeRealtime() {
     }
 
     const customerRow = {
-      customer_number: null,
-      account_number: null,
-      old_account_number: payload.oldAccountNumber || payload.old_account_number || '',
-      full_name: payload.fullName || payload.name || '',
-      address: payload.address || '',
-      nin: payload.nin || '',
-      bvn: payload.bvn || '',
-      phone: payload.phone || '',
-      photo_path: payload.photo || payload.photo_path || '',
-      status: 'active',
-      linked_staff_id: requestRow.requested_by_staff_id || null,
-      account_type: 'customer',
-      created_at: new Date().toISOString(),
-      is_active: true
-    };
+  full_name: payload.fullName || payload.name || '',
+  address: payload.address || '',
+  nin: payload.nin || '',
+  bvn: payload.bvn || '',
+  phone: payload.phone || '',
+  created_at: new Date().toISOString()
+};
 
     const inserted = await client
       .from(customersTable)
