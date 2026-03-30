@@ -1281,14 +1281,26 @@
     return `${name} • ${roleLabel || 'Staff'}`;
   }
   function approvalDetails(a) {
-    const p = a.payload || {};
-    if (a.type === 'customer_credit') return `${money(p.amount)} to ${customerName(p.customerId) || p.accountNumber}${p.details ? ' • ' + p.details : ''}`;
-    if (a.type === 'customer_debit') return `${money(p.amount)} from ${customerName(p.customerId) || p.accountNumber}${p.details ? ' • ' + p.details : ''}`;
-    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') { const rows = p.rows || p.entries || []; const total = rows.reduce((s,r)=>s+Number(r.amount||0),0); const attachmentTag = p.fieldNote ? ' • Note attached' : ''; return `${rows.length} item${rows.length===1?'':'s'} • Total ${money(total)}${attachmentTag}`; }
-    if (a.type === 'wallet_fund') return `${staffName(p.staffId)} • Wallet fund • ${money(p.amount)}`;
-    if (a.type === 'debt_repayment') return `${staffName(p.staffId)} • Debt repayment • ${money(p.amount)}`;
-    return requestSummary(a);
+  const p = a.payload || {};
+
+  if (a.type === 'account_opening') {
+    return [
+      p.fullName || p.name || '',
+      p.phone ? `Phone ${p.phone}` : '',
+      p.nin ? `NIN ${p.nin}` : '',
+      p.bvn ? `BVN ${p.bvn}` : '',
+      p.oldAccountNumber ? `Old ${p.oldAccountNumber}` : ''
+    ].filter(Boolean).join(' • ');
   }
+
+  if (a.type === 'customer_credit') return `${money(p.amount)} to ${customerName(p.customerId) || p.accountNumber}${p.details ? ' • ' + p.details : ''}`;
+  if (a.type === 'customer_debit') return `${money(p.amount)} from ${customerName(p.customerId) || p.accountNumber}${p.details ? ' • ' + p.details : ''}`;
+  if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') { const rows = p.rows || p.entries || []; const total = rows.reduce((s,r)=>s+Number(r.amount||0),0); const attachmentTag = p.fieldNote ? ' • Note attached' : ''; return `${rows.length} item${rows.length===1?'':'s'} • Total ${money(total)}${attachmentTag}`; }
+  if (a.type === 'wallet_fund') return `${staffName(p.staffId)} • Wallet fund • ${money(p.amount)}`;
+  if (a.type === 'debt_repayment') return `${staffName(p.staffId)} • Debt repayment • ${money(p.amount)}`;
+
+  return requestSummary(a);
+}
 
   function prettyApprovalType(type) {
     return {
@@ -1341,7 +1353,7 @@
     const photoBlock = `<div class="approval-photo-stack"><button type="button" class="secondary" id="approvalPhotoToggle">Display Picture</button><div class="approval-photo-panel hidden" id="approvalPhotoPanel"><div class="photo-box approval-photo-box">${photoSrc ? `<img src="${photoSrc}" alt="customer photo">` : '<span>No Photo</span>'}</div></div></div>`;
     let html = '';
     if (req.type === 'account_opening') {
-      html = `<div class="stack"><div class="form-grid two modal-cs-grid">${field('Name', p.name, 'field-wide')}${field('Phone', p.phone, 'field-phone')}${field('Address', p.address, 'field-wide')}${field('NIN', p.nin, 'field-id')}${field('BVN', p.bvn, 'field-bvn')}${field('Generated Account', p.generatedAccountNumber || 'Auto-generate on approval', 'field-account')}</div>${photoBlock}</div>`;
+      html = `<div class="stack"><div class="form-grid two modal-cs-grid">${field('Name', p.fullName || p.name || '', 'field-wide')}${field('Phone', p.phone, 'field-phone')}${field('Address', p.address, 'field-wide')}${field('NIN', p.nin, 'field-id')}${field('BVN', p.bvn, 'field-bvn')}${field('Generated Account', p.generatedAccountNumber || 'Auto-generate on approval', 'field-account')}</div>${photoBlock}</div>`;
     } else if (req.type === 'account_maintenance') {
       const patch = p.patch || {};
       html = `<div class="stack"><div class="form-grid two modal-cs-grid">${field('Customer Name', customer?.name || patch.name, 'field-wide')}${field('Account Number', p.accountNumber, 'field-account')}${field('Current Status', customerStatusLabel(customer), 'field-status')}${field('Old Account Number', patch.oldAccountNumber, 'field-account')}${field('Updated Name', patch.name, 'field-wide')}${field('Updated Phone', patch.phone, 'field-phone')}${field('Updated Address', patch.address, 'field-wide')}${field('Updated NIN', patch.nin, 'field-id')}${field('Updated BVN', patch.bvn, 'field-bvn')}</div>${photoBlock}</div>`;
