@@ -633,36 +633,16 @@
   if (!approvalRecord?.type) return defaultResultOk(null);
 
   if (approvalRecord.type === 'account_opening') {
-    return syncCustomersListFromGateway();
-  }
+    const res = await client
+      .from(customersTable)
+      .select(customersSelect)
+      .order('created_at', { ascending: false });
 
-  if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
-    return syncCustomerFromGateway({
-      customerId: approvalRecord.payload?.customerId,
-      accountNumber: approvalRecord.payload?.accountNumber
-    });
-  }
-
-  if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
-    const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
-    for (const row of rows) {
-      await syncCustomerFromGateway({
-        customerId: row.customerId,
-        accountNumber: row.accountNumber
-      });
+    if (!res.error && Array.isArray(res.data)) {
+      state.customers = res.data.map(normalizeCustomerRecord);
     }
+
     return defaultResultOk(true);
-  }
-
-  if (approvalRecord.type === 'float_topup' || approvalRecord.type === 'float_declaration') {
-    return syncCodFromGateway({
-      staffId: approvalRecord.payload?.staffId,
-      businessDate: approvalRecord.payload?.date
-    });
-  }
-
-  if (approvalRecord.type === 'debt_repayment') {
-    return syncDebtBalancesFromGateway();
   }
 
   return defaultResultOk(null);
@@ -1979,17 +1959,59 @@
   function freezeInactiveCustomer(c){ if(!c) return; if(c.active === false) c.frozen = true; }
 
   function openCustomerSearchModal(list) {
-    const renderRows = arr => arr.map(c=>`<tr><td>${c.accountNumber}</td><td>${c.name}</td><td>${c.phone}</td><td><span class="linklike" data-pick="${c.id}">Select</span></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th></th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
-    const bindPicks = () => qq('[data-pick]').forEach(el => el.onclick = () => { state.ui.selectedCustomerId = el.dataset.pick; save(); closeModal(); applySelectedCustomerToActiveTool(); });
+  const source = [
+    ...(Array.isArray(list) ? list : []),
+    ...(Array.isArray(state.customers) ? state.customers : [])
+  ];
+
+  const seen = new Set();
+  const merged = source.filter(c => {
+    const key = String(
+      c.id ||
+      c.accountNumber ||
+      c.account_number ||
+      `${c.name || c.full_name || ''}|${c.phone || ''}`
+    );
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const renderRows = arr => arr.map(c => {
+    const accountNumber = c.accountNumber || c.account_number || '';
+    const name = c.name || c.full_name || '';
+    const phone = c.phone || '';
+    const id = c.id || '';
+    return `<tr><td>${accountNumber}</td><td>${name}</td><td>${phone}</td><td><span class="linklike" data-pick="${id}">Select</span></td></tr>`;
+  }).join('');
+
+  openModal(
+    'Customer Search',
+    `<div class="stack"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th></th></tr></thead><tbody id="modalCustomerRows">${renderRows(merged)}</tbody></table></div></div>`,
+    [{ label:'Close', className:'secondary', onClick: closeModal }]
+  );
+
+  const bindPicks = () => qq('[data-pick]').forEach(el => el.onclick = () => {
+    state.ui.selectedCustomerId = el.dataset.pick;
+    save();
+    closeModal();
+    applySelectedCustomerToActiveTool();
+  });
+
+  bindPicks();
+
+  const search = byId('modalCustomerSearch');
+  if (search) search.oninput = () => {
+    const qv = search.value.trim().toLowerCase();
+    const filtered = !qv ? merged : merged.filter(c => {
+      const accountNumber = String(c.accountNumber || c.account_number || '');
+      const name = String(c.name || c.full_name || '').toLowerCase();
+      return accountNumber.includes(qv) || name.includes(qv);
+    });
+    byId('modalCustomerRows').innerHTML = renderRows(filtered);
     bindPicks();
-    const search = byId('modalCustomerSearch');
-    if (search) search.oninput = () => {
-      const qv = search.value.trim().toLowerCase();
-      const filtered = !qv ? list : list.filter(c => String(c.accountNumber).includes(qv) || c.name.toLowerCase().includes(qv));
-      byId('modalCustomerRows').innerHTML = renderRows(filtered); bindPicks();
-    };
-  }
+  };
+}
 
   async function toBase64(file) {
     if (!file) return '';
