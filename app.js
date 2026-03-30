@@ -630,25 +630,44 @@
   }
 
   async function syncApprovalEffectsFromGateway(approvalRecord) {
-    if (!approvalRecord?.type) return defaultResultOk(null);
-    if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
-      return syncCustomerFromGateway({ customerId: approvalRecord.payload?.customerId, accountNumber: approvalRecord.payload?.accountNumber });
-    }
-    if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
-      const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
-      for (const row of rows) {
-        await syncCustomerFromGateway({ customerId: row.customerId, accountNumber: row.accountNumber });
-      }
-      return defaultResultOk(true);
-    }
-    if (approvalRecord.type === 'float_topup' || approvalRecord.type === 'float_declaration') {
-      return syncCodFromGateway({ staffId: approvalRecord.payload?.staffId, businessDate: approvalRecord.payload?.date });
-    }
-    if (approvalRecord.type === 'debt_repayment') {
-      return syncDebtBalancesFromGateway();
-    }
-    return defaultResultOk(null);
+  if (!approvalRecord?.type) return defaultResultOk(null);
+
+  if (approvalRecord.type === 'account_opening') {
+    return syncCustomersListFromGateway();
   }
+
+  if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
+    return syncCustomerFromGateway({
+      customerId: approvalRecord.payload?.customerId,
+      accountNumber: approvalRecord.payload?.accountNumber
+    });
+  }
+
+  if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
+    const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
+    for (const row of rows) {
+      await syncCustomerFromGateway({
+        customerId: row.customerId,
+        accountNumber: row.accountNumber
+      });
+    }
+    return defaultResultOk(true);
+  }
+
+  if (approvalRecord.type === 'float_topup' || approvalRecord.type === 'float_declaration') {
+    return syncCodFromGateway({
+      staffId: approvalRecord.payload?.staffId,
+      businessDate: approvalRecord.payload?.date
+    });
+  }
+
+  if (approvalRecord.type === 'debt_repayment') {
+    return syncDebtBalancesFromGateway();
+  }
+
+  return defaultResultOk(null);
+}
+
 
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
     console.log("submitApprovalThroughGateway HIT", { type, payload, meta });
