@@ -633,21 +633,36 @@
   if (!approvalRecord?.type) return defaultResultOk(null);
 
   if (approvalRecord.type === 'account_opening') {
-    const cfg = window.__DUCESS_CONFIG__?.supabase || {};
-    const customersTable = cfg.customersTable || 'customers';
-    const customersSelect = cfg.customersSelect || 'id, customer_number, account_number, old_account_number, full_name, address, nin, bvn, phone, photo_path, status, linked_staff_id, account_type, created_at, is_active';
+    return syncCustomersListFromGateway();
+  }
 
-    const res = await gateway.client
-      .from(customersTable)
-      .select(customersSelect)
-      .order('created_at', { ascending: false });
+  if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
+    return syncCustomerFromGateway({
+      customerId: approvalRecord.payload?.customerId,
+      accountNumber: approvalRecord.payload?.accountNumber
+    });
+  }
 
-    if (!res.error && Array.isArray(res.data)) {
-      state.customers = res.data.map(normalizeCustomerRecord);
-      save();
+  if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
+    const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
+    for (const row of rows) {
+      await syncCustomerFromGateway({
+        customerId: row.customerId,
+        accountNumber: row.accountNumber
+      });
     }
-
     return defaultResultOk(true);
+  }
+
+  if (approvalRecord.type === 'float_topup' || approvalRecord.type === 'float_declaration') {
+    return syncCodFromGateway({
+      staffId: approvalRecord.payload?.staffId,
+      businessDate: approvalRecord.payload?.date
+    });
+  }
+
+  if (approvalRecord.type === 'debt_repayment') {
+    return syncDebtBalancesFromGateway();
   }
 
   return defaultResultOk(null);
