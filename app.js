@@ -633,13 +633,18 @@
   if (!approvalRecord?.type) return defaultResultOk(null);
 
   if (approvalRecord.type === 'account_opening') {
-    const res = await client
+    const cfg = window.__DUCESS_CONFIG__?.supabase || {};
+    const customersTable = cfg.customersTable || 'customers';
+    const customersSelect = cfg.customersSelect || 'id, customer_number, account_number, old_account_number, full_name, address, nin, bvn, phone, photo_path, status, linked_staff_id, account_type, created_at, is_active';
+
+    const res = await gateway.client
       .from(customersTable)
       .select(customersSelect)
       .order('created_at', { ascending: false });
 
     if (!res.error && Array.isArray(res.data)) {
       state.customers = res.data.map(normalizeCustomerRecord);
+      save();
     }
 
     return defaultResultOk(true);
