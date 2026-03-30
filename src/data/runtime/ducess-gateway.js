@@ -897,14 +897,12 @@ function subscribeRealtime() {
   const payload = requestRow?.payload || {};
 
   if (type === 'account_opening') {
-  const customerSelectSafe = 'id, account_number, full_name, phone, status, created_at';
-
   const fullName = payload.fullName || payload.name || '';
   const phone = payload.phone || '';
 
   const existing = await client
     .from(customersTable)
-    .select(customerSelectSafe)
+    .select(customersSelect)
     .eq('full_name', fullName)
     .eq('phone', phone)
     .limit(1)
@@ -930,20 +928,31 @@ function subscribeRealtime() {
     });
   }
 
-  const generatedAccountNumber = String(Date.now()).slice(-10);
+  const generatedAccountNumber =
+    payload.generatedAccountNumber ||
+    String(Date.now()).slice(-10);
 
   const customerRow = {
+    customer_number: null,
     account_number: generatedAccountNumber,
+    old_account_number: payload.oldAccountNumber || payload.old_account_number || '',
     full_name: fullName,
+    address: payload.address || '',
+    nin: payload.nin || '',
+    bvn: payload.bvn || '',
     phone: phone,
+    photo_path: payload.photo || payload.photoRef || payload.photo_path || '',
     status: 'active',
-    created_at: new Date().toISOString()
+    linked_staff_id: requestRow.requested_by_staff_id || null,
+    account_type: 'customer',
+    created_at: new Date().toISOString(),
+    is_active: true
   };
 
   const inserted = await client
     .from(customersTable)
     .insert([customerRow])
-    .select(customerSelectSafe)
+    .select(customersSelect)
     .maybeSingle();
 
   if (inserted.error) {
@@ -963,6 +972,7 @@ function subscribeRealtime() {
     decisionNote: decisionNote || ''
   });
 }
+
 
       const postable = ['customer_credit', 'customer_debit', 'customer_credit_journal', 'customer_debit_journal', 'float_topup', 'float_declaration', 'debt_repayment'];
       if (!postable.includes(type)) {
