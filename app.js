@@ -725,17 +725,28 @@
   }
 
   async function approveRequestRemote(id) {
-    if (!isSupabaseApprovalMode()) { approveRequest(id); return defaultResultOk(true); }
-    const staff = currentStaff();
-    const result = await gateway.approvals.approveRequest({ requestId: id, approvedByStaffId: staff?.id || '', approvedByName: staff?.name || 'System' });
-    if (result?.ok) {
-      await syncApprovalsFromGateway();
-      await syncApprovalEffectsFromGateway(result.data);
-      pushAudit('request_approved', `${result.data?.type || 'request'} approved`);
-      render();
-    }
-    return result;
+  if (!isSupabaseApprovalMode()) {
+    approveRequest(id);
+    return defaultResultOk(true);
   }
+
+  const staff = currentStaff();
+  const result = await gateway.approvals.approveRequest({
+    requestId: id,
+    approvedByStaffId: staff?.id || '',
+    approvedByName: staff?.name || 'System'
+  });
+
+  if (result?.ok) {
+    await syncApprovalsFromGateway();
+    await syncApprovalEffectsFromGateway(result.data);
+    await loadCustomersFromBackend?.();
+    pushAudit('request_approved', `${result.data?.type || 'request'} approved`);
+    render();
+  }
+
+  return result;
+}
 
   async function rejectRequestRemote(id) {
     if (!isSupabaseApprovalMode()) { rejectRequest(id); return defaultResultOk(true); }

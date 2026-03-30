@@ -1186,32 +1186,6 @@ function subscribeRealtime() {
       const approvalResult = await markApprovalDecision(payload.requestId, 'approved', approver, decisionNote, postingMeta);
       if (!approvalResult.ok) return approvalResult;
 
-      if ((requestRow.request_type || '') === 'account_opening') {
-  const fullName = requestRow?.payload?.fullName || requestRow?.payload?.name || '';
-  const phone = requestRow?.payload?.phone || '';
-
-  const freshCustomer = await client
-    .from(customersTable)
-    .select(customersSelect)
-    .eq('full_name', fullName)
-    .eq('phone', phone)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!freshCustomer.error && freshCustomer.data) {
-    const normalized = normalizeCustomerRecord(freshCustomer.data);
-    const existingIndex = (state.customers || []).findIndex(c => String(c.id) === String(normalized.id));
-    if (existingIndex >= 0) {
-      state.customers[existingIndex] = normalized;
-    } else {
-      state.customers = [normalized, ...(state.customers || [])];
-    }
-    save();
-    render();
-  }
-}
-
 
       const auditResult = await insertAuditLogEntry({
         actorStaffId: approver.staffId,
