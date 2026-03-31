@@ -760,7 +760,6 @@
   if (result?.ok) {
     await syncApprovalsFromGateway();
     await syncApprovalEffectsFromGateway(result.data);
-    await loadCustomersFromBackend?.();
     pushAudit('request_approved', `${result.data?.type || 'request'} approved`);
     render();
   }
