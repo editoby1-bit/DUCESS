@@ -732,25 +732,43 @@
   }
 
   async function syncApprovalEffectsFromGateway(approvalRecord) {
-    if (!approvalRecord?.type) return defaultResultOk(null);
-    if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
-      return syncCustomerFromGateway({ customerId: approvalRecord.payload?.customerId, accountNumber: approvalRecord.payload?.accountNumber });
-    }
-    if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
-      const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
-      for (const row of rows) {
-        await syncCustomerFromGateway({ customerId: row.customerId, accountNumber: row.accountNumber });
-      }
-      return defaultResultOk(true);
-    }
-    if (approvalRecord.type === 'float_topup' || approvalRecord.type === 'float_declaration') {
-      return syncCodFromGateway({ staffId: approvalRecord.payload?.staffId, businessDate: approvalRecord.payload?.date });
-    }
-    if (approvalRecord.type === 'debt_repayment') {
-      return syncDebtBalancesFromGateway();
-    }
-    return defaultResultOk(null);
+  if (!approvalRecord?.type) return defaultResultOk(null);
+
+  if (approvalRecord.type === 'account_opening') {
+    return syncCustomersListFromGateway();
   }
+
+  if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
+    return syncCustomerFromGateway({
+      customerId: approvalRecord.payload?.customerId,
+      accountNumber: approvalRecord.payload?.accountNumber
+    });
+  }
+
+  if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
+    const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
+    for (const row of rows) {
+      await syncCustomerFromGateway({
+        customerId: row.customerId,
+        accountNumber: row.accountNumber
+      });
+    }
+    return defaultResultOk(true);
+  }
+
+  if (approvalRecord.type === 'float_topup' || approvalRecord.type === 'float_declaration') {
+    return syncCodFromGateway({
+      staffId: approvalRecord.payload?.staffId,
+      businessDate: approvalRecord.payload?.date
+    });
+  }
+
+  if (approvalRecord.type === 'debt_repayment') {
+    return syncDebtBalancesFromGateway();
+  }
+
+  return defaultResultOk(null);
+}
 
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
     if (!isSupabaseApprovalMode()) return defaultResultOk(createRequest(type, payload, meta));
@@ -2192,11 +2210,12 @@ function renderTellerBalances() {
         photo: byId('openPhoto').dataset.base64 || ''
       };
       if (!payload.name || !payload.address || !payload.phone || !payload.nin || !payload.bvn) return showToast('Complete all required fields');
-      confirmAction('Submit account opening request?', () => {
-        createRequest('account_opening', payload);
-        render();
-        showToast('Account opening sent for approval');
-      });
+      confirmAction('Submit account opening request?', async () => {
+  const result = await submitApprovalThroughGateway('account_opening', payload);
+  if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+  render();
+  showToast('Account opening sent for approval');
+});
     };
   }
 
@@ -2279,29 +2298,41 @@ function renderTellerBalances() {
       setDetailsEditable(true);
       showToast(prefix === 'reactivation' ? 'Account details are now editable' : 'You can now edit and save the account details');
     };
-    byId(`${prefix}Submit`).onclick = () => {
-      const c = getSelectedCustomer() || getCustomerByAccountNo(byId(`${prefix}Acc`).value);
-      if (!c) return showToast('Search for an account first');
-      if (prefix === 'maintenance') {
-        createRequest('account_maintenance', {
-          customerId: c.id,
-          accountNumber: c.accountNumber,
-          patch: {
-            name: byId(`${prefix}Name`).value.trim(),
-            address: byId(`${prefix}Address`).value.trim(),
-            phone: byId(`${prefix}Phone`)?.value.trim() || c.phone,
-            nin: byId(`${prefix}Nin`)?.value.trim() || c.nin,
-            bvn: byId(`${prefix}Bvn`)?.value.trim() || c.bvn,
-            oldAccountNumber: byId(`${prefix}OldAccount`)?.value.trim() || (c.oldAccountNumber || '')
-          }
-        });
-        showToast('Maintenance request sent for approval');
-      } else {
-        createRequest('account_reactivation', { customerId: c.id, accountNumber: c.accountNumber });
-        showToast('Reactivation request sent for approval');
+    byId(`${prefix}Submit`).onclick = async () => {
+  const c = getSelectedCustomer() || getCustomerByAccountNo(byId(`${prefix}Acc`).value);
+  if (!c) return showToast('Search for an account first');
+
+  let result;
+
+  if (prefix === 'maintenance') {
+    result = await submitApprovalThroughGateway('account_maintenance', {
+      customerId: c.id,
+      accountNumber: c.accountNumber,
+      patch: {
+        name: byId(`${prefix}Name`).value.trim(),
+        address: byId(`${prefix}Address`).value.trim(),
+        phone: byId(`${prefix}Phone`)?.value.trim() || c.phone,
+        nin: byId(`${prefix}Nin`)?.value.trim() || c.nin,
+        bvn: byId(`${prefix}Bvn`)?.value.trim() || c.bvn,
+        oldAccountNumber: byId(`${prefix}OldAccount`)?.value.trim() || (c.oldAccountNumber || '')
       }
-      render();
-    };
+    });
+
+    if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+    showToast('Maintenance request sent for approval');
+  } else {
+    result = await submitApprovalThroughGateway('account_reactivation', {
+      customerId: c.id,
+      accountNumber: c.accountNumber
+    });
+
+    if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+    showToast('Reactivation request sent for approval');
+  }
+
+  render();
+};
+
     const selected = getSelectedCustomer();
     if (selected) {
       const matchesTool = (accInput?.value || '').trim() ? (selected.accountNumber === (accInput?.value || '').trim()) : true;
