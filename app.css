@@ -10243,9 +10243,9 @@ body.home-lock-scroll .shell{
   }
   .approval-assign-input,
   #approvalAssignAccount{
-    width:6.2ch !important;
-    min-width:6.2ch !important;
-    max-width:6.2ch !important;
+    width:7.2ch !important;
+    min-width:7.2ch !important;
+    max-width:7.2ch !important;
     text-align:center !important;
     padding-left:8px !important;
     padding-right:8px !important;
@@ -10350,8 +10350,8 @@ body.home-lock-scroll .shell{
     width:100% !important;
   }
   .approval-opening-linear .approval-assign-field{
-    max-width:6.2ch !important;
-    width:6.2ch !important;
+    max-width:7.2ch !important;
+    width:7.2ch !important;
   }
   .approval-opening-linear .approval-assign-field label{
     display:block !important;
@@ -10359,9 +10359,9 @@ body.home-lock-scroll .shell{
   }
   .approval-assign-input,
   #approvalAssignAccount{
-    width:6.2ch !important;
-    min-width:6.2ch !important;
-    max-width:6.2ch !important;
+    width:7.2ch !important;
+    min-width:7.2ch !important;
+    max-width:7.2ch !important;
     padding:8px 10px !important;
     text-align:center !important;
     box-sizing:border-box !important;
@@ -10476,9 +10476,9 @@ body.home-lock-scroll .shell{
     box-sizing:border-box !important;
   }
   .approval-opening-linear .approval-assign-field{
-    width:6.2ch !important;
-    max-width:6.2ch !important;
-    min-width:6.2ch !important;
+    width:7.2ch !important;
+    max-width:7.2ch !important;
+    min-width:7.2ch !important;
   }
   .approval-opening-linear .approval-assign-field label{
     white-space:nowrap !important;
@@ -10486,9 +10486,9 @@ body.home-lock-scroll .shell{
   }
   .approval-assign-input,
   #approvalAssignAccount{
-    width:6.2ch !important;
-    min-width:6.2ch !important;
-    max-width:6.2ch !important;
+    width:7.2ch !important;
+    min-width:7.2ch !important;
+    max-width:7.2ch !important;
     padding:7px 6px !important;
     text-align:center !important;
     box-sizing:border-box !important;

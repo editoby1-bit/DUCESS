@@ -1597,7 +1597,7 @@
     let html = '';
     if (req.type === 'account_opening') {
       const assignBlock = req.status === 'pending'
-        ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}"></div>`
+        ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off"></div>`
         : '';
       html = `<div class="stack approval-opening-linear">
         ${field('Name', p.name, 'field-wide')}
