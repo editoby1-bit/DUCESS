@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Duces Enterprise Ledger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <div class="logo"><img src="logo.png" style="width:70%;height:70%;object-fit:contain;border-radius:50%;"></div>
+        <div>
+          <div class="eyebrow">Duces Enterprise</div>
+        </div>
+      </div>
+      <h1 class="dashboard-title">DASHBOARD</h1>
+      <div class="top-actions">
+        <label class="inline-field compact">
+          <span>Role / Staff</span>
+          <select id="staffSelect"></select>
+        </label>
+        <button class="ghost-btn" id="btnTodayFloat">Opening Balance</button>
+        <button class="ghost-btn" id="btnCOD">Close of Day</button>
+        <button class="ghost-btn" id="btnAudit">Audit Trail</button>
+<button id="btnThemeCycle" class="ghost-btn theme-cycle-btn">Theme: Classic</button>
+      </div>
+    </header>
+
+    <section class="hero-card hidden">
+      <div>
+        <div class="section-label">Dashboard</div>
+        <div class="hero-title">WELCOME TO DUCESS ENTERPRISE LEDGER WORKFLOW</div>
+        <div class="hero-sub">Please note that this application is very robust and can detect non-compliance and fraudulent activities. Transparency is encouraged.</div>
+      </div>
+      <div class="hero-stats" id="heroStats"></div>
+    </section>
+
+    <section class="module-grid" id="moduleGrid"></section>
+
+    <section class="workspace-card">
+      <div class="workspace-head">
+        <div>
+          <div class="section-label" id="workspaceLabel">Customer Service</div>
+          <h2 id="workspaceTitle">Check Balance</h2>
+        </div>
+        <div class="workspace-right">
+          <input id="globalNameSearch" class="global-search" placeholder="Search customer by name" />
+        </div>
+      </div>
+      <div id="workspace"></div>
+    </section>
+  </div>
+
+  <div id="modalBack" class="modal-back hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modalTitle">Modal</h3>
+        <button class="icon-btn" id="modalClose">✕</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+      <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="src/data/runtime/ducess-config.js"></script>
+    <script src="src/data/runtime/ducess-gateway.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
