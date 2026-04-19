@@ -1141,10 +1141,13 @@ function subscribeRealtime() {
     .select(approvalRequestsSelect)
     .single();
 
-  console.log("APPROVAL INSERT RESULT", { data, insertError });
+  console.log('APPROVAL INSERT RESULT', { data, insertError });
 
-  if (insertError) return defaultResult.err('APPROVAL_CREATE_FAILED', 'Could not create approval request in Supabase.', insertError);
-  return defaultResult.ok(normalizeApprovalRecord(data));
+if (insertError) {
+  console.error('APPROVAL INSERT ERROR MESSAGE:', insertError.message);
+  console.error('APPROVAL INSERT ERROR DETAILS:', insertError.details);
+  console.error('APPROVAL INSERT ERROR HINT:', insertError.hint);
+  console.error('APPROVAL INSERT ERROR CODE:', insertError.code);
 }
 
     async function approveRequest(payload = {}) {
