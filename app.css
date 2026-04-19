@@ -6669,6 +6669,23 @@ body[data-theme="ducess-sheet"] .module-grid-title{
   color:#f3f8ff !important;
   text-shadow:0 0 1px rgba(0,0,0,.25);
 }
+/* ── THEME TILE BACKGROUND FIX: dark & tinted themes need dark tile boxes ── */
+body[data-theme="dark-slate"] .module-card .module-title{
+  background:linear-gradient(180deg,#1b3349,#122436) !important;
+  color:#e8f4ff !important;
+  box-shadow:0 8px 18px rgba(0,0,0,.40) !important;
+}
+body[data-theme="ducess-sheet"] .module-card .module-title{
+  background:linear-gradient(180deg,#2a0808,#1a0303) !important;
+  color:#f6e8e8 !important;
+  box-shadow:0 8px 18px rgba(0,0,0,.45) !important;
+}
+body[data-theme="neutral-stone"] .module-card .module-title{
+  background:linear-gradient(180deg,#e8e1d5,#ddd5c6) !important;
+  color:#2c2a27 !important;
+  box-shadow:0 8px 18px rgba(80,64,40,.18) !important;
+}
+/* ── END THEME TILE BACKGROUND FIX ── */
 body[data-theme="dark-slate"] .module-card .module-icon{
   background:#21405a !important;
   color:#f3f8ff !important;
@@ -6676,6 +6693,10 @@ body[data-theme="dark-slate"] .module-card .module-icon{
 body[data-theme="ducess-sheet"] .module-card .module-icon{
   background:#4e0e0e !important;
   color:#f7f4ea !important;
+}
+body[data-theme="neutral-stone"] .module-card .module-icon{
+  background:#d6cfc3 !important;
+  color:#5a4a37 !important;
 }
 body[data-theme="dark-slate"] .module-hub{
   background:#0d2136 !important;
