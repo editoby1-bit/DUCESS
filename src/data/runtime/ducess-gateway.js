@@ -955,18 +955,37 @@ if (!generatedAccountNumber) {
   };
 
   const inserted = await client
-    .from(customersTable)
-    .insert([customerRow])
-    .select(customersSelect)
-    .maybeSingle();
+  .from(customersTable)
+  .insert([customerRow])
+  .select(customersSelect)
+  .maybeSingle();
 
-  if (inserted.error) {
+if (inserted.error) {
+  const msg = String(inserted.error.message || '').toLowerCase();
+
+  if (inserted.error.code === '23505' || msg.includes('duplicate') || msg.includes('unique')) {
+    if (msg.includes('account_number')) {
+      return defaultResult.err(
+        'ACCOUNT_NUMBER_ALREADY_USED',
+        'Account number already used.',
+        inserted.error
+      );
+    }
+
     return defaultResult.err(
-      'CUSTOMER_CREATE_FAILED',
-      'Could not create customer from approved account opening.',
+      'CUSTOMER_ALREADY_EXISTS',
+      'A customer with the same details already exists.',
       inserted.error
     );
   }
+
+  return defaultResult.err(
+    'CUSTOMER_CREATE_FAILED',
+    'Could not create customer from approved account opening.',
+    inserted.error
+  );
+}
+
 
   return defaultResult.ok({
     posted: true,
