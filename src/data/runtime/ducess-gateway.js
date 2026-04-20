@@ -1179,6 +1179,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const requestResult = await fetchApprovalRequestRow(payload.requestId, 'pending');
       if (!requestResult.ok) return requestResult;
       const requestRow = requestResult.data;
+      if (payload?.payload && typeof payload.payload === 'object') {
+  requestRow.payload = {
+    ...(requestRow.payload || {}),
+    ...payload.payload
+  };
+}
 
       const postingResult = await performDirectPostingForApproval(requestRow, approver, decisionNote);
       if (!postingResult.ok) return postingResult;

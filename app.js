@@ -839,10 +839,15 @@
     return result;
   }
 
-  async function approveRequestRemote(id) {
+  async function approveRequestRemote(id, payloadOverride = null) {
     if (!isSupabaseApprovalMode()) { approveRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
-    const result = await gateway.approvals.approveRequest({ requestId: id, approvedByStaffId: staff?.id || '', approvedByName: staff?.name || 'System' });
+    const result = await gateway.approvals.approveRequest({
+  requestId: id,
+  approvedByStaffId: staff?.id || '',
+  approvedByName: staff?.name || 'System',
+  payload: payloadOverride || null
+});
     if (result?.ok) {
       await syncApprovalsFromGateway();
       await syncApprovalEffectsFromGateway(result.data);
@@ -879,6 +884,8 @@
     save();
     return req;
   }
+
+
 
   function approveRequest(id) {
     const req = state.approvals.find(r => r.id === id);
@@ -1184,6 +1191,18 @@
   function cardMetric(label, value, hint, action='') {
     return `<div class="summary-card ${action ? 'clickable' : ''}" ${action ? `data-hero-card="${action}"` : ''}><div class="section-label">${label}</div><div class="value">${value}</div><div class="hint">${hint}</div></div>`;
   }
+
+  function setButtonLoading(btn, isLoading, text = 'Processing...') {
+  if (!btn) return;
+  if (isLoading) {
+    btn.dataset.originalText = btn.innerHTML;
+    btn.innerHTML = `<span class="spinner"></span> ${text}`;
+    btn.disabled = true;
+  } else {
+    btn.innerHTML = btn.dataset.originalText || btn.innerHTML;
+    btn.disabled = false;
+  }
+}
 
   function smoothScrollToOpenedSegment(selector) {
     requestAnimationFrame(() => {
@@ -1616,44 +1635,110 @@
     openModal('Journal Approval', `<div class="stack"><div class="kpi-row balance-kpi-row"><div class="kpi"><div class="label">Posted By</div><div class="number">${escapeHtml(req.requestedByName)}</div></div><div class="kpi"><div class="label">Form</div><div class="number">${money(opening)}</div></div><div class="kpi"><div class="label">Total</div><div class="number">${money(total)}</div></div>${req.type === 'customer_credit_journal' ? `<div class="kpi"><div class="label">Charges</div><div class="number">${money(totalCharges)}</div></div>` : ''}<div class="kpi"><div class="label">Overdraw</div><div class="number ${running<0?'balance-negative':''}">${money(Math.max(0,-running))}</div></div></div>${fieldNoteBlock}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Customer</th><th>Account</th><th>Amount</th><th>Remaining Balance</th></tr></thead><tbody>${bodyRows}</tbody></table></div></div>`, actions);
   }
 
-  function openRequestDetailModal(reqId){
-    const req = state.approvals.find(r=>r.id===reqId); if(!req) return; const p=req.payload||{};
-    const esc = (v) => String(v ?? '—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-    const field = (label, value, cls='') => `<div class="field ${cls}"><label>${label}</label><div class="display-field">${esc(value)}</div></div>`;
-    const customer = state.customers.find(c => c.id === p.customerId);
-    const photoSrc = p.photo || p.photoRef || p.photo_path || '';
-    const photoBlock = `<div class="approval-photo-stack"><button type="button" class="secondary" id="approvalPhotoToggle">Display Picture</button><div class="approval-photo-panel hidden" id="approvalPhotoPanel"><div class="photo-box approval-photo-box">${photoSrc ? `<img src="${photoSrc}" alt="customer photo">` : '<span>No Photo</span>'}</div></div></div>`;
-    let html = '';
-    if (req.type === 'account_opening') {
-      const assignBlock = req.status === 'pending'
-        ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off"></div>`
-        : '';
-      html = `<div class="stack approval-opening-linear">
-        ${field('Name', p.name, 'field-wide')}
-        ${field('Phone', p.phone, 'field-phone')}
-        ${field('Address', p.address, 'field-wide')}
-        ${field('NIN', p.nin, 'field-id')}
-        ${field('BVN', p.bvn, 'field-bvn')}
-        ${assignBlock}
-        ${photoBlock}
-      </div>`;
-    } else if (req.type === 'account_maintenance') {
-      const patch = p.patch || {};
-      html = `<div class="stack"><div class="form-grid two modal-cs-grid">${field('Customer Name', customer?.name || patch.name, 'field-wide')}${field('Account Number', p.accountNumber, 'field-account')}${field('Current Status', customerStatusLabel(customer), 'field-status')}${field('Old Account Number', patch.oldAccountNumber, 'field-account')}${field('Updated Name', patch.name, 'field-wide')}${field('Updated Phone', patch.phone, 'field-phone')}${field('Updated Address', patch.address, 'field-wide')}${field('Updated NIN', patch.nin, 'field-id')}${field('Updated BVN', patch.bvn, 'field-bvn')}</div>${photoBlock}</div>`;
-    } else if (req.type === 'account_reactivation') {
-      html = `<div class="stack"><div class="form-grid two modal-cs-grid">${field('Customer Name', customer?.name, 'field-wide')}${field('Account Number', p.accountNumber, 'field-account')}${field('Current Status', customerStatusLabel(customer), 'field-status')}${field('Requested Action', 'Reactivate Account', 'field-submit')}</div>${photoBlock}</div>`;
-    } else {
-      html = `<pre>${esc(JSON.stringify(p,null,2))}</pre>`;
-    }
-    const actions = [{label:'Close', className:'secondary', onClick: closeModal}];
-    if (req.status === 'pending') {
-      actions.unshift({label:'Reject', className:'danger', onClick: ()=>{ rejectRequestRemote(req.id).then((result)=>{ if(result?.ok===false) showToast(result?.error?.message || 'Unable to reject request'); }); closeModal(); }});
-      actions.unshift({label:'Approve', className:'success', onClick: ()=>{ if (req.type === 'account_opening') { const assignInput = byId('approvalAssignAccount'); if (assignInput) req.payload.generatedAccountNumber = assignInput.value.trim(); } approveRequestRemote(req.id).then((result)=>{ if(result?.ok===false) showToast(result?.error?.message || 'Unable to approve request'); }); closeModal(); }});
-    }
-    openModal(prettyApprovalType(req.type), html, actions);
-    const btn = byId('approvalPhotoToggle');
-    if (btn) btn.onclick = ()=> byId('approvalPhotoPanel')?.classList.toggle('hidden');
+  function openRequestDetailModal(reqId){  
+  const req = state.approvals.find(r => r.id === reqId);  
+  if (!req) return;  
+
+  const p = req.payload || {};  
+  const esc = (v) => String(v ?? '—')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+
+  const field = (label, value, cls='') =>
+    `<div class="field ${cls}"><label>${label}</label><div class="display-field">${esc(value)}</div></div>`;
+
+  const customer = state.customers.find(c => c.id === p.customerId);
+  const photoSrc = p.photo || p.photoRef || p.photo_path || '';
+  const photoBlock = `<div class="approval-photo-stack"><button type="button" class="secondary" id="approvalPhotoToggle">Display Picture</button><div class="approval-photo-panel hidden" id="approvalPhotoPanel"><div class="photo-box approval-photo-box">${photoSrc ? `<img src="${photoSrc}" alt="customer photo">` : '<span>No Photo</span>'}</div></div></div>`;
+
+  let html = '';
+
+  if (req.type === 'account_opening') {
+    const assignBlock = req.status === 'pending'
+      ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Enter account number before approval"></div>`
+      : field('Assigned Account Number', p.generatedAccountNumber || '', 'field-account');
+
+    html = `<div class="stack approval-opening-linear">
+      ${field('Name', p.fullName || p.name, 'field-wide')}
+      ${field('Phone', p.phone, 'field-phone')}
+      ${field('Address', p.address, 'field-wide')}
+      ${field('NIN', p.nin, 'field-id')}
+      ${field('BVN', p.bvn, 'field-bvn')}
+      ${assignBlock}
+      ${photoBlock}
+    </div>`;
+  } else if (req.type === 'account_maintenance') {
+    const patch = p.patch || {};
+    html = `<div class="stack"><div class="form-grid two modal-cs-grid">
+      ${field('Customer Name', customer?.name || patch.name, 'field-wide')}
+      ${field('Account Number', p.accountNumber, 'field-account')}
+      ${field('Current Status', customerStatusLabel(customer), 'field-status')}
+      ${field('Old Account Number', patch.oldAccountNumber, 'field-account')}
+      ${field('Updated Name', patch.name, 'field-wide')}
+      ${field('Updated Phone', patch.phone, 'field-phone')}
+      ${field('Updated Address', patch.address, 'field-wide')}
+      ${field('Updated NIN', patch.nin, 'field-id')}
+      ${field('Updated BVN', patch.bvn, 'field-bvn')}
+    </div>${photoBlock}</div>`;
+  } else if (req.type === 'account_reactivation') {
+    html = `<div class="stack"><div class="form-grid two modal-cs-grid">
+      ${field('Customer Name', customer?.name, 'field-wide')}
+      ${field('Account Number', p.accountNumber, 'field-account')}
+      ${field('Current Status', customerStatusLabel(customer), 'field-status')}
+      ${field('Requested Action', 'Reactivate Account', 'field-submit')}
+    </div>${photoBlock}</div>`;
+  } else {
+    html = `<pre>${esc(JSON.stringify(p, null, 2))}</pre>`;
   }
+
+  const actions = [{ label:'Close', className:'secondary', onClick: closeModal }];
+
+  if (req.status === 'pending') {
+    actions.unshift({
+      label:'Reject',
+      className:'danger',
+      onClick: async () => {
+        const result = await rejectRequestRemote(req.id);
+        if (result?.ok === false) {
+          showToast(result?.error?.message || 'Unable to reject request');
+          return; // keep modal open
+        }
+        closeModal();
+      }
+    });
+
+    actions.unshift({
+      label:'Approve',
+      className:'success',
+      onClick: async () => {
+        if (req.type === 'account_opening') {
+          const assignInput = byId('approvalAssignAccount');
+          if (assignInput) {
+            req.payload.generatedAccountNumber = assignInput.value.trim();
+          }
+        }
+
+        const result = await approveRequestRemote(req.id, req.payload);
+
+        if (result?.ok === false) {
+          showToast(result?.error?.message || 'Unable to approve request');
+          return; // keep modal open
+        }
+
+        closeModal();
+      }
+    });
+  }
+
+  openModal(prettyApprovalType(req.type), html, actions);
+
+  const btn = byId('approvalPhotoToggle');
+  if (btn) btn.onclick = () => byId('approvalPhotoPanel')?.classList.toggle('hidden');
+}
+
 
   function renderPermissions() {
     const tools = ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','credit','debit','approval_queue','business_balance'];
@@ -2209,25 +2294,37 @@ function renderTellerBalances() {
         showToast(error?.message || 'Unable to process selected photo');
       }
     };
-    byId('submitOpening').onclick = () => {
-      const payload = {
-        name: byId('openName').value.trim(),
-        address: byId('openAddress').value.trim(),
-        phone: byId('openPhone').value.trim(),
-        nin: byId('openNin').value.trim(),
-        bvn: byId('openBvn').value.trim(),
-        oldAccountNumber: byId('openOldAccount').value.trim(),
-        generatedAccountNumber: '',
-        photo: byId('openPhoto').dataset.base64 || ''
-      };
-      if (!payload.name || !payload.address || !payload.phone || !payload.nin || !payload.bvn) return showToast('Complete all required fields');
-      confirmAction('Submit account opening request?', async () => {
-  const result = await submitApprovalThroughGateway('account_opening', payload);
-  if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
-  render();
-  showToast('Account opening sent for approval');
-});
-    };
+    byId('submitOpening').onclick = async (e) => {
+  const btn = e.currentTarget;
+
+  const payload = {
+    name: byId('openName').value.trim(),
+    address: byId('openAddress').value.trim(),
+    phone: byId('openPhone').value.trim(),
+    nin: byId('openNin').value.trim(),
+    bvn: byId('openBvn').value.trim(),
+    oldAccountNumber: byId('openOldAccount').value.trim(),
+    generatedAccountNumber: '',
+    photo: byId('openPhoto').dataset.base64 || ''
+  };
+
+  if (!payload.name || !payload.address || !payload.phone || !payload.nin || !payload.bvn) {
+    return showToast('Complete all required fields');
+  }
+
+  confirmAction('Submit account opening request?', async () => {
+    setButtonLoading(btn, true, 'Sending request...');
+    try {
+      const result = await submitApprovalThroughGateway('account_opening', payload);
+      if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+      render();
+      showToast('Account opening sent for approval');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  });
+};
+
   }
 
   function bindMaintenance(prefix) {
