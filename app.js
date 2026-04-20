@@ -1628,24 +1628,6 @@ function hideProcessing() {
     return Number.isFinite(num) ? num : 0;
   }
 
-  function openJournalApprovalModal(reqId){
-    const req = state.approvals.find(r => String(r?.id) === String(reqId)); if(!req) return;
-    const rows = req.payload?.rows || req.payload?.entries || [];
-    const total = rows.reduce((s,r)=>s+Number(r.amount||0),0);
-    const totalCharges = rows.reduce((s,r)=>s+getTotalChargeAmount(r),0);
-    const opening = getOpeningBalanceForDate(req.payload?.staffId, req.payload?.date || req.payload?.businessDate);
-    const fieldNote = req.payload?.fieldNote || null;
-    let running = opening;
-    const bodyRows = rows.map((r,i)=>{ const commission = normalizeCommissionAmount(r.amount, r.commissionAmount); const customerGets = getCustomerCreditAmount(r); running -= Number(r.amount||0); const chargeMeta = getTotalChargeAmount(r) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(r)}</div>` : ''; return `<tr><td>${i+1}</td><td>${escapeHtml(r.customerName || '—')}${chargeMeta}</td><td>${escapeHtml(r.accountNumber || '—')}</td><td>${money(r.amount)}</td><td class="${running<0?'balance-negative':''}">${money(running)}</td></tr>`; }).join('');
-    const fieldNoteBlock = fieldNote?.dataUrl ? `<div class="journal-attachment-review"><div class="label">Field Note</div><div class="journal-attachment-card"><div class="journal-attachment-meta"><strong>${escapeHtml(fieldNote.name || 'Attached file')}</strong><span>${escapeHtml(formatFileSize(fieldNote.size || 0))}</span></div><a href="${fieldNote.dataUrl}" target="_blank" rel="noopener" download="${escapeHtml(fieldNote.name || 'field-note')}">Open Attachment</a></div></div>` : '';
-    const actions = [{label:'Close', className:'secondary', onClick: closeModal}];
-    if (req.status === 'pending') {
-      actions.unshift({label:'Reject Journal', className:'danger', onClick: ()=>{ rejectRequestRemote(req.id).then((result)=>{ if(result?.ok===false) showToast(result?.error?.message || 'Unable to reject request'); }); closeModal(); }});
-      actions.unshift({label:'Approve Journal', className:'success', onClick: ()=>{ approveRequestRemote(req.id).then((result)=>{ if(result?.ok===false) showToast(result?.error?.message || 'Unable to approve request'); }); closeModal(); }});
-    }
-    openModal('Journal Approval', `<div class="stack"><div class="kpi-row balance-kpi-row"><div class="kpi"><div class="label">Posted By</div><div class="number">${escapeHtml(req.requestedByName)}</div></div><div class="kpi"><div class="label">Form</div><div class="number">${money(opening)}</div></div><div class="kpi"><div class="label">Total</div><div class="number">${money(total)}</div></div>${req.type === 'customer_credit_journal' ? `<div class="kpi"><div class="label">Charges</div><div class="number">${money(totalCharges)}</div></div>` : ''}<div class="kpi"><div class="label">Overdraw</div><div class="number ${running<0?'balance-negative':''}">${money(Math.max(0,-running))}</div></div></div>${fieldNoteBlock}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Customer</th><th>Account</th><th>Amount</th><th>Remaining Balance</th></tr></thead><tbody>${bodyRows}</tbody></table></div></div>`, actions);
-  }
-
   function openRequestDetailModal(reqId) {
   const req = state.approvals.find(r => r.id === reqId);
   if (!req) return;
@@ -1713,23 +1695,22 @@ function hideProcessing() {
       className: 'danger',
       onClick: async () => {
         closeModal();
-showProcessing('Rejecting request...');
-await nextPaint();
+        showProcessing('Rejecting request...');
+        await nextPaint();
 
-try {
-  const result = await rejectRequestRemote(req.id);
+        try {
+          const result = await rejectRequestRemote(req.id);
 
-  if (result?.ok === false) {
-    hideProcessing();
-    showToast(result?.error?.message || 'Unable to reject request');
-    return;
-  }
-
-} finally {
-  hideProcessing();
-}
-
-    })
+          if (result?.ok === false) {
+            hideProcessing();
+            showToast(result?.error?.message || 'Unable to reject request');
+            return;
+          }
+        } finally {
+          hideProcessing();
+        }
+      }
+    });
 
     actions.unshift({
       label: 'Approve',
@@ -1743,21 +1724,20 @@ try {
         }
 
         closeModal();
-showProcessing('Approving request...');
-await nextPaint();
+        showProcessing('Approving request...');
+        await nextPaint();
 
-try {
-  const result = await approveRequestRemote(req.id, req.payload);
+        try {
+          const result = await approveRequestRemote(req.id, req.payload);
 
-  if (result?.ok === false) {
-    hideProcessing();
-    showToast(result?.error?.message || 'Unable to approve request');
-    return;
-  }
-
-} finally {
-  hideProcessing();
-}
+          if (result?.ok === false) {
+            hideProcessing();
+            showToast(result?.error?.message || 'Unable to approve request');
+            return;
+          }
+        } finally {
+          hideProcessing();
+        }
       }
     });
   }
