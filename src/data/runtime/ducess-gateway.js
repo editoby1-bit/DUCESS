@@ -928,9 +928,14 @@ function subscribeRealtime() {
     });
   }
 
-  const generatedAccountNumber =
-    payload.generatedAccountNumber ||
-    String(Date.now()).slice(-10);
+  const generatedAccountNumber = String(payload.generatedAccountNumber || '').trim();
+
+if (!generatedAccountNumber) {
+  return defaultResult.err(
+    'ACCOUNT_NUMBER_REQUIRED',
+    'Account number must be entered before approving account opening.'
+  );
+}
 
   const customerRow = {
     customer_number: null,

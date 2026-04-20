@@ -776,8 +776,19 @@
     let result;
     if (type === 'account_opening' && gateway.customers?.submitAccountOpening) {
       result = await gateway.customers.submitAccountOpening({
-        fullName: payload.name, phone: payload.phone, address: payload.address, nin: payload.nin, bvn: payload.bvn, photoRef: payload.photo || null, openedByStaffId: staff?.id || '', requestedByName: staff?.name || 'System'
-      });
+  fullName: payload.name,
+  phone: payload.phone,
+  address: payload.address,
+  nin: payload.nin,
+  bvn: payload.bvn,
+  oldAccountNumber: payload.oldAccountNumber || '',
+  generatedAccountNumber: payload.generatedAccountNumber || '',
+  photo: payload.photo || null,
+  photoRef: payload.photo || null,
+  openedByStaffId: staff?.id || '',
+  requestedByName: staff?.name || 'System'
+});
+
     } else if (type === 'account_maintenance' && gateway.customers?.submitAccountMaintenance) {
       result = await gateway.customers.submitAccountMaintenance({
         customerId: payload.customerId,
@@ -1610,7 +1621,7 @@
     const esc = (v) => String(v ?? '—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     const field = (label, value, cls='') => `<div class="field ${cls}"><label>${label}</label><div class="display-field">${esc(value)}</div></div>`;
     const customer = state.customers.find(c => c.id === p.customerId);
-    const photoSrc = p.photo || customer?.photo || '';
+    const photoSrc = p.photo || p.photoRef || p.photo_path || '';
     const photoBlock = `<div class="approval-photo-stack"><button type="button" class="secondary" id="approvalPhotoToggle">Display Picture</button><div class="approval-photo-panel hidden" id="approvalPhotoPanel"><div class="photo-box approval-photo-box">${photoSrc ? `<img src="${photoSrc}" alt="customer photo">` : '<span>No Photo</span>'}</div></div></div>`;
     let html = '';
     if (req.type === 'account_opening') {
