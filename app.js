@@ -1204,6 +1204,17 @@
   }
 }
 
+function showProcessing(text = 'Processing...') {
+  const overlay = byId('globalProcessingOverlay');
+  const label = byId('processingText');
+  if (label) label.textContent = text;
+  overlay?.classList.remove('hidden');
+}
+
+function hideProcessing() {
+  byId('globalProcessingOverlay')?.classList.add('hidden');
+}
+
   function smoothScrollToOpenedSegment(selector) {
     requestAnimationFrame(() => {
       const target = (selector && q(selector)) || q('.workspace-card');
@@ -1701,35 +1712,46 @@
       label:'Reject',
       className:'danger',
       onClick: async () => {
-        const result = await rejectRequestRemote(req.id);
-        if (result?.ok === false) {
-          showToast(result?.error?.message || 'Unable to reject request');
-          return; // keep modal open
-        }
-        closeModal();
-      }
+  showProcessing('Rejecting request...');
+
+  const result = await rejectRequestRemote(req.id);
+
+  hideProcessing();
+
+  if (result?.ok === false) {
+    showToast(result?.error?.message || 'Unable to reject request');
+    return;
+  }
+
+  closeModal();
+}
     });
 
     actions.unshift({
       label:'Approve',
       className:'success',
       onClick: async () => {
-        if (req.type === 'account_opening') {
-          const assignInput = byId('approvalAssignAccount');
-          if (assignInput) {
-            req.payload.generatedAccountNumber = assignInput.value.trim();
-          }
-        }
+  if (req.type === 'account_opening') {
+    const assignInput = byId('approvalAssignAccount');
+    if (assignInput) {
+      req.payload.generatedAccountNumber = assignInput.value.trim();
+    }
+  }
 
-        const result = await approveRequestRemote(req.id, req.payload);
+  showProcessing('Approving request...');
 
-        if (result?.ok === false) {
-          showToast(result?.error?.message || 'Unable to approve request');
-          return; // keep modal open
-        }
+  const result = await approveRequestRemote(req.id, req.payload);
 
-        closeModal();
-      }
+  hideProcessing();
+
+  if (result?.ok === false) {
+    showToast(result?.error?.message || 'Unable to approve request');
+    return;
+  }
+
+  closeModal();
+}
+
     });
   }
 
@@ -2313,16 +2335,18 @@ function renderTellerBalances() {
   }
 
   confirmAction('Submit account opening request?', async () => {
-    setButtonLoading(btn, true, 'Sending request...');
-    try {
-      const result = await submitApprovalThroughGateway('account_opening', payload);
-      if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
-      render();
-      showToast('Account opening sent for approval');
-    } finally {
-      setButtonLoading(btn, false);
-    }
-  });
+  showProcessing('Sending request...');
+
+  try {
+    const result = await submitApprovalThroughGateway('account_opening', payload);
+    if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+    render();
+    showToast('Account opening sent for approval');
+  } finally {
+    hideProcessing();
+  }
+});
+
 };
 
   }
