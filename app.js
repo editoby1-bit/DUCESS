@@ -1712,23 +1712,23 @@ function hideProcessing() {
       label: 'Reject',
       className: 'danger',
       onClick: async () => {
-        showProcessing('Rejecting request...');
+        closeModal();
+showProcessing('Rejecting request...');
 await nextPaint();
 
 try {
   const result = await rejectRequestRemote(req.id);
 
+  if (result?.ok === false) {
+    hideProcessing();
+    showToast(result?.error?.message || 'Unable to reject request');
+    return;
+  }
 
-          if (result?.ok === false) {
-            showToast(result?.error?.message || 'Unable to reject request');
-            return;
-          }
+} finally {
+  hideProcessing();
+}
 
-          closeModal();
-        } finally {
-          hideProcessing();
-        }
-      }
     });
 
     actions.unshift({
@@ -1742,21 +1742,22 @@ try {
           }
         }
 
-        showProcessing('Approving request...');
+        closeModal();
+showProcessing('Approving request...');
 await nextPaint();
 
 try {
   const result = await approveRequestRemote(req.id, req.payload);
 
-          if (result?.ok === false) {
-            showToast(result?.error?.message || 'Unable to approve request');
-            return;
-          }
+  if (result?.ok === false) {
+    hideProcessing();
+    showToast(result?.error?.message || 'Unable to approve request');
+    return;
+  }
 
-          closeModal();
-        } finally {
-          hideProcessing();
-        }
+} finally {
+  hideProcessing();
+}
       }
     });
   }
