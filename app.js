@@ -1729,7 +1729,7 @@ try {
   hideProcessing();
 }
 
-    });
+    })
 
     actions.unshift({
       label: 'Approve',
