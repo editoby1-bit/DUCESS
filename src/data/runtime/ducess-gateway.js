@@ -1149,7 +1149,9 @@ if (insertError) {
   console.error('APPROVAL INSERT ERROR HINT:', insertError.hint);
   console.error('APPROVAL INSERT ERROR CODE:', insertError.code);
 }
-
+if (insertError) return defaultResult.err('APPROVAL_CREATE_FAILED', 'Could not create approval request in Supabase.', insertError);
+return defaultResult.ok(normalizeApprovalRecord(data));
+}
     async function approveRequest(payload = {}) {
       if (!canUseSupabase()) return local.approvals.approveRequest(payload);
       const approver = {
