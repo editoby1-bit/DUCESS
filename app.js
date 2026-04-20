@@ -1713,9 +1713,11 @@ function hideProcessing() {
       className: 'danger',
       onClick: async () => {
         showProcessing('Rejecting request...');
+await nextPaint();
 
-        try {
-          const result = await rejectRequestRemote(req.id);
+try {
+  const result = await rejectRequestRemote(req.id);
+
 
           if (result?.ok === false) {
             showToast(result?.error?.message || 'Unable to reject request');
@@ -1741,9 +1743,10 @@ function hideProcessing() {
         }
 
         showProcessing('Approving request...');
+await nextPaint();
 
-        try {
-          const result = await approveRequestRemote(req.id, req.payload);
+try {
+  const result = await approveRequestRemote(req.id, req.payload);
 
           if (result?.ok === false) {
             showToast(result?.error?.message || 'Unable to approve request');
@@ -1765,7 +1768,9 @@ function hideProcessing() {
 }
 
 
-
+function nextPaint() {
+  return new Promise(resolve => requestAnimationFrame(() => resolve()));
+}
 
   function renderPermissions() {
     const tools = ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','credit','debit','approval_queue','business_balance'];
