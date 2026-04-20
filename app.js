@@ -1769,7 +1769,11 @@ try {
 
 
 function nextPaint() {
-  return new Promise(resolve => requestAnimationFrame(() => resolve()));
+  return new Promise(resolve =>
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => resolve())
+    )
+  );
 }
 
   function renderPermissions() {
