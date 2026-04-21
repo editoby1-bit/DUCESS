@@ -943,15 +943,23 @@
         break;
       }
       case 'float_declaration': {
-        if (!hasBaseOpeningBalanceForDate(req.payload.staffId, req.payload.date)) {
-          addStaffEntry(req.payload.staffId, 'approved_float', req.payload.amount, req.payload.amount, `Approved form for ${req.payload.date}`, { floatDate: req.payload.date });
-        }
-        break;
-      }
+  // FORM SYSTEM: first approved submission becomes FORM
+  if (!hasBaseOpeningBalanceForDate(req.payload.staffId, req.payload.date)) {
+    addStaffEntry(
+      req.payload.staffId,
+      'approved_form',
+      req.payload.amount,
+      req.payload.amount,
+      `Approved FORM for ${req.payload.date}`,
+      { formDate: req.payload.date }
+    );
+  }
+  break;
+}
       case 'float_topup': {
-        addStaffEntry(req.payload.staffId, 'approved_float_topup', req.payload.amount, req.payload.amount, `Approved float top-up for ${req.payload.staffName || 'staff'} on ${req.payload.date}`, { floatDate: req.payload.date });
-        break;
-      }
+  // FORM SYSTEM: disabled
+  break;
+}
       case 'customer_credit': {
         const c = state.customers.find(x => x.id === req.payload.customerId);
         if (!c || isCustomerFrozen(c) || c.active === false) break;
@@ -3030,12 +3038,12 @@ function renderTellerBalances() {
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       { label: 'Submit', onClick: () => {
           const amount = Number(byId('floatAmount').value || 0);
-          if (!(amount > 0)) return showToast('Enter valid float');
+          if (!(amount > 0)) return showToast('Enter valid form');
           if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
           createRequest('float_declaration', { staffId: st.id, amount, date: businessDate() });
           closeModal();
           render();
-          showToast('Float declaration sent for approval');
+          showToast('Form sent for approval');
       }}
     ]);
   }
@@ -3145,32 +3153,33 @@ function renderTellerBalances() {
     return hasBaseOpeningBalanceForDate(staffId, dateStr) || state.approvals.some(r => r.type === 'float_declaration' && r.status === 'pending' && r.payload.staffId === staffId && r.payload.date === dateStr);
   }
 
-  function hasBaseOpeningBalanceForDate(staffId, dateStr) {
-    const acc = ensureStaffAccount(staffId);
-    return acc.entries.some(e => e.type === 'approved_float' && e.floatDate === dateStr);
-  }
+  function hasOpeningBalanceForDate(staffId, date) {
+  return hasBaseOpeningBalanceForDate(staffId, date);
+}
 
   function hasOpeningBalanceForDate(staffId, dateStr) {
     const acc = ensureStaffAccount(staffId);
     return acc.entries.some(e => ['approved_float','approved_float_topup'].includes(e.type) && e.floatDate === dateStr);
   }
 
-  function openingBalanceOnlyForDate(staffId, dateStr) {
-    const acc = ensureStaffAccount(staffId);
-    return acc.entries.filter(e => e.type === 'approved_float' && e.floatDate === dateStr).reduce((s,e)=>s+Number(e.amount||0),0);
-  }
+  function openingBalanceOnlyForDate(staffId, date) {
+  const acc = ensureStaffAccount(staffId);
+  return (acc.entries || [])
+    .filter(e =>
+      (e.type === 'approved_form' || e.type === 'approved_float') &&
+      (e.formDate === date || e.floatDate === date)
+    )
+    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+}
 
-  function floatTopUpsForDate(staffId, dateStr) {
-    if (isSupabaseApprovalMode()) {
-      return (state.approvals || []).filter(r => r.type === 'float_topup' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
-    }
-    const acc = ensureStaffAccount(staffId);
-    return acc.entries.filter(e => e.type === 'approved_float_topup' && e.floatDate === dateStr).reduce((s,e)=>s+Number(e.amount||0),0);
-  }
+  function floatTopUpsForDate() {
+  // FORM SYSTEM: no top-ups anymore
+  return 0;
+}
 
-  function getOpeningBalanceForDate(staffId, dateStr) {
-    return openingBalanceOnlyForDate(staffId, dateStr) + floatTopUpsForDate(staffId, dateStr);
-  }
+  function getOpeningBalanceForDate(staffId, date) {
+  return openingBalanceOnlyForDate(staffId, date);
+}
 
 
   function normalizePaymentMode(mode) {
@@ -3216,17 +3225,18 @@ function renderTellerBalances() {
       .reduce((s,r)=> s + (r.type.endsWith('_journal') ? (r.payload.rows||[]).reduce((a,x)=>a+Number(x.amount||0),0) : Number(r.payload?.amount||0)), 0);
   }
 
-  function currentFloatAvailable(staffId, date=businessDate()) {
-    const opening = getOpeningBalanceForDate(staffId, date);
-    const usedApproved = approvedCreditTotalForDate(staffId, date);
-    const debitsApproved = approvedDebitTotalForDate(staffId, date);
-    const pendingPosted = pendingPostedFloatImpactForDate(staffId, date);
-    return opening - usedApproved - debitsApproved - pendingPosted;
-  }
+  function currentFloatAvailable(staffId, date) {
+  const form = getOpeningBalanceForDate(staffId, date);
+  const credits = approvedCreditTotalForDate(staffId, date);
+  const debits = approvedDebitTotalForDate(staffId, date);
 
-  function currentFloatOverdraw(staffId, date=businessDate()) {
-    return Math.max(0, -currentFloatAvailable(staffId, date));
-  }
+  return form - credits - debits;
+}
+
+  function currentFloatOverdraw(staffId, date) {
+  const remaining = currentFloatAvailable(staffId, date);
+  return remaining < 0 ? Math.abs(remaining) : 0;
+}
 
   function pendingJournalTotal(staffId, date=businessDate()) {
     const journals = state.ui?.staffJournals || {};
