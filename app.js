@@ -1325,7 +1325,9 @@ function hideProcessing() {
       case 'credit': return renderJournalTool('credit');
       case 'debit': return renderJournalTool('debit');
       case 'my_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">My Balance</div><div class="tool-empty-note">Balance details open in a modal when this heading is selected.</div></div>`;
-      case 'opening_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">Form</div><div class="tool-empty-note">Form opens in a modal when this heading is selected.</div></div>`;
+      case 'opening_balance':
+  setTimeout(() => openFloatModal(), 0);
+  return `<div class="tool-empty-state"><div class="tool-empty-title">Form</div><div class="tool-empty-note">Opening form...</div></div>`;
       case 'my_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">My Close of Day</div><div class="tool-empty-note">Close-of-day details open in a modal when this heading is selected.</div></div>`;
       case 'central_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">Central Close of Day</div><div class="tool-empty-note">Central close-of-day opens in a modal when this heading is selected.</div></div>`;
       case 'approval_customer_service':
@@ -3023,30 +3025,52 @@ function renderTellerBalances() {
   }
 
   function openFloatModal() {
-    const st = currentStaff();
-    const requiresFloat = hasPermission('credit') || hasPermission('debit');
-    if (!requiresFloat) return showToast('Current staff does not need posting float');
-    if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
-    openModal('Form', `
-      <div class="form-grid three compact-modal-grid">
-        <div class="field"><label>Staff</label><div class="display-field">${st.name}</div></div>
-        <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
-        <div class="field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
-      </div>
-      <div class="note">Posting cannot begin until this form is approved.</div>
-    </div>`, [
-      { label: 'Cancel', className: 'secondary', onClick: closeModal },
-      { label: 'Submit', onClick: () => {
-          const amount = Number(byId('floatAmount').value || 0);
-          if (!(amount > 0)) return showToast('Enter valid form');
-          if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
-          createRequest('float_declaration', { staffId: st.id, amount, date: businessDate() });
+  const st = currentStaff();
+  const requiresFloat = hasPermission('credit') || hasPermission('debit');
+  if (!requiresFloat) return showToast('Current staff does not need posting form');
+  if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
+
+  openModal('Form', `
+    <div class="form-grid three compact-modal-grid">
+      <div class="field"><label>Staff</label><div class="display-field">${st.name}</div></div>
+      <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
+      <div class="field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
+    </div>
+    <div class="note">Posting cannot begin until this form is approved.</div>
+  `, [
+    { label: 'Cancel', className: 'secondary', onClick: closeModal },
+    {
+      label: 'Submit',
+      onClick: async () => {
+        const amount = Number(byId('floatAmount').value || 0);
+        if (!(amount > 0)) return showToast('Enter valid form');
+        if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
+
+        showProcessing('Sending form for approval...');
+        await nextPaint();
+
+        try {
+          const result = await submitApprovalThroughGateway('float_declaration', {
+            staffId: st.id,
+            amount,
+            date: businessDate()
+          });
+
+          if (result?.ok === false) {
+            showToast(result?.error?.message || 'Unable to submit form');
+            return;
+          }
+
           closeModal();
           render();
           showToast('Form sent for approval');
-      }}
-    ]);
-  }
+        } finally {
+          hideProcessing();
+        }
+      }
+    }
+  ]);
+}
 
   function openCODModal() {
     if (!canCloseBusinessDay()) return showToast('Only Approval Officer or Admin can close day');
