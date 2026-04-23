@@ -3048,10 +3048,16 @@ function renderTellerBalances() {
 
           try {
             const result = await submitApprovalThroughGateway('float_declaration', {
-              staffId: st.id,
-              amount,
-              date: businessDate()
-            });
+  staffId: st.id,              // keep for frontend
+requestedByStaffId: st.id,   // 👈 add this
+  amount,
+  date: businessDate(),
+
+  // 👇 ADD THIS (BACKWARD COMPATIBILITY)
+  floatAmount: amount,
+  float_date: businessDate(),
+  type: 'float_declaration'
+});
 
             if (result?.ok === false) {
               showToast(result?.error?.message || 'Unable to submit form');
