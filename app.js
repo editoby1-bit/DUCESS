@@ -943,23 +943,22 @@
         break;
       }
       case 'float_declaration': {
-  // FORM SYSTEM: first approved submission becomes FORM
-  if (!hasBaseOpeningBalanceForDate(req.payload.staffId, req.payload.date)) {
-    addStaffEntry(
-      req.payload.staffId,
-      'approved_form',
-      req.payload.amount,
-      req.payload.amount,
-      `Approved FORM for ${req.payload.date}`,
-      { formDate: req.payload.date }
-    );
-  }
-  break;
-}
+        if (!hasBaseOpeningBalanceForDate(req.payload.staffId, req.payload.date)) {
+          addStaffEntry(
+            req.payload.staffId,
+            'approved_form',
+            req.payload.amount,
+            req.payload.amount,
+            `Approved form for ${req.payload.date}`,
+            { formDate: req.payload.date }
+          );
+        }
+        break;
+      }
       case 'float_topup': {
-  // FORM SYSTEM: disabled
-  break;
-}
+        // Form system: top-up disabled
+        break;
+      }
       case 'customer_credit': {
         const c = state.customers.find(x => x.id === req.payload.customerId);
         if (!c || isCustomerFrozen(c) || c.active === false) break;
@@ -1325,9 +1324,7 @@ function hideProcessing() {
       case 'credit': return renderJournalTool('credit');
       case 'debit': return renderJournalTool('debit');
       case 'my_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">My Balance</div><div class="tool-empty-note">Balance details open in a modal when this heading is selected.</div></div>`;
-      case 'opening_balance':
-  setTimeout(() => openFloatModal(), 0);
-  return `<div class="tool-empty-state"><div class="tool-empty-title">Form</div><div class="tool-empty-note">Opening form...</div></div>`;
+      case 'opening_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">Form</div><div class="tool-empty-note">Form opens in a modal when this heading is selected.</div></div>`;
       case 'my_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">My Close of Day</div><div class="tool-empty-note">Close-of-day details open in a modal when this heading is selected.</div></div>`;
       case 'central_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">Central Close of Day</div><div class="tool-empty-note">Central close-of-day opens in a modal when this heading is selected.</div></div>`;
       case 'approval_customer_service':
@@ -3025,52 +3022,51 @@ function renderTellerBalances() {
   }
 
   function openFloatModal() {
-  const st = currentStaff();
-  const requiresFloat = hasPermission('credit') || hasPermission('debit');
-  if (!requiresFloat) return showToast('Current staff does not need posting form');
-  if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
+    const st = currentStaff();
+    const requiresFloat = hasPermission('credit') || hasPermission('debit');
+    if (!requiresFloat) return showToast('Current staff does not need posting form');
 
-  openModal('Form', `
-    <div class="form-grid three compact-modal-grid">
-      <div class="field"><label>Staff</label><div class="display-field">${st.name}</div></div>
-      <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
-      <div class="field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
-    </div>
-    <div class="note">Posting cannot begin until this form is approved.</div>
-  `, [
-    { label: 'Cancel', className: 'secondary', onClick: closeModal },
-    {
-      label: 'Submit',
-      onClick: async () => {
-        const amount = Number(byId('floatAmount').value || 0);
-        if (!(amount > 0)) return showToast('Enter valid form');
-        if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
-
-        showProcessing('Sending form for approval...');
-        await nextPaint();
-
-        try {
-          const result = await submitApprovalThroughGateway('float_declaration', {
-            staffId: st.id,
-            amount,
-            date: businessDate()
-          });
-
-          if (result?.ok === false) {
-            showToast(result?.error?.message || 'Unable to submit form');
-            return;
-          }
+    openModal('Form', `
+      <div class="form-grid three compact-modal-grid">
+        <div class="field"><label>Staff</label><div class="display-field">${st.name}</div></div>
+        <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
+        <div class="field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
+      </div>
+      <div class="note">Posting cannot begin until this form is approved.</div>
+    `, [
+      { label: 'Cancel', className: 'secondary', onClick: closeModal },
+      {
+        label: 'Submit',
+        onClick: async () => {
+          const amount = Number(byId('floatAmount')?.value || 0);
+          if (!(amount > 0)) return showToast('Enter valid form');
+          if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
 
           closeModal();
-          render();
-          showToast('Form sent for approval');
-        } finally {
-          hideProcessing();
+          showProcessing('Sending form for approval...');
+          await nextPaint();
+
+          try {
+            const result = await submitApprovalThroughGateway('float_declaration', {
+              staffId: st.id,
+              amount,
+              date: businessDate()
+            });
+
+            if (result?.ok === false) {
+              showToast(result?.error?.message || 'Unable to submit form');
+              return;
+            }
+
+            render();
+            showToast('Form sent for approval');
+          } finally {
+            hideProcessing();
+          }
         }
       }
-    }
-  ]);
-}
+    ]);
+  }
 
   function openCODModal() {
     if (!canCloseBusinessDay()) return showToast('Only Approval Officer or Admin can close day');
@@ -3177,33 +3173,35 @@ function renderTellerBalances() {
     return hasBaseOpeningBalanceForDate(staffId, dateStr) || state.approvals.some(r => r.type === 'float_declaration' && r.status === 'pending' && r.payload.staffId === staffId && r.payload.date === dateStr);
   }
 
-  function hasOpeningBalanceForDate(staffId, date) {
-  return hasBaseOpeningBalanceForDate(staffId, date);
-}
-
-  function hasOpeningBalanceForDate(staffId, dateStr) {
+  function hasBaseOpeningBalanceForDate(staffId, dateStr) {
     const acc = ensureStaffAccount(staffId);
-    return acc.entries.some(e => ['approved_float','approved_float_topup'].includes(e.type) && e.floatDate === dateStr);
+    return acc.entries.some(e =>
+      (e.type === 'approved_form' || e.type === 'approved_float') &&
+      (e.formDate === dateStr || e.floatDate === dateStr)
+    );
   }
 
-  function openingBalanceOnlyForDate(staffId, date) {
-  const acc = ensureStaffAccount(staffId);
-  return (acc.entries || [])
-    .filter(e =>
-      (e.type === 'approved_form' || e.type === 'approved_float') &&
-      (e.formDate === date || e.floatDate === date)
-    )
-    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
-}
+  function hasOpeningBalanceForDate(staffId, dateStr) {
+    return hasBaseOpeningBalanceForDate(staffId, dateStr);
+  }
+
+  function openingBalanceOnlyForDate(staffId, dateStr) {
+    const acc = ensureStaffAccount(staffId);
+    return acc.entries
+      .filter(e =>
+        (e.type === 'approved_form' || e.type === 'approved_float') &&
+        (e.formDate === dateStr || e.floatDate === dateStr)
+      )
+      .reduce((s, e) => s + Number(e.amount || 0), 0);
+  }
 
   function floatTopUpsForDate() {
-  // FORM SYSTEM: no top-ups anymore
-  return 0;
-}
+    return 0;
+  }
 
-  function getOpeningBalanceForDate(staffId, date) {
-  return openingBalanceOnlyForDate(staffId, date);
-}
+  function getOpeningBalanceForDate(staffId, dateStr) {
+    return openingBalanceOnlyForDate(staffId, dateStr);
+  }
 
 
   function normalizePaymentMode(mode) {
@@ -3249,18 +3247,17 @@ function renderTellerBalances() {
       .reduce((s,r)=> s + (r.type.endsWith('_journal') ? (r.payload.rows||[]).reduce((a,x)=>a+Number(x.amount||0),0) : Number(r.payload?.amount||0)), 0);
   }
 
-  function currentFloatAvailable(staffId, date) {
-  const form = getOpeningBalanceForDate(staffId, date);
-  const credits = approvedCreditTotalForDate(staffId, date);
-  const debits = approvedDebitTotalForDate(staffId, date);
+  function currentFloatAvailable(staffId, date = businessDate()) {
+    const form = getOpeningBalanceForDate(staffId, date);
+    const usedApproved = approvedCreditTotalForDate(staffId, date);
+    const debitsApproved = approvedDebitTotalForDate(staffId, date);
+    const pendingPosted = pendingPostedFloatImpactForDate(staffId, date);
+    return form - usedApproved - debitsApproved - pendingPosted;
+  }
 
-  return form - credits - debits;
-}
-
-  function currentFloatOverdraw(staffId, date) {
-  const remaining = currentFloatAvailable(staffId, date);
-  return remaining < 0 ? Math.abs(remaining) : 0;
-}
+  function currentFloatOverdraw(staffId, date = businessDate()) {
+    return Math.max(0, -currentFloatAvailable(staffId, date));
+  }
 
   function pendingJournalTotal(staffId, date=businessDate()) {
     const journals = state.ui?.staffJournals || {};
