@@ -2530,10 +2530,9 @@ function renderTellerBalances() {
     };
   }
 
-  function hasApprovedFloat(staffId, date=businessDate()) {
-    const acc = ensureStaffAccount(staffId);
-    return acc.entries.some(e => e.type === 'approved_float' && e.floatDate === date);
-  }
+  function hasApprovedFloat(staffId, dateStr) {
+  return hasBaseOpeningBalanceForDate(staffId, dateStr);
+}
 
 
   function bindJournal(kind) {
