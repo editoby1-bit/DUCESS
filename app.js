@@ -756,12 +756,19 @@
     return defaultResultOk(true);
   }
 
-  if (approvalRecord.type === 'float_topup' || approvalRecord.type === 'float_declaration') {
-    return syncCodFromGateway({
-      staffId: approvalRecord.payload?.staffId,
-      businessDate: approvalRecord.payload?.date
-    });
-  }
+  if (approvalRecord.type === 'float_declaration') {
+  syncApprovedFormFromApprovalRecord(approvalRecord);
+  await syncCodFromGateway({
+    staffId: approvalRecord.payload?.staffId,
+    businessDate: approvalRecord.payload?.date
+  });
+  save();
+  return defaultResultOk(true);
+}
+
+if (approvalRecord.type === 'float_topup') {
+  return defaultResultOk(true);
+}
 
   if (approvalRecord.type === 'debt_repayment') {
     return syncDebtBalancesFromGateway();
@@ -3176,8 +3183,41 @@ requestedByStaffId: st.id,   // 👈 add this
   }
 
   function hasFloatDeclaredOrPending(staffId, dateStr) {
-    return hasBaseOpeningBalanceForDate(staffId, dateStr) || state.approvals.some(r => r.type === 'float_declaration' && r.status === 'pending' && r.payload.staffId === staffId && r.payload.date === dateStr);
-  }
+  return hasBaseOpeningBalanceForDate(staffId, dateStr) ||
+    state.approvals.some(r =>
+      r.type === 'float_declaration' &&
+      ['pending', 'approved'].includes(String(r.status || '').toLowerCase()) &&
+      r.payload?.staffId === staffId &&
+      r.payload?.date === dateStr
+    );
+}
+
+function syncApprovedFormFromApprovalRecord(approvalRecord) {
+  const payload = approvalRecord?.payload || {};
+  const staffId = payload.staffId || payload.staff_id || '';
+  const date = payload.date || payload.float_date || businessDate();
+  const amount = Number(payload.amount || payload.floatAmount || 0);
+
+  if (!staffId || !(amount > 0)) return;
+
+  const acc = ensureStaffAccount(staffId);
+  const exists = (acc.entries || []).some(e =>
+    (e.type === 'approved_form' || e.type === 'approved_float') &&
+    (e.formDate === date || e.floatDate === date)
+  );
+
+  if (exists) return;
+
+  addStaffEntry(
+    staffId,
+    'approved_form',
+    amount,
+    amount,
+    `Approved form for ${date}`,
+    { formDate: date, floatDate: date, approvalRequestId: approvalRecord.id }
+  );
+}
+
 
   function hasBaseOpeningBalanceForDate(staffId, dateStr) {
     const acc = ensureStaffAccount(staffId);
