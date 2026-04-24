@@ -1299,6 +1299,11 @@ function hideProcessing() {
         state.ui.tool = null;
       } else {
         state.ui.tool = nextTool;
+        if (nextTool === 'credit' || nextTool === 'debit') {
+          state.ui.txAccDraft = '';
+          state.ui.selectedCustomerId = null;
+          state.ui.selectedJournalCustomerId = null;
+        }
         if (nextTool === 'approval_customer_service') state.ui.approvalsSection = 'customer_service';
         if (nextTool === 'approval_tellering') state.ui.approvalsSection = 'tellering';
         if (nextTool === 'approval_others') state.ui.approvalsSection = 'others';
@@ -1504,7 +1509,7 @@ function hideProcessing() {
               <div class="posting-row-left">
                 <div class="posting-inline-group posting-inline-account">
                   <label class="sheet-label posting-label-account" for="txAcc">Account Number</label>
-                  <input id="txAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" value="${escapeHtml(String(state.ui.txAccDraft ?? getSelectedCustomer()?.accountNumber ?? ''))}" />
+                  <input id="txAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                   <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
                 </div>
               </div>
@@ -2531,8 +2536,8 @@ function renderTellerBalances() {
   }
 
   function hasApprovedFloat(staffId, dateStr) {
-  return hasBaseOpeningBalanceForDate(staffId, dateStr);
-}
+    return openingBalanceOnlyForDate(staffId, dateStr) > 0 || hasBaseOpeningBalanceForDate(staffId, dateStr);
+  }
 
 
   function bindJournal(kind) {
@@ -2856,8 +2861,9 @@ function renderTellerBalances() {
     if (byId('txPostSingle')) byId('txPostSingle').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
-      const customer = getSelectedCustomer() || getCustomerByAccountNo(byId('txAcc').value);
-      if (!customer) return showToast('Search for customer first');
+      const accountNumberInput = String(byId('txAcc')?.value || '').trim();
+      const customer = getCustomerByAccountNo(accountNumberInput);
+      if (!accountNumberInput || !customer) return showToast('Search for customer first');
       if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast('Frozen account cannot accept transactions'); }
       const amount = Number(byId('txAmount').value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
@@ -3218,12 +3224,22 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
 }
 
 
+  function approvedFormTotalForDate(staffId, dateStr) {
+    return (state.approvals || [])
+      .filter(r => r.type === 'float_declaration'
+        && String(r.status || '').toLowerCase() === 'approved'
+        && (r.payload?.staffId === staffId || r.payload?.staff_id === staffId)
+        && (r.payload?.date === dateStr || r.payload?.float_date === dateStr))
+      .reduce((sum, r) => sum + Number(r.payload?.amount || r.payload?.floatAmount || 0), 0);
+  }
+
   function hasBaseOpeningBalanceForDate(staffId, dateStr) {
     const acc = ensureStaffAccount(staffId);
-    return acc.entries.some(e =>
+    const localExists = acc.entries.some(e =>
       (e.type === 'approved_form' || e.type === 'approved_float') &&
       (e.formDate === dateStr || e.floatDate === dateStr)
     );
+    return localExists || approvedFormTotalForDate(staffId, dateStr) > 0;
   }
 
   function hasOpeningBalanceForDate(staffId, dateStr) {
@@ -3232,12 +3248,14 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
 
   function openingBalanceOnlyForDate(staffId, dateStr) {
     const acc = ensureStaffAccount(staffId);
-    return acc.entries
+    const localTotal = acc.entries
       .filter(e =>
         (e.type === 'approved_form' || e.type === 'approved_float') &&
         (e.formDate === dateStr || e.floatDate === dateStr)
       )
       .reduce((s, e) => s + Number(e.amount || 0), 0);
+    const approvedTotal = approvedFormTotalForDate(staffId, dateStr);
+    return Math.max(localTotal, approvedTotal);
   }
 
   function floatTopUpsForDate() {
