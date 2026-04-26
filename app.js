@@ -1553,7 +1553,7 @@ function hideProcessing() {
             <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Form</th><th>Amount</th><th>Remaining Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one">
-                <div class="journal-cell"><input id="journalAcc" class="entry-input" maxlength="4"><div class="journal-cell-label">Account Number</div></div>
+                <div class="journal-cell"><div class="journal-account-search-row"><input id="journalAcc" class="entry-input" maxlength="4"><button id="journalSearchBtn" type="button" class="sheet-btn secondary tiny-btn ultra-compact-btn">Search</button></div><div class="journal-cell-label">Account Number</div></div>
                 <div class="journal-cell grow"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
                 <div class="journal-cell"><input id="journalAmount" class="entry-input" type="number"><div class="journal-cell-label">Amount</div></div>
               </div>
@@ -2640,18 +2640,18 @@ function renderTellerBalances() {
     };
 
     const recalcPreview = () => {
+      const formBase = getOpeningBalanceForDate(staff.id, businessDate());
       const approvedBase = currentFloatAvailable(staff.id, businessDate());
       const totalPending = pendingJournalTotal(staff.id, businessDate());
       const thisJournalTotal = journal.reduce((acc,row)=>acc+Number(row.amount||0),0);
       let running = approvedBase - (totalPending - thisJournalTotal);
       const withBalances = journal.map((row) => {
-        const before = running;
         running -= Number(row.amount||0);
         const remaining = running;
         const variance = Math.max(0, -remaining);
-        return { row, before, remaining, variance };
+        return { row, formBase, remaining, variance };
       });
-      const rows = withBalances.map(({ row, before, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(before)}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
+      const rows = withBalances.map(({ row, formBase, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(formBase)}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
       ['journalRunningFloat','postingRunningFloat'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,running)); });
       ['journalVariance','postingVariance'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,-running)); });
@@ -2772,6 +2772,7 @@ function renderTellerBalances() {
     if (byId('journalCollapseBtn')) byId('journalCollapseBtn').onclick = toggleJournalCollapse;
     if (byId('journalCollapseTopBtn')) byId('journalCollapseTopBtn').onclick = toggleJournalCollapse;
 
+    if (byId('journalSearchBtn')) byId('journalSearchBtn').onclick = () => openJournalCustomerSearchModal(state.customers);
     if (byId('journalAcc')) {
       byId('journalAcc').oninput = () => { const v = (byId('journalAcc').value || '').trim(); if (/^\d{4}$/.test(v)) searchJournal(); };
       byId('journalAcc').onchange = searchJournal;
@@ -2972,7 +2973,7 @@ function renderTellerBalances() {
       btn.style.zIndex = '10';
       btn.addEventListener('click', function(e) {
         e.stopPropagation();
-        openJournalApprovalModal(this.dataset.inspectJournal);
+        openRequestDetailModal(this.dataset.inspectJournal);
       }, true);
     });
     qq('[data-inspect-request]').forEach(btn => btn.onclick = ()=> openRequestDetailModal(btn.dataset.inspectRequest));
@@ -3169,6 +3170,28 @@ requestedByStaffId: st.id,   // 👈 add this
       const qv = search.value.trim().toLowerCase();
       const filtered = !qv ? list : list.filter(c => String(c.accountNumber).includes(qv) || c.name.toLowerCase().includes(qv));
       byId('modalCustomerRows').innerHTML = renderRows(filtered); bindPicks();
+    };
+  }
+
+
+  function openJournalCustomerSearchModal(list) {
+    const renderRows = arr => arr.map(c=>`<tr><td>${c.accountNumber}</td><td>${c.name}</td><td>${c.phone}</td><td><span class="linklike" data-pick-journal="${c.id}">Select</span></td></tr>`).join('');
+    openModal('Customer Search', `<div class="stack"><input id="modalJournalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th></th></tr></thead><tbody id="modalJournalCustomerRows">${renderRows(list)}</tbody></table></div></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    const bindPicks = () => qq('[data-pick-journal]').forEach(el => el.onclick = () => {
+      const c = state.customers.find(x => x.id === el.dataset.pickJournal);
+      if (!c) return showToast('Customer not found');
+      state.ui.selectedJournalCustomerId = c.id;
+      save();
+      closeModal();
+      if (byId('journalAcc')) byId('journalAcc').value = c.accountNumber || '';
+      if (byId('journalName')) byId('journalName').textContent = c.name || '—';
+    });
+    bindPicks();
+    const search = byId('modalJournalCustomerSearch');
+    if (search) search.oninput = () => {
+      const qv = search.value.trim().toLowerCase();
+      const filtered = !qv ? list : list.filter(c => String(c.accountNumber).includes(qv) || String(c.name || '').toLowerCase().includes(qv));
+      byId('modalJournalCustomerRows').innerHTML = renderRows(filtered); bindPicks();
     };
   }
 
