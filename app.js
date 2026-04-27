@@ -1552,10 +1552,14 @@ function hideProcessing() {
           <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
             <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Form</th><th>Amount</th><th>Remaining Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
-              <div class="journal-entry-top row-one">
-                <div class="journal-cell journal-account-cell"><div class="journal-account-search-row" style="display:flex;align-items:center;gap:6px;white-space:nowrap;"><input id="journalAcc" class="entry-input" maxlength="4" style="width:92px;flex:0 0 92px;"><button id="journalSearchBtn" type="button" class="sheet-btn secondary tiny-btn ultra-compact-btn" style="flex:0 0 auto;">Search</button></div><div class="journal-cell-label">Account Number</div></div>
-                <div class="journal-cell grow"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
-                <div class="journal-cell"><input id="journalAmount" class="entry-input" type="number"><div class="journal-cell-label">Amount</div></div>
+              <div class="journal-entry-top row-one" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="posting-inline-group posting-inline-account journal-account-inline" style="display:flex;align-items:center;gap:6px;flex:0 0 auto;white-space:nowrap;">
+                  <label class="sheet-label posting-label-account" for="journalAcc">Account Number</label>
+                  <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" style="width:76px;flex:0 0 76px;">
+                  <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
+                </div>
+                <div class="journal-cell grow" style="min-width:220px;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
+                <div class="journal-cell" style="min-width:170px;"><input id="journalAmount" class="entry-input" type="number"><div class="journal-cell-label">Amount</div></div>
               </div>
               <div class="journal-entry-top row-two">
                 <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid To'}</div></div>
