@@ -10997,3 +10997,37 @@ button[data-inspect-journal] {
   gap: 10px;
   font-weight: 500;
 }
+
+/* ===== 2026-04-27 SURGICAL PATCH: journal account/search alignment only ===== */
+.journal-entry-top.row-one{
+  display:grid !important;
+  grid-template-columns:max-content 64px max-content 194px 160px !important;
+  column-gap:4px !important;
+  gap:4px !important;
+  align-items:center !important;
+  justify-content:start !important;
+}
+.journal-entry-top.row-one .posting-label-account[for="journalAcc"]{
+  width:auto !important;
+  min-width:0 !important;
+  max-width:none !important;
+  margin:0 !important;
+  padding:0 !important;
+  white-space:nowrap !important;
+  align-self:center !important;
+}
+#journalAcc{
+  width:64px !important;
+  min-width:64px !important;
+  max-width:64px !important;
+  margin:0 !important;
+  justify-self:start !important;
+}
+#journalSearchBtn{
+  width:auto !important;
+  min-width:0 !important;
+  max-width:none !important;
+  margin-left:-2px !important;
+  justify-self:start !important;
+  align-self:center !important;
+}
