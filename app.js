@@ -1553,7 +1553,7 @@ function hideProcessing() {
             <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Form</th><th>Amount</th><th>Remaining Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one">
-                <div class="journal-cell"><div class="journal-account-search-row"><input id="journalAcc" class="entry-input" maxlength="4"><button id="journalSearchBtn" type="button" class="sheet-btn secondary tiny-btn ultra-compact-btn">Search</button></div><div class="journal-cell-label">Account Number</div></div>
+                <div class="journal-cell journal-account-cell"><div class="journal-account-search-row" style="display:flex;align-items:center;gap:6px;white-space:nowrap;"><input id="journalAcc" class="entry-input" maxlength="4" style="width:92px;flex:0 0 92px;"><button id="journalSearchBtn" type="button" class="sheet-btn secondary tiny-btn ultra-compact-btn" style="flex:0 0 auto;">Search</button></div><div class="journal-cell-label">Account Number</div></div>
                 <div class="journal-cell grow"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
                 <div class="journal-cell"><input id="journalAmount" class="entry-input" type="number"><div class="journal-cell-label">Amount</div></div>
               </div>
@@ -1695,6 +1695,35 @@ function hideProcessing() {
       ${field('Updated NIN', patch.nin, 'field-id')}
       ${field('Updated BVN', patch.bvn, 'field-bvn')}
     </div>${photoBlock}</div>`;
+  } else if (req.type === 'customer_credit_journal' || req.type === 'customer_debit_journal') {
+    const rows = Array.isArray(p.rows) ? p.rows : Array.isArray(p.entries) ? p.entries : [];
+    const total = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const totalCharges = rows.reduce((sum, row) => sum + getTotalChargeAmount(row), 0);
+    const rowHtml = rows.map((row, idx) => {
+      const chargeText = req.type === 'customer_credit_journal' ? chargeInlineMeta(row) : '';
+      const detailsText = [row.details || '', chargeText].filter(Boolean).join(' • ');
+      return `<tr>
+        <td>${idx + 1}</td>
+        <td>${esc(row.customerName || customerName(row.customerId) || '—')}</td>
+        <td>${esc(row.accountNumber || '—')}</td>
+        <td>${money(row.amount)}</td>
+        <td>${esc(row.receivedOrPaidBy || row.paidTo || '')}</td>
+        <td>${esc(row.payoutSource || row.paymentMode || '')}</td>
+        <td>${esc(detailsText || '—')}</td>
+      </tr>`;
+    }).join('');
+    const note = p.fieldNote;
+    const noteBlock = note ? `<div class="note">Field note attached: ${esc(note.name || 'Attached file')}</div>` : '';
+    html = `<div class="stack">
+      <div class="form-grid three modal-cs-grid">
+        ${field('Business Date', p.date || p.businessDate || '—', 'field-date')}
+        ${field('Items', rows.length, 'field-account')}
+        ${field('Total Amount', money(total), 'field-account')}
+        ${req.type === 'customer_credit_journal' ? field('Total Charges', money(totalCharges), 'field-account') : ''}
+      </div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>${req.type === 'customer_credit_journal' ? 'Received By' : 'Paid To'}</th><th>Mode</th><th>Details</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="7" class="muted">No journal entries</td></tr>'}</tbody></table></div>
+      ${noteBlock}
+    </div>`;
   } else if (req.type === 'account_reactivation') {
     html = `<div class="stack"><div class="form-grid two modal-cs-grid">
       ${field('Customer Name', customer?.name, 'field-wide')}
