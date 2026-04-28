@@ -761,6 +761,15 @@ function subscribeRealtime() {
       return defaultResult.ok(data);
     }
 
+    function isMissingColumnOrRelationError(error) {
+      const code = String(error?.code || '');
+      const message = String(error?.message || '').toLowerCase();
+      const details = String(error?.details || '').toLowerCase();
+      return code === '42703' || code === '42P01' || code === 'PGRST204' ||
+        (message.includes('column') && (message.includes('does not exist') || message.includes('not found'))) ||
+        message.includes('could not find') || details.includes('does not exist');
+    }
+
     async function fetchExistingPostedTransactionsByRequest(requestId) {
       if (!requestId) return defaultResult.ok([]);
       const { data, error: queryError } = await client
@@ -768,7 +777,13 @@ function subscribeRealtime() {
         .select('id, account_id, customer_id, amount, tx_type, balance_after, approval_request_id')
         .eq('approval_request_id', requestId)
         .order('created_at', { ascending: true });
-      if (queryError) return defaultResult.err('POSTED_TX_CHECK_FAILED', 'Could not verify previously posted transactions.', queryError);
+      if (queryError) {
+        if (isMissingColumnOrRelationError(queryError)) {
+          console.warn('[DUCESS gateway] approval_request_id is not available on customer_transactions yet; skipping prior-post check.', queryError);
+          return defaultResult.ok([]);
+        }
+        return defaultResult.err('POSTED_TX_CHECK_FAILED', 'Could not verify previously posted transactions.', queryError);
+      }
       return defaultResult.ok(Array.isArray(data) ? data : []);
     }
 
@@ -874,7 +889,17 @@ function subscribeRealtime() {
         approval_request_id: approvalRequestId,
         status: 'approved',
       };
-      const { data, error: insertError } = await client.from(customerTransactionsTable).insert(insertRow).select(customerTransactionsSelect).maybeSingle();
+      let insertAttempt = await client.from(customerTransactionsTable).insert(insertRow).select(customerTransactionsSelect).maybeSingle();
+      let data = insertAttempt.data;
+      let insertError = insertAttempt.error;
+      if (insertError && isMissingColumnOrRelationError(insertError)) {
+        const legacyInsertRow = { ...insertRow };
+        delete legacyInsertRow.approval_request_id;
+        delete legacyInsertRow.status;
+        insertAttempt = await client.from(customerTransactionsTable).insert(legacyInsertRow).select(customerTransactionsSelect).maybeSingle();
+        data = insertAttempt.data;
+        insertError = insertAttempt.error;
+      }
       if (insertError) return defaultResult.err('CUSTOMER_TX_INSERT_FAILED', 'Could not post approved transaction to Supabase.', insertError);
 
       const balanceResult = await upsertAccountBalance(accountSummary.accountId, balanceAfter);
