@@ -2805,8 +2805,28 @@ function renderTellerBalances() {
 
     if (byId('journalSearchBtn')) byId('journalSearchBtn').onclick = () => openJournalCustomerSearchModal(state.customers);
     if (byId('journalAcc')) {
-      byId('journalAcc').oninput = () => { const v = (byId('journalAcc').value || '').trim(); if (/^\d{4}$/.test(v)) searchJournal(); };
-      byId('journalAcc').onchange = searchJournal;
+      const clearJournalCustomerSelection = () => {
+        state.ui.selectedJournalCustomerId = null;
+        if (byId('journalName')) byId('journalName').textContent = '—';
+        save();
+      };
+      byId('journalAcc').oninput = () => {
+        const input = byId('journalAcc');
+        const v = (input?.value || '').trim();
+        const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
+        if (!v || (selected && String(selected.accountNumber || '') !== v)) {
+          clearJournalCustomerSelection();
+        }
+        if (/^\d{4}$/.test(v)) searchJournal();
+      };
+      byId('journalAcc').onchange = () => {
+        const v = (byId('journalAcc')?.value || '').trim();
+        if (!v) {
+          clearJournalCustomerSelection();
+          return;
+        }
+        searchJournal();
+      };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
     }
 
