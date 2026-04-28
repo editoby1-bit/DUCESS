@@ -1659,7 +1659,13 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (value !== undefined && value !== null && value !== '') query = query.eq(column, value);
       });
       const { data, error: queryError } = await query.maybeSingle();
-      if (queryError) return defaultResult.err('ACCOUNT_FETCH_FAILED', 'Could not fetch account from Supabase.', queryError);
+      if (queryError) {
+        // Migration bridge: current DUCESS can use customers.account_number directly
+        // without a customer_accounts table. Missing legacy account table should
+        // not block approval posting.
+        if (isMissingColumnOrRelationError(queryError)) return defaultResult.ok(null);
+        return defaultResult.err('ACCOUNT_FETCH_FAILED', 'Could not fetch account from Supabase.', queryError);
+      }
       return defaultResult.ok(data || null);
     }
 
@@ -1840,25 +1846,40 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function getAccountSummary(accountId) {
       if (!canUseSupabase()) return local.accounts.getAccountSummary(accountId);
-      let accountResult = await fetchAccountBySelector({ id: accountId });
-      if (!accountResult.ok) return accountResult;
+      const key = String(accountId || '').trim();
+      if (!key) return defaultResult.ok(null);
+
+      // Migration bridge: approval payloads often pass the customer id as accountId.
+      // Resolve from customers first so posting does not depend on customer_accounts.
       let customer = null;
-      let accountRow = accountResult.data;
-      if (accountRow?.customer_id) {
-        const customerResult = await getCustomerById(accountRow.customer_id);
-        if (!customerResult.ok) return customerResult;
-        customer = customerResult.data;
-      }
+      const directCustomerResult = await getCustomerById(key);
+      if (!directCustomerResult.ok) return directCustomerResult;
+      customer = directCustomerResult.data;
+
+      let accountRow = null;
       if (!customer) {
-        const customerResult = await getCustomerById(accountId);
-        if (!customerResult.ok) return customerResult;
-        customer = customerResult.data;
+        const accountResult = await fetchAccountBySelector({ id: key });
+        if (!accountResult.ok) return accountResult;
+        accountRow = accountResult.data;
+        if (accountRow?.customer_id) {
+          const customerResult = await getCustomerById(accountRow.customer_id);
+          if (!customerResult.ok) return customerResult;
+          customer = customerResult.data;
+        }
       }
+
       if (!customer && accountRow?.account_number) {
         const customerResult = await getCustomerByAccountNumber(accountRow.account_number);
         if (!customerResult.ok) return customerResult;
         customer = customerResult.data;
       }
+
+      if (!customer) {
+        const byAccountNumber = await getCustomerByAccountNumber(key);
+        if (!byAccountNumber.ok) return byAccountNumber;
+        customer = byAccountNumber.data;
+      }
+
       if (!customer) return defaultResult.ok(null);
       const summary = customerToAccountSummary(customer);
       if (summary && accountRow?.id) summary.accountId = accountRow.id;
