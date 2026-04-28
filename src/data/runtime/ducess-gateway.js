@@ -1007,11 +1007,11 @@ if (inserted.error) {
         const ledgerResult = await insertStaffCashLedgerEntry({
           approvalRequestId: requestRow.id,
           staffId: payload.staffId || null,
-          entryType: 'approved_float',
-          amount: normalizeNumber(payload.amount),
-          delta: normalizeNumber(payload.amount),
-          note: payload.note || `Approved opening float for ${payload.staffName || 'staff'}`,
-          floatDate: payload.date || null,
+          entryType: 'approved_form',
+          amount: normalizeNumber(payload.amount || payload.floatAmount),
+          delta: normalizeNumber(payload.amount || payload.floatAmount),
+          note: payload.note || `Approved form for ${payload.staffName || 'staff'}`,
+          floatDate: payload.date || payload.float_date || null,
           createdByStaffId: requestRow.requested_by_staff_id || null,
           approvedByStaffId: approver?.staffId || null,
         });
@@ -1020,19 +1020,7 @@ if (inserted.error) {
       }
 
       if (type === 'float_topup') {
-        const ledgerResult = await insertStaffCashLedgerEntry({
-          approvalRequestId: requestRow.id,
-          staffId: payload.staffId || null,
-          entryType: 'approved_float_topup',
-          amount: normalizeNumber(payload.amount),
-          delta: normalizeNumber(payload.amount),
-          note: payload.note || `Approved float top-up for ${payload.staffName || 'staff'}`,
-          floatDate: payload.date || null,
-          createdByStaffId: requestRow.requested_by_staff_id || null,
-          approvedByStaffId: approver?.staffId || null,
-        });
-        if (!ledgerResult.ok) return ledgerResult;
-        return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: ledgerResult.data, decisionNote: decisionNote || '' });
+        return defaultResult.ok({ posted: false, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '', disabled: true });
       }
 
       if (type === 'debt_repayment') {
@@ -1330,11 +1318,13 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     function computeCodMetricsFromRows(transactionRows = [], cashRows = []) {
       const totalCredits = transactionRows.filter((row) => String(row.tx_type || row.type || '').toLowerCase() === 'credit').reduce((sum, row) => sum + normalizeNumber(row.amount), 0);
       const totalDebits = transactionRows.filter((row) => String(row.tx_type || row.type || '').toLowerCase() === 'debit').reduce((sum, row) => sum + normalizeNumber(row.amount), 0);
-      const openingBalance = cashRows.filter((row) => String(row.entry_type || '').toLowerCase() === 'approved_float').reduce((sum, row) => sum + normalizeNumber(row.amount), 0);
-      const floatTopUps = cashRows.filter((row) => String(row.entry_type || '').toLowerCase() === 'approved_float_topup').reduce((sum, row) => sum + normalizeNumber(row.amount), 0);
-      const effectiveOpeningBalance = openingBalance + floatTopUps;
+      const openingBalance = cashRows
+        .filter((row) => ['approved_form', 'approved_float'].includes(String(row.entry_type || '').toLowerCase()))
+        .reduce((sum, row) => sum + normalizeNumber(row.amount), 0);
+      const floatTopUps = 0;
+      const effectiveOpeningBalance = openingBalance;
       const netBookBalance = totalCredits - totalDebits;
-      const remainingBalance = openingBalance + floatTopUps - totalCredits - totalDebits;
+      const remainingBalance = openingBalance - totalCredits - totalDebits;
       const expectedCash = remainingBalance;
       const overdraw = Math.max(0, -remainingBalance);
       return { openingBalance, floatTopUps, effectiveOpeningBalance, totalCredits, totalDebits, netBookBalance, remainingBalance, expectedCash, overdraw };

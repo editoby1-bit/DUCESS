@@ -858,6 +858,7 @@ if (approvalRecord.type === 'float_topup') {
     if (result?.ok) {
       await syncApprovalsFromGateway();
       await syncApprovalEffectsFromGateway(result.data);
+      await syncCodFromGateway();
       pushAudit('request_approved', `${result.data?.type || 'request'} approved</div>`);
       render();
     }
@@ -2805,24 +2806,22 @@ function renderTellerBalances() {
 
     if (byId('journalSearchBtn')) byId('journalSearchBtn').onclick = () => openJournalCustomerSearchModal(state.customers);
     if (byId('journalAcc')) {
-      const clearJournalCustomerSelection = () => {
-        state.ui.selectedJournalCustomerId = null;
-        if (byId('journalName')) byId('journalName').textContent = '—';
-        save();
-      };
       byId('journalAcc').oninput = () => {
-        const input = byId('journalAcc');
-        const v = (input?.value || '').trim();
+        const v = (byId('journalAcc').value || '').trim();
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
         if (!v || (selected && String(selected.accountNumber || '') !== v)) {
-          clearJournalCustomerSelection();
+          if (byId('journalName')) byId('journalName').textContent = '—';
+          state.ui.selectedJournalCustomerId = null;
+          save();
         }
         if (/^\d{4}$/.test(v)) searchJournal();
       };
       byId('journalAcc').onchange = () => {
-        const v = (byId('journalAcc')?.value || '').trim();
+        const v = (byId('journalAcc').value || '').trim();
         if (!v) {
-          clearJournalCustomerSelection();
+          if (byId('journalName')) byId('journalName').textContent = '—';
+          state.ui.selectedJournalCustomerId = null;
+          save();
           return;
         }
         searchJournal();
@@ -2840,8 +2839,12 @@ function renderTellerBalances() {
     });
 
     if (byId('journalAddRow')) byId('journalAddRow').onclick = () => {
-      const customer = (state.ui.selectedJournalCustomerId && state.customers.find(c => c.id === state.ui.selectedJournalCustomerId)) || getCustomerByAccountNo(byId('journalAcc')?.value || '');
-      if (!customer) return showToast('Search for customer first');
+      const journalAccValue = String(byId('journalAcc')?.value || '').trim();
+      const selectedJournalCustomer = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
+      const customer = (selectedJournalCustomer && String(selectedJournalCustomer.accountNumber || '') === journalAccValue)
+        ? selectedJournalCustomer
+        : getCustomerByAccountNo(journalAccValue);
+      if (!journalAccValue || !customer) return showToast('Search for customer first');
       if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast('Frozen account cannot accept transactions'); }
       const amount = Number(byId('journalAmount')?.value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
