@@ -846,76 +846,64 @@ function subscribeRealtime() {
     }
 
     async function postSingleCustomerTransaction(requestRow, entry, txType, approver, options = {}) {
-      const approvalRequestId = requestRow?.id;
-      const accountLookupId = entry?.accountId || entry?.customerId || requestRow?.entity_id || requestRow?.entityId;
-      const accountSummaryResult = await getAccountSummary(accountLookupId);
-      if (!accountSummaryResult.ok) return accountSummaryResult;
-      const accountSummary = accountSummaryResult.data;
-      if (!accountSummary?.accountId) return defaultResult.err('ACCOUNT_NOT_FOUND', 'Could not resolve target account for approved request.');
+  const approvalRequestId = requestRow?.id;
+  const accountLookupId = entry?.accountId || entry?.customerId || requestRow?.entity_id || requestRow?.entityId;
 
-      if (!options.skipExistingCheck) {
-        const existingTxResult = await fetchExistingPostedTransactionsByRequest(approvalRequestId);
-        if (!existingTxResult.ok) return existingTxResult;
-        if (existingTxResult.data.length) {
-        return defaultResult.ok({
-          alreadyPosted: true,
-          requestId: approvalRequestId,
-          accountId: accountSummary.accountId,
-          customerId: accountSummary.customerId,
-          amount: normalizeNumber(entry?.amount),
-          txType,
-          balanceAfter: existingTxResult.data[existingTxResult.data.length - 1]?.balance_after ?? accountSummary.bookBalance,
-        });
-        }
-      }
+  const accountSummaryResult = await getAccountSummary(accountLookupId);
+  if (!accountSummaryResult.ok) return accountSummaryResult;
 
-      const currentBalance = normalizeNumber(accountSummary.bookBalance);
-      const amount = normalizeNumber(entry?.amount);
-      const delta = txType === 'credit' ? amount : -amount;
-      const balanceAfter = currentBalance + delta;
-      const insertRow = {
-        customer_id: entry?.customerId || accountSummary.customerId || null,
-        account_id: accountSummary.accountId,
-        tx_type: txType,
-        amount,
-        details: entry?.details || '',
-        posted_by: requestRow?.requested_by_name || entry?.requestedByName || '',
-        posted_by_id: requestRow?.requested_by_staff_id || entry?.requestedByStaffId || '',
-        approved_by: approver?.name || '',
-        counterparty: entry?.receivedOrPaidBy || entry?.counterparty || '',
-        effective_at: isoAtMidday(entry?.businessDate || entry?.date || inferApprovalDate(requestRow)),
-        created_at: new Date().toISOString(),
-        balance_after: balanceAfter,
-        approval_request_id: approvalRequestId,
-        status: 'approved',
-      };
-      let insertAttempt = await client.from(customerTransactionsTable).insert(insertRow).select(customerTransactionsSelect).maybeSingle();
-      let data = insertAttempt.data;
-      let insertError = insertAttempt.error;
-      if (insertError && isMissingColumnOrRelationError(insertError)) {
-        const legacyInsertRow = { ...insertRow };
-        delete legacyInsertRow.approval_request_id;
-        delete legacyInsertRow.status;
-        insertAttempt = await client.from(customerTransactionsTable).insert(legacyInsertRow).select(customerTransactionsSelect).maybeSingle();
-        data = insertAttempt.data;
-        insertError = insertAttempt.error;
-      }
-      if (insertError) return defaultResult.err('CUSTOMER_TX_INSERT_FAILED', 'Could not post approved transaction to Supabase.', insertError);
+  const accountSummary = accountSummaryResult.data;
+  if (!accountSummary?.accountId) {
+    return defaultResult.err('ACCOUNT_NOT_FOUND', 'Could not resolve target account for approved request.');
+  }
 
-      const balanceResult = await upsertAccountBalance(accountSummary.accountId, balanceAfter);
-      if (!balanceResult.ok) return balanceResult;
+  const currentBalance = normalizeNumber(accountSummary.bookBalance);
+  const amount = normalizeNumber(entry?.amount);
+  const delta = txType === 'credit' ? amount : -amount;
+  const balanceAfter = currentBalance + delta;
 
-      return defaultResult.ok({
-        alreadyPosted: false,
-        requestId: approvalRequestId,
-        accountId: accountSummary.accountId,
-        customerId: entry?.customerId || accountSummary.customerId || null,
-        amount,
-        txType,
-        balanceAfter,
-        transactionId: data?.id || null,
-      });
-    }
+  const insertRow = {
+    customer_id: entry?.customerId || accountSummary.customerId || null,
+    account_id: accountSummary.accountId,
+    tx_type: txType,
+    amount,
+    details: entry?.details || '',
+    posted_by: requestRow?.requested_by_name || entry?.requestedByName || '',
+    posted_by_id: requestRow?.requested_by_staff_id || entry?.requestedByStaffId || '',
+    approved_by: approver?.name || '',
+    counterparty: entry?.receivedOrPaidBy || entry?.counterparty || '',
+    effective_at: isoAtMidday(entry?.businessDate || entry?.date || inferApprovalDate(requestRow)),
+    created_at: new Date().toISOString(),
+    balance_after: balanceAfter,
+    approval_request_id: approvalRequestId
+  };
+
+  const insertAttempt = await client
+    .from(customerTransactionsTable)
+    .insert(insertRow);
+
+  if (insertAttempt.error) {
+    return defaultResult.err(
+      'CUSTOMER_TX_INSERT_FAILED',
+      'Could not post approved transaction to Supabase.',
+      insertAttempt.error
+    );
+  }
+
+  const balanceResult = await upsertAccountBalance(accountSummary.accountId, balanceAfter);
+  if (!balanceResult.ok) return balanceResult;
+
+  return defaultResult.ok({
+    alreadyPosted: false,
+    requestId: approvalRequestId,
+    accountId: accountSummary.accountId,
+    customerId: entry?.customerId || accountSummary.customerId || null,
+    amount,
+    txType,
+    balanceAfter,
+    transactionId: null
+  });
+}
 
     async function performDirectPostingForApproval(requestRow, approver, decisionNote) {
   const type = requestRow?.request_type || requestRow?.type || '';
