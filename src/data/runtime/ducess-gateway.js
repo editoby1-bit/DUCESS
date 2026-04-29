@@ -882,10 +882,12 @@ function subscribeRealtime() {
     .from(customerTransactionsTable)
     .insert(insertRow);
 
-  if (insertAttempt.error) {
+  console.log('CUSTOMER TRANSACTION INSERT RESULT:', insertAttempt);
+
+  if (insertAttempt.error && insertAttempt.error.message) {
     return defaultResult.err(
       'CUSTOMER_TX_INSERT_FAILED',
-      'Could not post approved transaction to Supabase.',
+      insertAttempt.error.message,
       insertAttempt.error
     );
   }
