@@ -2382,6 +2382,7 @@ function renderTellerBalances() {
 
   confirmAction('Submit account opening request?', async () => {
   showProcessing('Sending request...');
+  await nextPaint();
 
   try {
     const result = await submitApprovalThroughGateway('account_opening', payload);
@@ -2809,7 +2810,13 @@ function renderTellerBalances() {
       byId('journalAcc').oninput = () => {
         const v = (byId('journalAcc').value || '').trim();
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
-        if (!v || (selected && String(selected.accountNumber || '') !== v)) {
+        if (!v) {
+          if (byId('journalName')) byId('journalName').textContent = '—';
+          state.ui.selectedJournalCustomerId = null;
+          save();
+          return;
+        }
+        if (selected && String(selected.accountNumber || '') !== v) {
           if (byId('journalName')) byId('journalName').textContent = '—';
           state.ui.selectedJournalCustomerId = null;
           save();
@@ -2926,30 +2933,35 @@ function renderTellerBalances() {
       const chargeBreakdown = kind === 'credit' ? collectChargeBreakdownFromUi('single', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       const customerCreditAmount = kind === 'credit' ? Math.max(0, amount - totalChargeAmount) : amount;
-      confirmAction(`Submit single ${kind} request for approval?`, () => {
-        submitApprovalThroughGateway(kind === 'credit' ? 'customer_credit' : 'customer_debit', {
-          customerId: customer.id,
-          customerName: customer.name,
-          accountNumber: customer.accountNumber,
-          amount,
-          customerCreditAmount,
-          chargeBreakdown,
-          totalChargeAmount,
-          commissionAmount: chargeBreakdown.find(row => row.key === 'commission')?.amount || 0,
-          chargeTraceId: totalChargeAmount > 0 ? uid('ctr') : '',
-          commissionTraceId: totalChargeAmount > 0 ? uid('ctr') : '',
-          details: byId('txDetails').value.trim(),
-          receivedOrPaidBy: byId('txCounterparty').value.trim(),
-          payoutSource: mode,
-          paymentMode: mode,
-          staffId: staff.id,
-          date: businessDate()
-        }).then((result) => {
+      confirmAction(`Submit single ${kind} request for approval?`, async () => {
+        showProcessing('Sending request...');
+        await nextPaint();
+        try {
+          const result = await submitApprovalThroughGateway(kind === 'credit' ? 'customer_credit' : 'customer_debit', {
+            customerId: customer.id,
+            customerName: customer.name,
+            accountNumber: customer.accountNumber,
+            amount,
+            customerCreditAmount,
+            chargeBreakdown,
+            totalChargeAmount,
+            commissionAmount: chargeBreakdown.find(row => row.key === 'commission')?.amount || 0,
+            chargeTraceId: totalChargeAmount > 0 ? uid('ctr') : '',
+            commissionTraceId: totalChargeAmount > 0 ? uid('ctr') : '',
+            details: byId('txDetails').value.trim(),
+            receivedOrPaidBy: byId('txCounterparty').value.trim(),
+            payoutSource: mode,
+            paymentMode: mode,
+            staffId: staff.id,
+            date: businessDate()
+          });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
           resetFields();
           showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} request sent for approval`);
           render();
-        });
+        } finally {
+          hideProcessing();
+        }
       });
     };
 
@@ -2958,29 +2970,32 @@ function renderTellerBalances() {
       if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
       if (!journal.length) return showToast('Generate journal first');
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
-      confirmAction(`Submit ${kind} journal for approval?`, () => {
-        submitApprovalThroughGateway(kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal', {
-          staffId: staff.id,
-          date: businessDate(),
-          openingFloat: getOpeningBalanceForDate(staff.id, businessDate()),
-          rows: journal.map(row => ({
-            customerId: row.customerId,
-            customerName: row.customerName,
-            accountNumber: row.accountNumber,
-            amount: row.amount,
-            customerCreditAmount: row.customerCreditAmount,
-            chargeBreakdown: row.chargeBreakdown,
-            totalChargeAmount: row.totalChargeAmount,
-            commissionAmount: row.commissionAmount,
-            chargeTraceId: row.chargeTraceId || row.commissionTraceId,
-            commissionTraceId: row.commissionTraceId,
-            details: row.details,
-            receivedOrPaidBy: row.receivedOrPaidBy,
-            payoutSource: row.payoutSource,
-            paymentMode: row.paymentMode
-          })),
-          fieldNote: attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null
-        }).then((result) => {
+      confirmAction(`Submit ${kind} journal for approval?`, async () => {
+        showProcessing('Sending journal...');
+        await nextPaint();
+        try {
+          const result = await submitApprovalThroughGateway(kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal', {
+            staffId: staff.id,
+            date: businessDate(),
+            openingFloat: getOpeningBalanceForDate(staff.id, businessDate()),
+            rows: journal.map(row => ({
+              customerId: row.customerId,
+              customerName: row.customerName,
+              accountNumber: row.accountNumber,
+              amount: row.amount,
+              customerCreditAmount: row.customerCreditAmount,
+              chargeBreakdown: row.chargeBreakdown,
+              totalChargeAmount: row.totalChargeAmount,
+              commissionAmount: row.commissionAmount,
+              chargeTraceId: row.chargeTraceId || row.commissionTraceId,
+              commissionTraceId: row.commissionTraceId,
+              details: row.details,
+              receivedOrPaidBy: row.receivedOrPaidBy,
+              payoutSource: row.payoutSource,
+              paymentMode: row.paymentMode
+            })),
+            fieldNote: attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null
+          });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit journal');
           journal.splice(0);
           attachmentState.fieldNote = null;
@@ -2991,7 +3006,9 @@ function renderTellerBalances() {
           save();
           showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} journal sent for approval`);
           renderWorkspace();
-        });
+        } finally {
+          hideProcessing();
+        }
       });
     };
 
@@ -3003,11 +3020,29 @@ function renderTellerBalances() {
   function bindApprovals() {
     qq('[data-approve]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
-      confirmAction('Approve this request?', () => { approveRequestRemote(btn.dataset.approve).then((result) => { if (result?.ok === false) showToast(result?.error?.message || 'Unable to approve request'); }); });
+      confirmAction('Approve this request?', async () => {
+        showProcessing('Approving request...');
+        await nextPaint();
+        try {
+          const result = await approveRequestRemote(btn.dataset.approve);
+          if (result?.ok === false) showToast(result?.error?.message || 'Unable to approve request');
+        } finally {
+          hideProcessing();
+        }
+      });
     });
     qq('[data-reject]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
-      confirmAction('Reject this request?', () => { rejectRequestRemote(btn.dataset.reject).then((result) => { if (result?.ok === false) showToast(result?.error?.message || 'Unable to reject request'); }); });
+      confirmAction('Reject this request?', async () => {
+        showProcessing('Rejecting request...');
+        await nextPaint();
+        try {
+          const result = await rejectRequestRemote(btn.dataset.reject);
+          if (result?.ok === false) showToast(result?.error?.message || 'Unable to reject request');
+        } finally {
+          hideProcessing();
+        }
+      });
     });
     qq('[data-cod-resolve]').forEach(btn => btn.onclick = () => openCODResolutionModal(btn.dataset.codResolve));
     const more = byId('approvalsMore');
