@@ -845,7 +845,7 @@ function subscribeRealtime() {
       return defaultResult.ok(data || insertRow);
     }
 
-    async function postSingleCustomerTransaction(requestRow, entry, txType, approver, options = {}) {
+   async function postSingleCustomerTransaction(requestRow, entry, txType, approver, options = {}) {
   const approvalRequestId = requestRow?.id;
   const accountLookupId = entry?.accountId || entry?.customerId || requestRow?.entity_id || requestRow?.entityId;
 
@@ -869,7 +869,7 @@ function subscribeRealtime() {
     amount,
     details: entry?.details || '',
     posted_by: requestRow?.requested_by_name || entry?.requestedByName || '',
-    posted_by_id: requestRow?.requested_by_staff_id || entry?.requestedByStaffId || '',
+    posted_by_id: null,
     approved_by: approver?.name || '',
     counterparty: entry?.receivedOrPaidBy || entry?.counterparty || '',
     effective_at: isoAtMidday(entry?.businessDate || entry?.date || inferApprovalDate(requestRow)),
