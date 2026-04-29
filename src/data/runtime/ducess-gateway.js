@@ -632,8 +632,8 @@ async function submitDebtRepayment(_payload) {
     };
   }
   function createSupabaseClient(config) {
-    const url = config?.supabase?.url || '';
-    const anonKey = config?.supabase?.anonKey || '';
+    const url = "https://ghhqlxwuvqilusisieom.supabase.co";
+const anonKey = "sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I";
     const supabaseFactory = global.supabase?.createClient;
 
     if (!supabaseFactory) {
