@@ -171,6 +171,8 @@
 
   let realtimeBound = false;
   let realtimeUnsub = null;
+  let realtimeRefreshInFlight = false;
+  let realtimeRefreshQueued = false;
   const state = bootstrapState();
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'all', from: '', to: '' }, operationalFilter: { preset: 'all', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
@@ -663,6 +665,32 @@
     render();
   }
 
+  async function refreshRealtimeState(reason = 'realtime') {
+    if (!isSupabaseApprovalMode()) return defaultResultOk(false);
+    if (realtimeRefreshInFlight) {
+      realtimeRefreshQueued = true;
+      return defaultResultOk('queued');
+    }
+    realtimeRefreshInFlight = true;
+    try {
+      await syncStaffFromGateway();
+      await syncCustomersListFromGateway();
+      await syncApprovalsFromGateway();
+      await syncCodFromGateway();
+      await syncDebtBalancesFromGateway();
+      state.__lastRealtimeRefresh = { reason, at: new Date().toISOString() };
+      save();
+      render();
+      return defaultResultOk(true);
+    } finally {
+      realtimeRefreshInFlight = false;
+      if (realtimeRefreshQueued) {
+        realtimeRefreshQueued = false;
+        setTimeout(() => refreshRealtimeState('queued').catch(err => console.warn('[DUCESS realtime sync failed]', err)), 80);
+      }
+    }
+  }
+
   function debounceAsync(fn, wait = 250) {
     let timer = null;
     return (...args) => {
@@ -673,21 +701,25 @@
 
   function setupRealtimeSubscriptions() {
     if (!isSupabaseApprovalMode() || !gateway.__realtime?.subscribe || realtimeBound) return;
-    const refreshApprovals = debounceAsync(async () => { await syncApprovalsFromGateway(); render(); }, 150);
-    const refreshCod = debounceAsync(async () => { await syncCodFromGateway(); await syncDebtBalancesFromGateway(); render(); }, 150);
+    const refreshApprovals = debounceAsync(async () => { await syncApprovalsFromGateway(); render(); }, 120);
+    const refreshCod = debounceAsync(async () => { await syncCodFromGateway(); await syncDebtBalancesFromGateway(); render(); }, 120);
     const refreshBalances = debounceAsync(async (payload) => {
       const row = payload?.new || payload?.old || {};
       if (row.customer_id) await syncCustomerFromGateway({ customerId: row.customer_id });
-      else if (row.account_id && gateway.accounts?.getAccountByNumber) {
+      else if (row.account_id && gateway.accounts?.getAccountSummary) {
         const acct = await gateway.accounts.getAccountSummary(row.account_id);
         if (acct?.ok && acct.data?.accountNumber) await syncCustomerFromGateway({ accountNumber: acct.data.accountNumber });
+        else await syncCustomersListFromGateway();
       } else {
         await syncCustomersListFromGateway();
       }
+      await syncCodFromGateway();
+      await syncDebtBalancesFromGateway();
       render();
-    }, 150);
-    const refreshCustomers = debounceAsync(async () => { await syncCustomersListFromGateway(); render(); }, 200);
-    const refreshStaff = debounceAsync(async () => { await syncStaffFromGateway(); render(); }, 200);
+    }, 120);
+    const refreshCustomers = debounceAsync(async () => { await syncCustomersListFromGateway(); render(); }, 160);
+    const refreshStaff = debounceAsync(async () => { await syncStaffFromGateway(); render(); }, 160);
+    const refreshAll = debounceAsync(async () => { await refreshRealtimeState('realtime-event'); }, 220);
     realtimeUnsub = gateway.__realtime.subscribe({
       approval: refreshApprovals,
       cod: refreshCod,
@@ -695,7 +727,12 @@
       balance: refreshBalances,
       customer: refreshCustomers,
       staff: refreshStaff,
-      onStatus: (status) => { state.__realtimeStatus = status; }
+      onEvent: refreshAll,
+      onStatus: (status) => { state.__realtimeStatus = status; save(); }
+    });
+    window.addEventListener('focus', () => refreshRealtimeState('window-focus').catch(err => console.warn('[DUCESS realtime sync failed]', err)));
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshRealtimeState('visibility-return').catch(err => console.warn('[DUCESS realtime sync failed]', err));
     });
     realtimeBound = true;
   }
@@ -1315,6 +1352,12 @@ function hideProcessing() {
           state.ui.txAccDraft = '';
           state.ui.selectedCustomerId = null;
           state.ui.selectedJournalCustomerId = null;
+          state.ui.generatedJournals ||= {};
+          state.ui.collapsedJournals ||= {};
+          const st = currentStaff();
+          const journalKey = `${st?.id || 'staff'}:${businessDate()}:${nextTool}`;
+          state.ui.generatedJournals[journalKey] = false;
+          state.ui.collapsedJournals[journalKey] = false;
         }
         if (nextTool === 'approval_customer_service') state.ui.approvalsSection = 'customer_service';
         if (nextTool === 'approval_tellering') state.ui.approvalsSection = 'tellering';
