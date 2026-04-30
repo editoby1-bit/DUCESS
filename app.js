@@ -591,6 +591,35 @@
     state.operations.incomeAccounts ||= [];
     state.operations.expenseAccounts ||= [];
     state.operations.entries ||= [];
+    const addChargeOperationalEntries = (req, entries) => {
+      (entries || []).forEach((entry, entryIndex) => {
+        const grossAmount = Number(entry?.amount || 0);
+        const chargeBreakdown = normalizeChargePayload(grossAmount, entry);
+        if (!chargeBreakdown.length) return;
+        const customerAccount = entry?.accountNumber || entry?.customerName || 'customer';
+        const traceId = entry?.chargeTraceId || entry?.commissionTraceId || `${req.id || 'approval'}_${entryIndex}`;
+        chargeBreakdown.forEach((chargeRow, chargeIndex) => {
+          const incomeAccount = getIncomeAccountByName(chargeRow.accountName || chargeRow.label);
+          const sourceChargeKey = `${req.id || 'approval'}:${entry?.id || entryIndex}:${chargeRow.key || chargeRow.label || chargeIndex}:${Number(chargeRow.amount || 0)}`;
+          if (state.operations.entries.some(e => e.sourceChargeKey === sourceChargeKey)) return;
+          state.operations.entries.unshift({
+            id: uid('op'),
+            kind: 'income',
+            accountId: incomeAccount?.id || chargeRow.key || '',
+            accountName: incomeAccount?.name || chargeRow.accountName || chargeRow.label || 'Charge Income',
+            amount: Number(chargeRow.amount || 0),
+            note: `${chargeRow.label || 'Charge'} from ${customerAccount} • Trace ${traceId}`,
+            date: `${entry?.date || req.payload?.date || req.payload?.businessDate || today()}T12:00:00.000Z`,
+            postedBy: req.requestedByName || staffName(req.requestedBy) || 'System',
+            approvedBy: req.approvedBy || req.approvedByName || '',
+            traceId,
+            sourceTransactionType: req.type,
+            sourceApprovalId: req.id,
+            sourceChargeKey
+          });
+        });
+      });
+    };
     (state.approvals || []).forEach(req => {
       if (!req || req.status !== 'approved') return;
       const p = req.payload || {};
@@ -616,6 +645,8 @@
           sourceApprovalId: req.id
         });
       }
+      if (req.type === 'customer_credit') addChargeOperationalEntries(req, [p]);
+      if (req.type === 'customer_credit_journal') addChargeOperationalEntries(req, Array.isArray(p.rows) ? p.rows : Array.isArray(p.entries) ? p.entries : []);
       if (req.type === 'create_operational_account') {
         const dest = p.category === 'income' ? state.operations.incomeAccounts : state.operations.expenseAccounts;
         if (!Array.isArray(dest)) return;
@@ -901,11 +932,11 @@ if (approvalRecord.type === 'float_topup') {
         requestedByStaffId: getStaffBackendId(staff),
         businessDate: payload.date,
         requestedByName: staff?.name || 'System',
-        customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, staffId: payload.staffId, date: payload.date
+        customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, paymentMode: payload.paymentMode, staffId: payload.staffId, date: payload.date, customerCreditAmount: payload.customerCreditAmount, chargeBreakdown: payload.chargeBreakdown, totalChargeAmount: payload.totalChargeAmount, commissionAmount: payload.commissionAmount, chargeTraceId: payload.chargeTraceId || payload.commissionTraceId, commissionTraceId: payload.commissionTraceId
       });
     } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries) {
       result = await gateway.accounts.submitJournalEntries({
-        entries: (payload.rows || []).map(row => ({ accountId: row.customerId, txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource })),
+        entries: (payload.rows || []).map(row => ({ accountId: row.customerId, txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown, totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount, chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId })),
         requestedByStaffId: getStaffBackendId(staff),
         requestedByName: staff?.name || 'System',
         businessDate: payload.date,
