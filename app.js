@@ -3856,12 +3856,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     });
     byId(`${kind}CustomApply`).onclick = () => { state.ui[`${kind}Filter`] = { preset:'custom', from:byId(`${kind}From`).value, to:byId(`${kind}To`).value }; save(); renderWorkspace(); };
     qq(`[data-type-kind="${kind}"]`).forEach(btn => btn.onclick = () => { state.ui[`${kind}Type`] = btn.dataset.typeFilter; save(); renderWorkspace(); });
-    const moreBtn = byId(`${kind}More</div>`);
+    const moreBtn = byId(`${kind}More`);
     if (moreBtn) moreBtn.onclick = () => {
       const key = kind === 'business' ? 'businessEntriesLimit' : 'operationalEntriesLimit';
       state.ui[key] = (state.ui[key] || 20) + 20; save(); renderWorkspace();
     };
-    const lessBtn = byId(`${kind}Less</div>`);
+    const lessBtn = byId(`${kind}Less`);
     if (lessBtn) lessBtn.onclick = () => {
       const key = kind === 'business' ? 'businessEntriesLimit' : 'operationalEntriesLimit';
       state.ui[key] = Math.max(20, (state.ui[key] || 20) - 20); save(); renderWorkspace();
@@ -3908,16 +3908,25 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     return `${y}-${m}-${day}`;
   }
 
-  function filterDateReference() {
-    return dateOnly(businessDate && businessDate()) || today();
+  function filterRowDate(row) {
+    return dateOnly(row?.date || row?.businessDate || row?.business_date || row?.transactionDate || row?.transaction_date || row?.postedAt || row?.posted_at || row?.approvedAt || row?.approved_at || row?.createdAt || row?.created_at || row?.requestedAt || row?.requested_at);
+  }
+
+  function filterDateReference(rows = []) {
+    const preferred = dateOnly(businessDate && businessDate()) || today();
+    const dates = (rows || []).map(filterRowDate).filter(Boolean).sort();
+    if (!dates.length) return preferred;
+    if (dates.includes(preferred)) return preferred;
+    return dates[dates.length - 1];
   }
 
   function filterByDate(rows, filter) {
     const activeFilter = filter || { preset: 'daily', from: '', to: '' };
-    const referenceIso = filterDateReference();
+    if (activeFilter.preset === 'all') return rows || [];
+    const referenceIso = filterDateReference(rows || []);
     const referenceDate = new Date(`${referenceIso}T12:00:00`);
-    return rows.filter(r => {
-      const iso = dateOnly(r.date || r.createdAt || r.created_at || r.approvedAt || r.requestedAt);
+    return (rows || []).filter(r => {
+      const iso = filterRowDate(r);
       if (!iso) return false;
       const d = new Date(`${iso}T12:00:00`);
       if (activeFilter.preset === 'daily') return iso === referenceIso;
