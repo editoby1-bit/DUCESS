@@ -3553,7 +3553,24 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
           const note=q(`[data-cod-note="${st.id}"]`)?.value?.trim()||'';
           const variance=Math.max(0,-running);
           const overdraw=Math.max(0,-running);
-          const result = await gateway.cod.submitCod({ staffId: st.id, businessDate: businessDate(), actualCash: running, note, submittedByStaffId: currentStaff()?.id || st.id });
+          const result = await gateway.cod.submitCod({
+            staffId: st.id,
+            businessDate: businessDate(),
+            actualCash: running,
+            note,
+            submittedByStaffId: currentStaff()?.id || st.id,
+            metrics: {
+              openingBalance: formAmount,
+              floatTopUps: 0,
+              effectiveOpeningBalance: formAmount,
+              totalCredits: credits,
+              totalDebits: debits,
+              netBookBalance: netBook,
+              remainingBalance: running,
+              expectedCash: running,
+              overdraw
+            }
+          });
           if (result?.ok && result.data) {
             const existingIndex = (state.cod || []).findIndex(item => item.id === result.data.id);
             const nextRow = Object.assign({}, result.data, { staffName: st.name, formAmount, openingBalance: formAmount, totalCreditCash: creditCash, totalCreditTransfer: creditTransfer, totalDebitCash: debitCash, totalDebitTransfer: debitTransfer, totalCredits: credits, totalDebits: debits, netBookBalance: netBook, actualCash: running, expectedCash: running, runningFloat: running, remainingBalance: running, variance, overdraw, note });
