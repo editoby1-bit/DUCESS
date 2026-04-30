@@ -3406,13 +3406,63 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   function openAuditModal() {
     const st = currentStaff();
     const adminView = isAdminStaff(st);
-    const visibleAudit = (state.audit || []).filter(a => {
-      if (adminView) return true;
-      return a.actorId === st?.id || a.actor_id === st?.id || a.actorUuid === st?.uuid || a.actor_uuid === st?.uuid || a.actor === st?.name;
+    const audits = state.audit || [];
+    const staffList = (state.staff || []).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+    const getAuditActorStaff = (a) => {
+      const actorId = a.actorId || a.actor_id || a.actorStaffId || a.actor_staff_id || '';
+      const actorUuid = a.actorUuid || a.actor_uuid || a.actorUserId || a.actor_user_id || '';
+      const actorName = String(a.actor || a.actorName || a.actor_name || '').trim().toLowerCase();
+      return staffList.find(x => String(x.id || '') === String(actorId || ''))
+        || staffList.find(x => String(x.uuid || x.authUserId || x.auth_user_id || '') && String(x.uuid || x.authUserId || x.auth_user_id || '') === String(actorUuid || ''))
+        || staffList.find(x => String(x.name || '').trim().toLowerCase() === actorName)
+        || null;
+    };
+    const isOwnAudit = (a) => {
+      const actorStaff = getAuditActorStaff(a);
+      return actorStaff?.id === st?.id
+        || actorStaff?.uuid === st?.uuid
+        || a.actorId === st?.id
+        || a.actor_id === st?.id
+        || a.actorUuid === st?.uuid
+        || a.actor_uuid === st?.uuid
+        || String(a.actor || '').trim() === String(st?.name || '').trim();
+    };
+    const baseAudit = adminView ? audits.slice() : audits.filter(isOwnAudit);
+    const uniqueActions = Array.from(new Set(baseAudit.map(a => String(a.action || a.actionType || a.action_type || '').trim()).filter(Boolean))).sort();
+    const roleOptions = Object.entries(ROLE_LABELS).map(([value,label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('');
+    const staffOptions = staffList.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)} — ${escapeHtml(ROLE_LABELS[x.role] || x.role || '')}</option>`).join('');
+    const actionOptions = uniqueActions.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
+    const filterHtml = `<div class="audit-filter-row" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;align-items:center;">
+      ${adminView ? `<select id="auditRoleFilter" class="entry-input" style="width:auto;min-width:140px;"><option value="">All roles</option>${roleOptions}</select><select id="auditStaffFilter" class="entry-input" style="width:auto;min-width:170px;"><option value="">All staff</option>${staffOptions}</select>` : ''}
+      <select id="auditActionFilter" class="entry-input" style="width:auto;min-width:150px;"><option value="">All actions</option>${actionOptions}</select>
+      <input id="auditDateFilter" class="entry-input" type="date" style="width:auto;min-width:135px;">
+    </div>`;
+    const rowForAudit = (a) => `<tr><td>${fmtDate(a.at || a.timestamp || a.createdAt)}</td><td>${escapeHtml(a.actor || a.actorName || a.actor_name || 'System')}</td><td>${escapeHtml(a.action || a.actionType || a.action_type || '')}</td><td>${escapeHtml(a.details || a.detail || '')}</td></tr>`;
+    const scopeNote = adminView ? '<div class="note">Admin Global Audit View: showing all staff actions. Use role/staff filters to narrow the trail.</div>' : '<div class="note">Showing only your own audit trail.</div>';
+    openModal('Audit Trail', `${scopeNote}${filterHtml}<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody id="auditTrailRows"></tbody></table></div>`, [{label:'Close', onClick: closeModal}]);
+    const renderAuditRows = () => {
+      const roleFilter = byId('auditRoleFilter')?.value || '';
+      const staffFilter = byId('auditStaffFilter')?.value || '';
+      const actionFilter = byId('auditActionFilter')?.value || '';
+      const dateFilter = byId('auditDateFilter')?.value || '';
+      const filtered = baseAudit.filter(a => {
+        const actorStaff = getAuditActorStaff(a);
+        const action = String(a.action || a.actionType || a.action_type || '').trim();
+        const isoDate = String(a.at || a.timestamp || a.createdAt || '').slice(0,10);
+        if (adminView && roleFilter && actorStaff?.role !== roleFilter) return false;
+        if (adminView && staffFilter && actorStaff?.id !== staffFilter) return false;
+        if (actionFilter && action !== actionFilter) return false;
+        if (dateFilter && isoDate !== dateFilter) return false;
+        return true;
+      });
+      const tbody = byId('auditTrailRows');
+      if (tbody) tbody.innerHTML = filtered.map(rowForAudit).join('') || '<tr><td colspan="4">No audit records</td></tr>';
+    };
+    ['auditRoleFilter','auditStaffFilter','auditActionFilter','auditDateFilter'].forEach(id => {
+      const el = byId(id);
+      if (el) el.onchange = renderAuditRows;
     });
-    const rows = visibleAudit.map(a=>`<tr><td>${fmtDate(a.at || a.timestamp || a.createdAt)}</td><td>${escapeHtml(a.actor || a.actorName || a.actor_name || 'System')}</td><td>${escapeHtml(a.action || a.actionType || a.action_type || '')}</td><td>${escapeHtml(a.details || a.detail || '')}</td></tr>`).join('');
-    const scopeNote = adminView ? '<div class="note">Admin Global Audit View: showing all staff actions.</div>' : '<div class="note">Showing audit records linked to your staff profile.</div>';
-    openModal('Audit Trail', `${scopeNote}<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No audit records</td></tr>'}</tbody></table></div>`, [{label:'Close', onClick: closeModal}]);
+    renderAuditRows();
   }
 
   function staffName(id) { return state.staff.find(s=>s.id===id)?.name || id; }
