@@ -11063,3 +11063,87 @@ body #btnAudit{
     font-size:10px !important;
   }
 }
+
+/* Phase 4E surgical polish: compact Staff Ledger modal only */
+#modalBack .modal[data-modal-title="Staff Ledger"]{
+  width:min(780px, calc(100vw - 28px));
+  max-height:84vh;
+  border-radius:16px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .modal-head,
+#modalBack .modal[data-modal-title="Staff Ledger"] .modal-actions{
+  padding:12px 14px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .modal-head h3{
+  font-size:18px;
+  line-height:1.2;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .modal-body{
+  padding:12px 14px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .stack{
+  gap:10px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .kpi-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:6px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .kpi{
+  flex:0 0 auto;
+  width:auto;
+  min-width:0;
+  max-width:220px;
+  padding:7px 10px;
+  border-radius:12px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .kpi .label{
+  font-size:10px;
+  line-height:1.1;
+  letter-spacing:.035em;
+  white-space:nowrap;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .kpi .number{
+  font-size:16px;
+  line-height:1.15;
+  margin-top:4px;
+  white-space:normal;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .note{
+  font-size:12px;
+  line-height:1.35;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .table-wrap{
+  border-radius:12px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .table{
+  min-width:680px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .table th,
+#modalBack .modal[data-modal-title="Staff Ledger"] .table td{
+  padding:8px 7px;
+  font-size:12px;
+}
+#modalBack .modal[data-modal-title="Staff Ledger"] .table th{
+  font-size:10px;
+  letter-spacing:.035em;
+}
+@media (max-width:760px){
+  #modalBack .modal[data-modal-title="Staff Ledger"]{
+    width:calc(100vw - 18px);
+    max-height:86vh;
+  }
+  #modalBack .modal[data-modal-title="Staff Ledger"] .modal-head,
+  #modalBack .modal[data-modal-title="Staff Ledger"] .modal-actions,
+  #modalBack .modal[data-modal-title="Staff Ledger"] .modal-body{
+    padding:10px;
+  }
+  #modalBack .modal[data-modal-title="Staff Ledger"] .kpi{
+    max-width:calc(50vw - 20px);
+    padding:6px 8px;
+  }
+  #modalBack .modal[data-modal-title="Staff Ledger"] .kpi .number{
+    font-size:14px;
+  }
+}
