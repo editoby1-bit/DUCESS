@@ -2362,19 +2362,100 @@ function nextPaint() {
     printHtml(html, true);
   }
 
+function staffLedgerEvents(staffId) {
+    const staff = staffById(staffId) || {};
+    const acc = ensureStaffAccount(staffId);
+    const events = [];
+    const seen = new Set();
+    const addEvent = (event) => {
+      const key = event.key || `${event.date}|${event.type}|${event.amount}|${event.details}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      events.push(event);
+    };
+    (acc.entries || []).forEach(entry => {
+      const type = String(entry.type || '').toLowerCase();
+      const amount = Number(entry.amount || 0);
+      const date = entry.formDate || entry.floatDate || String(entry.date || '').slice(0,10) || businessDate();
+      if (['approved_form','approved_float'].includes(type)) addEvent({ key: entry.id || `form-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: entry.note || `Approved FORM for ${date}`, runningType: 'form' });
+      else if (['customer_credit','credit'].includes(type)) addEvent({ key: entry.id || `credit-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: entry.note || 'Customer credit', runningType: 'credit' });
+      else if (['customer_debit','debit'].includes(type)) addEvent({ key: entry.id || `debit-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: entry.note || 'Customer debit', runningType: 'debit' });
+      else if (['debt_repayment','wallet_fund','wallet_funding'].includes(type)) addEvent({ key: entry.id || `${type}-${date}-${amount}`, date, type: type === 'debt_repayment' ? 'Debt Repayment' : 'Wallet', amount, delta: 0, details: entry.note || type.replace(/_/g,' '), runningType: 'other' });
+    });
+    (state.approvals || []).filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
+      const payload = req.payload || {};
+      const date = payload.date || payload.float_date || String(req.approvedAt || req.requestedAt || '').slice(0,10) || businessDate();
+      if (req.type === 'float_declaration' && (payload.staffId === staffId || payload.staff_id === staffId)) {
+        const amount = Number(payload.amount || payload.floatAmount || 0);
+        addEvent({ key: req.id || `form-approval-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: `Approved FORM for ${date}`, runningType: 'form' });
+      }
+      if (req.type === 'customer_credit' && payload.staffId === staffId) {
+        const amount = Number(payload.amount || 0);
+        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
+      }
+      if (req.type === 'customer_debit' && payload.staffId === staffId) {
+        const amount = Number(payload.amount || 0);
+        addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
+      }
+      if (req.type === 'customer_credit_journal' && payload.staffId === staffId) {
+        (payload.rows || payload.entries || []).forEach((row, idx) => {
+          const amount = Number(row.amount || 0);
+          addEvent({ key: `${req.id || 'credit-journal'}-${idx}`, date, type: 'Credit Journal Impact', amount, delta: -amount, details: `${row.accountNumber || ''} ${row.customerName || ''} ${row.details || ''}`.trim() || 'Credit journal entry', runningType: 'credit' });
+        });
+      }
+      if (req.type === 'customer_debit_journal' && payload.staffId === staffId) {
+        (payload.rows || payload.entries || []).forEach((row, idx) => {
+          const amount = Number(row.amount || 0);
+          addEvent({ key: `${req.id || 'debit-journal'}-${idx}`, date, type: 'Debit Journal Impact', amount, delta: -amount, details: `${row.accountNumber || ''} ${row.customerName || ''} ${row.details || ''}`.trim() || 'Debit journal entry', runningType: 'debit' });
+        });
+      }
+    });
+    (state.cod || []).filter(cod => cod.staffId === staffId).forEach(cod => {
+      const date = cod.date || String(cod.submittedAt || cod.resolvedAt || '').slice(0,10) || businessDate();
+      addEvent({ key: cod.id || `cod-${date}`, date, type: `COD ${String(cod.status || 'Submitted').toUpperCase()}`, amount: Number(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0), delta: 0, details: `FORM ${money(cod.formAmount ?? cod.openingBalance ?? getOpeningBalanceForDate(staffId, date))} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? currentFloatAvailable(staffId, date))} • Variance ${money(cod.variance || 0)}`, runningType: 'cod' });
+    });
+    let running = 0;
+    return events.sort((a,b)=> new Date(`${a.date}T12:00:00Z`) - new Date(`${b.date}T12:00:00Z`)).map(event => {
+      if (['form','credit','debit'].includes(event.runningType)) running += Number(event.delta || 0);
+      return { ...event, runningBalance: running, staffName: staff.name || staffId };
+    }).sort((a,b)=> new Date(`${b.date}T12:00:00Z`) - new Date(`${a.date}T12:00:00Z`));
+  }
+
+  function openStaffLedgerModal(staffId) {
+    const staff = staffById(staffId);
+    if (!staff) return showToast('Staff not found');
+    const acc = ensureStaffAccount(staffId);
+    const rows = staffLedgerEvents(staffId).map((row, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${row.date}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(row.details || '—')}</td></tr>`).join('');
+    const cod = staffCODRecords(staffId).slice().sort((a,b)=>new Date(b.submittedAt||b.resolvedAt||b.date)-new Date(a.submittedAt||a.resolvedAt||a.date))[0];
+    openModal('Staff Ledger', `
+      <div class="stack">
+        <div class="kpi-row wrap">
+          <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(staff.name)}</div></div>
+          <div class="kpi"><div class="label">Office</div><div class="number">${escapeHtml(ROLE_LABELS[staff.role] || staff.role)}</div></div>
+          <div class="kpi"><div class="label">Account Number</div><div class="number">${escapeHtml(acc.accountNumber || '')}</div></div>
+          <div class="kpi"><div class="label">FORM Today</div><div class="number">${money(getOpeningBalanceForDate(staffId, businessDate()))}</div></div>
+          <div class="kpi"><div class="label">Remaining Today</div><div class="number">${money(currentFloatAvailable(staffId, businessDate()))}</div></div>
+          <div class="kpi"><div class="label">Debt</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">${money(acc.debtBalance||0)}</div></div>
+        </div>
+        ${cod ? `<div class="note">Latest COD: <strong>${fmtDate(`${cod.date || cod.submittedAt}T12:00:00.000Z`)}</strong> • ${escapeHtml(cod.status || 'submitted')} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0)}</div>` : '<div class="note">No COD record yet for this staff.</div>'}
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No ledger entries yet</td></tr>'}</tbody></table></div>
+      </div>
+    `, [{ label:'Close', className:'secondary', onClick: closeModal }]);
+  }
+
 function renderTellerBalances() {
     const rows = state.staff.slice(0, state.ui.tellerEntriesLimit || 20).map(s=>{
       const acc = ensureStaffAccount(s.id);
-      const debtBalance = Number(acc.balance || 0) < 0 ? Number(acc.balance || 0) : 0;
+      const debtBalance = Number(acc.balance || 0) < 0 ? Number(acc.balance || 0) : Number(acc.debtBalance || 0) > 0 ? -Number(acc.debtBalance || 0) : 0;
       const totalCreditReceived = acc.entries
-        .filter(e => ['customer_credit','credit','approved_float','approved_float_topup'].includes(String(e.type || '').toLowerCase()))
+        .filter(e => ['customer_credit','credit','approved_float','approved_float_topup','approved_form'].includes(String(e.type || '').toLowerCase()))
         .reduce((sum,e)=>sum+Number(e.amount||0),0);
       const totalDebitsPaid = acc.entries
         .filter(e => ['customer_debit','debit'].includes(String(e.type || '').toLowerCase()))
         .reduce((sum,e)=>sum+Number(e.amount||0),0);
-      return `<tr><td>${s.name}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${acc.accountNumber}</td><td>${money(acc.balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td></tr>`;
+      return `<tr><td>${s.name}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${acc.accountNumber}</td><td>${money(acc.balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
     }).join('');
-    return `<div class="table-card"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Teller and Posting Accounts</h3><div class="note" style="margin:0">Business Date: <strong>${businessDate()}</strong></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Account Number</th><th>Balance</th><th>Debt Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th></tr></thead><tbody>${rows}</tbody></table></div><div class="action-row">${state.staff.length > (state.ui.tellerEntriesLimit || 20) ? `<button id="tellerMore" class="secondary">Show More</button>` : ''}${(state.ui.tellerEntriesLimit || 20) > 20 ? `<button id="tellerLess" class="secondary">Show Less</button>` : ''}</div></div>`;
+    return `<div class="table-card"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Teller and Posting Accounts</h3><div class="note" style="margin:0">Business Date: <strong>${businessDate()}</strong></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Account Number</th><th>Balance</th><th>Debt Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Ledger</th></tr></thead><tbody>${rows}</tbody></table></div><div class="action-row">${state.staff.length > (state.ui.tellerEntriesLimit || 20) ? `<button id="tellerMore" class="secondary">Show More</button>` : ''}${(state.ui.tellerEntriesLimit || 20) > 20 ? `<button id="tellerLess" class="secondary">Show Less</button>` : ''}</div></div>`;
   }
 
   function allApprovedCustomerTx(kind) {
@@ -2424,6 +2505,7 @@ function renderTellerBalances() {
     const tellerLess = byId('tellerLess');
     if (tellerLess) tellerLess.onclick = () => { state.ui.tellerEntriesLimit = Math.max(20, (state.ui.tellerEntriesLimit || 20) - 20); save(); renderWorkspace(); };
     qq('[data-assign-topup]').forEach(btn => btn.onclick = () => openFloatTopUpModal(btn.dataset.assignTopup));
+    qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
   }
 
   function openFloatTopUpModal(staffId=null) {
