@@ -174,7 +174,7 @@
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
   const state = bootstrapState();
-  state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'all', from: '', to: '' }, operationalFilter: { preset: 'all', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
+  state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
   if (state.ui.module && !MODULES[state.ui.module]) state.ui.module = null;
   if (state.ui.module && state.ui.tool && !(MODULES[state.ui.module]?.tools || []).includes(state.ui.tool)) state.ui.tool = null;
@@ -2076,7 +2076,7 @@ function nextPaint() {
   }
 
   function renderBusinessBalance() {
-    const rawBusiness = filterByDate(flattenBusinessEntries(), state.ui.businessFilter || { preset: 'all', from: '', to: '' });
+    const rawBusiness = filterByDate(flattenBusinessEntries(), state.ui.businessFilter || { preset: 'daily', from: '', to: '' });
     const typeFilter = state.ui.businessType || 'all';
     const filtered = rawBusiness.filter(t => typeFilter==='all' ? true : t.kind===typeFilter);
     const credits = filtered.filter(t => t.kind === 'credit').reduce((s,t)=>s+Number(t.amount||0),0);
@@ -2113,7 +2113,7 @@ function nextPaint() {
 
   
   function getOperationalFilteredRows() {
-    const rawOperational = filterByDate(state.operations.entries || [], state.ui.operationalFilter || { preset: 'all', from: '', to: '' });
+    const rawOperational = filterByDate(state.operations.entries || [], state.ui.operationalFilter || { preset: 'daily', from: '', to: '' });
     const kindFilter = state.ui.operationalType || 'all';
     return rawOperational.filter(e => kindFilter==='all' ? true : e.kind===kindFilter);
   }
@@ -2236,7 +2236,7 @@ function nextPaint() {
 
   
   function getBusinessFilteredRows() {
-    const rawBusiness = filterByDate(flattenBusinessEntries(), state.ui.businessFilter || { preset: 'all', from: '', to: '' });
+    const rawBusiness = filterByDate(flattenBusinessEntries(), state.ui.businessFilter || { preset: 'daily', from: '', to: '' });
     const typeFilter = String(state.ui.businessType || 'all').toLowerCase();
     return rawBusiness.filter(e => {
       const rowType = String(e.type || e.kind || '').toLowerCase();
@@ -3845,7 +3845,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function renderBalanceFilters(kind) {
-    const filter = state.ui[`${kind}Filter`] || { preset:'all', from:'', to:'' };
+    const filter = state.ui[`${kind}Filter`] || { preset:'daily', from:'', to:'' };
     const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
     const types = kind==='business' ? [['all','All'],['credit','Credit'],['debit','Debit']] : [['all','All'],['income','Income'],['expense','Expense']]; const activeType = state.ui[`${kind}Type`] || 'all'; return `<div class="form-card balance-filters-card"><div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-filter-kind="${kind}" data-filter-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="${kind}From" type="date" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="${kind}To" type="date" value="${filter.to||''}"></label><button class="secondary" id="${kind}CustomApply">Apply Custom</button><button class="secondary" id="${kind}ExportCsv">Export CSV</button><button class="secondary" id="${kind}PrintSummary">Print Summary</button></div><div class="action-inline balance-filters-row" style="margin-top:10px">${types.map(([k,l])=>`<button class="filter-chip ${activeType===k?'active':'secondary'}" data-type-kind="${kind}" data-type-filter="${k}">${l}</button>`).join('')}</div></div>`;
   }
@@ -3879,7 +3879,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         exportBusinessStatementCsv();
         return;
       }
-      const rows = filterByDate(flattenBusinessEntries(), state.ui.businessFilter || { preset: 'all', from: '', to: '' });
+      const rows = filterByDate(flattenBusinessEntries(), state.ui.businessFilter || { preset: 'daily', from: '', to: '' });
       exportCsv(rows, `${kind}_balance.csv</div>`);
     };
     byId(`${kind}PrintSummary`).onclick = () => {
@@ -3895,19 +3895,44 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     };
   }
 
+  function dateOnly(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const direct = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+    const d = new Date(raw);
+    if (isNaN(d)) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function filterDateReference() {
+    return dateOnly(businessDate && businessDate()) || today();
+  }
+
   function filterByDate(rows, filter) {
-    const now = new Date();
+    const activeFilter = filter || { preset: 'daily', from: '', to: '' };
+    const referenceIso = filterDateReference();
+    const referenceDate = new Date(`${referenceIso}T12:00:00`);
     return rows.filter(r => {
-      const d = new Date(r.date);
-      const iso = d.toISOString().slice(0,10);
-      if (filter.preset === 'daily') return iso === today();
-      if (filter.preset === 'weekly') {
-        const start = new Date(now); start.setDate(now.getDate()-6); start.setHours(0,0,0,0); return d >= start;
+      const iso = dateOnly(r.date || r.createdAt || r.created_at || r.approvedAt || r.requestedAt);
+      if (!iso) return false;
+      const d = new Date(`${iso}T12:00:00`);
+      if (activeFilter.preset === 'daily') return iso === referenceIso;
+      if (activeFilter.preset === 'weekly') {
+        const start = new Date(referenceDate);
+        start.setDate(referenceDate.getDate() - 6);
+        start.setHours(0,0,0,0);
+        const end = new Date(referenceDate);
+        end.setHours(23,59,59,999);
+        return d >= start && d <= end;
       }
-      if (filter.preset === 'monthly') return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
-      if (filter.preset === 'custom') {
-        if (filter.from && iso < filter.from) return false;
-        if (filter.to && iso > filter.to) return false;
+      if (activeFilter.preset === 'monthly') return d.getFullYear() === referenceDate.getFullYear() && d.getMonth() === referenceDate.getMonth();
+      if (activeFilter.preset === 'custom') {
+        if (activeFilter.from && iso < activeFilter.from) return false;
+        if (activeFilter.to && iso > activeFilter.to) return false;
       }
       return true;
     });
