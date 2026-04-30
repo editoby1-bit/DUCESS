@@ -45,6 +45,9 @@
       roleCode: rawStaff.roleCode || rawStaff.role_code || rawStaff.role || 'customer_service',
       isActive: typeof rawStaff.isActive === 'boolean' ? rawStaff.isActive : (typeof rawStaff.is_active === 'boolean' ? rawStaff.is_active : rawStaff.active !== false),
       branchId: rawStaff.branchId ?? rawStaff.branch_id ?? null,
+      uuid: rawStaff.uuid || rawStaff.id || '',
+      authUserId: rawStaff.authUserId || rawStaff.auth_user_id || '',
+      authEmail: rawStaff.authEmail || rawStaff.auth_email || '',
     };
   }
 
@@ -273,6 +276,46 @@
       return result;
     }
 
+
+    async function createStaff(payload = {}) {
+      const state = getLocalState();
+      state.staff ||= [];
+      const id = `st_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
+      const staff = {
+        id,
+        staffId: payload.staffCode || payload.staffId || id,
+        staff_code: payload.staffCode || payload.staffId || id,
+        name: payload.name || payload.fullName || '',
+        fullName: payload.name || payload.fullName || '',
+        role: payload.role || payload.roleCode || 'customer_service',
+        role_code: payload.role || payload.roleCode || 'customer_service',
+        branchId: payload.branchId || null,
+        branch_id: payload.branchId || null,
+        authEmail: payload.authEmail || '',
+        auth_email: payload.authEmail || '',
+        authUserId: payload.authUserId || '',
+        auth_user_id: payload.authUserId || '',
+        active: true,
+        is_active: true,
+        createdAt: new Date().toISOString(),
+      };
+      state.staff.push(staff);
+      writeLocalState(state);
+      return defaultResult.ok(normalizeStaffSummary(staff));
+    }
+
+    async function updateStaffStatus(payload = {}) {
+      const state = getLocalState();
+      const staffId = payload.staffId || payload.id;
+      const staff = (state.staff || []).find((item) => item.id === staffId || item.staffId === staffId || item.staff_code === staffId);
+      if (!staff) return defaultResult.err('STAFF_NOT_FOUND', 'Staff not found.');
+      staff.active = payload.isActive !== false;
+      staff.is_active = payload.isActive !== false;
+      staff.updatedAt = new Date().toISOString();
+      writeLocalState(state);
+      return defaultResult.ok(normalizeStaffSummary(staff));
+    }
+
     async function getEffectivePermissions(staffId) {
       const staffResult = await getStaffById(staffId);
       if (!staffResult.ok) return staffResult;
@@ -403,6 +446,8 @@
         getStaffById,
         listStaff,
         listActiveStaff,
+        createStaff,
+        updateStaffStatus,
       },
       permissions: {
         getEffectivePermissions,
@@ -730,6 +775,56 @@
       return listStaff({ isActive: true });
     }
 
+
+    async function createStaff(payload = {}) {
+      if (!canUseSupabase()) return local.staff.createStaff(payload);
+      const rpcName = config?.supabase?.createStaffRpc || 'ducess_create_staff';
+      const rpcPayload = {
+        staff_code: payload.staffCode || payload.staffId || '',
+        full_name: payload.name || payload.fullName || '',
+        role_code: payload.role || payload.roleCode || 'customer_service',
+        branch_id: payload.branchId || null,
+        auth_email: payload.authEmail || null,
+        temporary_password: payload.temporaryPassword || null,
+        created_by_staff_id: payload.createdByStaffId || null,
+        created_by_name: payload.createdByName || null,
+      };
+      try {
+        const { data: rpcData, error: rpcError } = await client.rpc(rpcName, rpcPayload);
+        if (!rpcError) return defaultResult.ok(normalizeStaffSummary(Array.isArray(rpcData) ? rpcData[0] : rpcData));
+      } catch (err) {}
+      const insertRow = {
+        staff_code: rpcPayload.staff_code,
+        full_name: rpcPayload.full_name,
+        role_code: rpcPayload.role_code,
+        branch_id: rpcPayload.branch_id,
+        auth_email: rpcPayload.auth_email,
+        is_active: true,
+      };
+      const { data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single();
+      if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Could not create staff profile in Supabase.', insertError);
+      return defaultResult.ok(normalizeStaffSummary(data));
+    }
+
+    async function updateStaffStatus(payload = {}) {
+      if (!canUseSupabase()) return local.staff.updateStaffStatus(payload);
+      const rpcName = config?.supabase?.updateStaffStatusRpc || 'ducess_update_staff_status';
+      try {
+        const { data: rpcData, error: rpcError } = await client.rpc(rpcName, {
+          staff_id: payload.staffId,
+          is_active: payload.isActive !== false,
+          reason: payload.reason || '',
+          override_used: payload.override === true,
+          updated_by_staff_id: payload.updatedByStaffId || null,
+          updated_by_name: payload.updatedByName || null,
+        });
+        if (!rpcError) return defaultResult.ok(normalizeStaffSummary(Array.isArray(rpcData) ? rpcData[0] : rpcData));
+      } catch (err) {}
+      const { data, error: updateError } = await client.from(staffTable).update({ is_active: payload.isActive !== false }).eq('id', payload.staffId).select(staffProfileSelect).single();
+      if (updateError) return defaultResult.err('STAFF_STATUS_UPDATE_FAILED', 'Could not update staff status in Supabase.', updateError);
+      return defaultResult.ok(normalizeStaffSummary(data));
+    }
+
     async function getEffectivePermissions(staffId) {
       if (!canUseSupabase()) return local.permissions.getEffectivePermissions(staffId);
       const staffResult = await getStaffById(staffId);
@@ -947,6 +1042,8 @@
         getStaffById,
         listStaff,
         listActiveStaff,
+        createStaff,
+        updateStaffStatus,
       },
       permissions: {
         getEffectivePermissions,
