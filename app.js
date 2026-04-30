@@ -792,7 +792,7 @@ if (approvalRecord.type === 'float_topup') {
   generatedAccountNumber: payload.generatedAccountNumber || '',
   photo: payload.photo || null,
   photoRef: payload.photo || null,
-  openedByStaffId: staff?.id || '',
+  openedByStaffId: getStaffBackendId(staff),
   requestedByName: staff?.name || 'System'
 });
 
@@ -800,13 +800,13 @@ if (approvalRecord.type === 'float_topup') {
       result = await gateway.customers.submitAccountMaintenance({
         customerId: payload.customerId,
         updates: { ...payload.patch },
-        requestedByStaffId: staff?.id || '',
+        requestedByStaffId: getStaffBackendId(staff),
         requestedByName: staff?.name || 'System'
       });
     } else if (type === 'account_reactivation' && gateway.customers?.submitAccountReactivation) {
       result = await gateway.customers.submitAccountReactivation({
         customerId: payload.customerId,
-        requestedByStaffId: staff?.id || '',
+        requestedByStaffId: getStaffBackendId(staff),
         note: payload.note || '',
         requestedByName: staff?.name || 'System'
       });
@@ -816,7 +816,7 @@ if (approvalRecord.type === 'float_topup') {
         accountId: payload.customerId,
         amount: Number(payload.amount || 0),
         details: payload.details || '',
-        requestedByStaffId: staff?.id || '',
+        requestedByStaffId: getStaffBackendId(staff),
         businessDate: payload.date,
         requestedByName: staff?.name || 'System',
         customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, staffId: payload.staffId, date: payload.date
@@ -824,7 +824,7 @@ if (approvalRecord.type === 'float_topup') {
     } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries) {
       result = await gateway.accounts.submitJournalEntries({
         entries: (payload.rows || []).map(row => ({ accountId: row.customerId, txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource })),
-        requestedByStaffId: staff?.id || '',
+        requestedByStaffId: getStaffBackendId(staff),
         requestedByName: staff?.name || 'System',
         businessDate: payload.date,
         staffId: payload.staffId,
@@ -835,7 +835,7 @@ if (approvalRecord.type === 'float_topup') {
     } else if (gateway.approvals?.submitApprovalRequest) {
       result = await gateway.approvals.submitApprovalRequest({
         requestType: type,
-        requestedByStaffId: staff?.id || '',
+        requestedByStaffId: getStaffBackendId(staff),
         requestedByName: staff?.name || 'System',
         payload
       });
@@ -851,7 +851,7 @@ if (approvalRecord.type === 'float_topup') {
     const staff = currentStaff();
     const result = await gateway.approvals.approveRequest({
   requestId: id,
-  approvedByStaffId: staff?.id || '',
+  approvedByStaffId: getStaffBackendId(staff),
   approvedByName: staff?.name || 'System',
   payload: payloadOverride || null
 });
@@ -868,7 +868,7 @@ if (approvalRecord.type === 'float_topup') {
   async function rejectRequestRemote(id) {
     if (!isSupabaseApprovalMode()) { rejectRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
-    const result = await gateway.approvals.rejectRequest({ requestId: id, rejectedByStaffId: staff?.id || '', rejectedByName: staff?.name || 'System' });
+    const result = await gateway.approvals.rejectRequest({ requestId: id, rejectedByStaffId: getStaffBackendId(staff), rejectedByName: staff?.name || 'System' });
     if (result?.ok) { await syncApprovalsFromGateway(); pushAudit('request_rejected', `${result.data?.type || 'request'} rejected</div>`); render(); }
     return result;
   }
@@ -3151,7 +3151,7 @@ function renderTellerBalances() {
           try {
             const result = await submitApprovalThroughGateway('float_declaration', {
   staffId: st.id,              // keep for frontend
-requestedByStaffId: st.id,   // 👈 add this
+requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   amount,
   date: businessDate(),
 
