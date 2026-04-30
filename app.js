@@ -285,7 +285,12 @@
   }
 
   function currentStaff() {
-    return state.staff.find(s => s.id === state.activeStaffId) || state.staff[0] || null;
+    return state.staff.find(s => s.id === state.activeStaffId) || state.staff.find(s => s.active !== false) || state.staff[0] || null;
+  }
+
+  function getStaffBackendId(staff = currentStaff()) {
+    if (!staff) return '';
+    return staff.uuid || staff.authUserId || staff.auth_user_id || staff.supabaseUserId || staff.supabase_user_id || staff.userId || staff.user_id || staff.backendId || staff.backend_id || staff.id || '';
   }
 
   function resetJournalUiState() {
@@ -1164,7 +1169,13 @@ if (approvalRecord.type === 'float_topup') {
 
   function bindHeader() {
     const staffSel = byId('staffSelect');
-    staffSel.innerHTML = state.staff.map(s => `<option value="${s.id}">${s.name} — ${ROLE_LABELS[s.role] || s.role}</option>`).join('');
+    const activeStaffList = state.staff.filter(s => s.active !== false);
+    const selectorStaffList = activeStaffList.length ? activeStaffList : state.staff;
+    if (!selectorStaffList.some(s => s.id === state.activeStaffId) && selectorStaffList[0]) {
+      state.activeStaffId = selectorStaffList[0].id;
+      save();
+    }
+    staffSel.innerHTML = selectorStaffList.map(s => `<option value="${s.id}">${s.name} — ${ROLE_LABELS[s.role] || s.role}</option>`).join('');
     staffSel.value = state.activeStaffId;
     staffSel.onchange = () => {
       state.activeStaffId = staffSel.value;
@@ -3863,7 +3874,16 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       </div>
     `,[{label:'Cancel', className:'secondary', onClick: closeModal},{label:'Add Staff', onClick:()=>{ const name=byId('newStaffName').value.trim(); const role=byId('newStaffRole').value; if(!name) return showToast('Enter staff name'); state.staff.push({id:uid('st'), name, role, active:true}); ensureStaffAccount(state.staff[state.staff.length-1].id); save(); closeModal(); render(); showToast('Staff added'); }}]);
     qq('[data-staff-toggle]').forEach(btn => btn.onclick = ()=> {
-      const st = state.staff.find(s=>s.id===btn.dataset.staffToggle); if(!st) return; st.active = st.active === false ? true : false; save(); render(); showToast(`Staff ${st.active===false?'deactivated':'reactivated'}</div>`);
+      const st = state.staff.find(s=>s.id===btn.dataset.staffToggle);
+      if(!st) return;
+      st.active = st.active === false ? true : false;
+      if (st.active === false && state.activeStaffId === st.id) {
+        const replacement = state.staff.find(s => s.id !== st.id && s.active !== false);
+        if (replacement) state.activeStaffId = replacement.id;
+      }
+      save();
+      render();
+      showToast(`Staff ${st.active===false?'deactivated':'reactivated'}</div>`);
     });
   }
 
