@@ -596,12 +596,19 @@
       const p = req.payload || {};
       if (req.type === 'operational_entry') {
         if (state.operations.entries.some(e => e.sourceApprovalId === req.id)) return;
+        const amount = Number(p.amount || 0);
+        const accountId = String(p.accountId || '').trim();
+        if (!accountId || !(amount > 0)) return;
+        const account = [...state.operations.incomeAccounts, ...state.operations.expenseAccounts]
+          .find(a => String(a.id || '') === accountId);
+        if (!account) return;
+        const kind = state.operations.incomeAccounts.some(a => String(a.id || '') === accountId) ? 'income' : 'expense';
         state.operations.entries.unshift({
           id: uid('op'),
-          kind: p.kind,
-          accountId: p.accountId,
-          accountName: p.accountName,
-          amount: Number(p.amount || 0),
+          kind,
+          accountId,
+          accountName: p.accountName || account.name,
+          amount,
           note: p.note || '',
           date: `${p.date || today()}T12:00:00.000Z`,
           postedBy: req.requestedByName || staffName(req.requestedBy) || 'System',
@@ -924,16 +931,6 @@ if (approvalRecord.type === 'float_topup') {
   async function approveRequestRemote(id, payloadOverride = null) {
     if (!isSupabaseApprovalMode()) { approveRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
-    const localReq = (state.approvals || []).find(r => r.id === id);
-    const canApproveLocally = !!localReq && localReq.status === 'pending' && ['operational_entry','create_operational_account'].includes(localReq.type);
-
-    if (canApproveLocally) {
-      approveRequest(id);
-      syncOperationalEffectsFromApprovedRequests();
-      save();
-      render();
-      return defaultResultOk(localReq);
-    }
 
     const result = await gateway.approvals.approveRequest({
   requestId: id,
@@ -1150,14 +1147,21 @@ if (approvalRecord.type === 'float_topup') {
         break;
       }
       case 'operational_entry': {
+        const amount = Number(req.payload.amount || 0);
+        const accountId = String(req.payload.accountId || '').trim();
+        const account = [...state.operations.incomeAccounts, ...state.operations.expenseAccounts]
+          .find(a => String(a.id || '') === accountId);
+        if (!accountId || !(amount > 0) || !account) break;
+        if (state.operations.entries.some(e => e.sourceApprovalId === req.id)) break;
+        const kind = state.operations.incomeAccounts.some(a => String(a.id || '') === accountId) ? 'income' : 'expense';
         state.operations.entries.unshift({
           id: uid('op'),
-          kind: req.payload.kind,
-          accountId: req.payload.accountId,
-          accountName: req.payload.accountName,
-          amount: req.payload.amount,
+          kind,
+          accountId,
+          accountName: req.payload.accountName || account.name,
+          amount,
           note: req.payload.note,
-          date: `${req.payload.date}T12:00:00.000Z`,
+          date: `${req.payload.date || today()}T12:00:00.000Z`,
           postedBy: req.requestedByName,
           approvedBy: currentStaff()?.name || '',
           sourceApprovalId: req.id
