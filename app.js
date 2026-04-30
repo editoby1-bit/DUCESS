@@ -305,6 +305,82 @@
   }
   function businessDate() { return state.businessDate || today(); }
   function nextDate(iso) { const d=new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10); }
+
+  const COD_LOCKED_POSTING_TYPES = ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','operational_entry'];
+
+  function approvalBusinessDate(type, payload = {}) {
+    return String(payload?.date || payload?.businessDate || payload?.float_date || businessDate()).slice(0,10);
+  }
+
+  function isBusinessDateClosed(dateStr = businessDate()) {
+    const target = String(dateStr || '').slice(0,10);
+    if (!target) return false;
+    return (state.dayClosures || []).some(row => String(row.date || row.businessDate || '').slice(0,10) === target);
+  }
+
+  function businessDateClosedMessage(dateStr = businessDate()) {
+    return `Business date ${dateStr} is already closed. Posting is locked.`;
+  }
+
+  function shouldLockApprovalType(type) {
+    return COD_LOCKED_POSTING_TYPES.includes(type);
+  }
+
+  function buildCodDailySnapshot(dateStr, postingStaff = []) {
+    const rows = postingStaff.map(st => {
+      const formAmount = getOpeningBalanceForDate(st.id, dateStr);
+      const creditCash = approvedCreditTotalForDateByMode(st.id, dateStr, 'cash');
+      const creditTransfer = approvedCreditTotalForDateByMode(st.id, dateStr, 'transfer');
+      const debitCash = approvedDebitTotalForDateByMode(st.id, dateStr, 'cash');
+      const debitTransfer = approvedDebitTotalForDateByMode(st.id, dateStr, 'transfer');
+      const totalCredits = creditCash + creditTransfer;
+      const totalDebits = debitCash + debitTransfer;
+      const netBookBalance = totalCredits - totalDebits;
+      const remainingBalance = currentFloatAvailable(st.id, dateStr);
+      const variance = Math.max(0, -remainingBalance);
+      const debt = Number(ensureStaffAccount(st.id)?.debtBalance || 0);
+      return { staffId: st.id, staffName: st.name, formAmount, creditCash, creditTransfer, debitCash, debitTransfer, totalCredits, totalDebits, netBookBalance, remainingBalance, variance, debt };
+    });
+    return {
+      rows,
+      totalForm: rows.reduce((sum,row)=>sum+Number(row.formAmount||0),0),
+      totalCredits: rows.reduce((sum,row)=>sum+Number(row.totalCredits||0),0),
+      totalDebits: rows.reduce((sum,row)=>sum+Number(row.totalDebits||0),0),
+      totalNetBookBalance: rows.reduce((sum,row)=>sum+Number(row.netBookBalance||0),0),
+      totalRemainingBalance: rows.reduce((sum,row)=>sum+Number(row.remainingBalance||0),0),
+      totalVariance: rows.reduce((sum,row)=>sum+Number(row.variance||0),0),
+      totalDebt: rows.reduce((sum,row)=>sum+Number(row.debt||0),0)
+    };
+  }
+
+  function carryForwardForms(fromDate, toDate, postingStaff = []) {
+    postingStaff.forEach(st => {
+      const remaining = currentFloatAvailable(st.id, fromDate);
+      if (!(remaining > 0)) return;
+      if (hasBaseOpeningBalanceForDate(st.id, toDate)) return;
+      addStaffEntry(st.id, 'approved_form', remaining, remaining, `Auto carried forward from ${fromDate}`, { formDate: toDate, floatDate: toDate, carriedFromDate: fromDate, autoCarryForward: true });
+    });
+  }
+
+  function finalizeBusinessDay(dateStr, postingStaff = []) {
+    const closedDate = String(dateStr || businessDate()).slice(0,10);
+    if (isBusinessDateClosed(closedDate)) return false;
+    const nextOpenDate = nextDate(closedDate);
+    const snapshot = buildCodDailySnapshot(closedDate, postingStaff);
+    state.dayClosures.push({
+      id: uid('dayclose'),
+      date: closedDate,
+      businessDate: closedDate,
+      nextBusinessDate: nextOpenDate,
+      closedAt: new Date().toISOString(),
+      closedBy: currentStaff()?.name || '',
+      closedById: currentStaff()?.id || '',
+      snapshot
+    });
+    carryForwardForms(closedDate, nextOpenDate, postingStaff);
+    state.businessDate = nextOpenDate;
+    return true;
+  }
   function staffById(id){ return state.staff.find(s=>s.id===id) || null; }
   function customerName(id){ return state.customers.find(c=>c.id===id)?.name || ''; }
   function getStaffWalletCustomer(staffId){ const acc=ensureStaffAccount(staffId); return state.customers.find(c=>c.id===acc.linkedCustomerId) || null; }
@@ -907,6 +983,10 @@ if (approvalRecord.type === 'float_topup') {
 }
 
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
+    const requestDate = approvalBusinessDate(type, payload);
+    if (shouldLockApprovalType(type) && isBusinessDateClosed(requestDate)) {
+      return defaultResultErr('BUSINESS_DATE_CLOSED', businessDateClosedMessage(requestDate));
+    }
     if (!isSupabaseApprovalMode()) return defaultResultOk(createRequest(type, payload, meta));
     const staff = currentStaff();
     let result;
@@ -976,6 +1056,11 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   async function approveRequestRemote(id, payloadOverride = null) {
+    const pendingReq = (state.approvals || []).find(r => r.id === id);
+    if (pendingReq && shouldLockApprovalType(pendingReq.type)) {
+      const reqDate = approvalBusinessDate(pendingReq.type, pendingReq.payload || {});
+      if (isBusinessDateClosed(reqDate)) return defaultResultErr('BUSINESS_DATE_CLOSED', businessDateClosedMessage(reqDate));
+    }
     if (!isSupabaseApprovalMode()) { approveRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
 
@@ -1006,6 +1091,7 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   function defaultResultOk(data) { return { ok: true, data }; }
+  function defaultResultErr(code, message) { return { ok: false, error: { code, message } }; }
 
   function createRequest(type, payload, meta={}) {
     const staff = currentStaff();
@@ -1030,6 +1116,10 @@ if (approvalRecord.type === 'float_topup') {
   function approveRequest(id) {
     const req = state.approvals.find(r => r.id === id);
     if (!req || req.status !== 'pending') return;
+    if (shouldLockApprovalType(req.type)) {
+      const reqDate = approvalBusinessDate(req.type, req.payload || {});
+      if (isBusinessDateClosed(reqDate)) return showToast(businessDateClosedMessage(reqDate));
+    }
     req.status = 'approved';
     req.approvedAt = new Date().toISOString();
     req.approvedBy = currentStaff()?.name || 'System';
@@ -3158,6 +3248,7 @@ function renderTellerBalances() {
 
     if (byId('txPostSingle')) byId('txPostSingle').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
+      if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
       if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
       const accountNumberInput = String(byId('txAcc')?.value || '').trim();
       const customer = getCustomerByAccountNo(accountNumberInput);
@@ -3203,6 +3294,7 @@ function renderTellerBalances() {
 
     if (byId('journalSubmit')) byId('journalSubmit').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
+      if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
       if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
       if (!journal.length) return showToast('Generate journal first');
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
@@ -3356,6 +3448,7 @@ function renderTellerBalances() {
       const amount = Number(byId('oeAmount').value || 0);
       const date = byId('oeDate').value || today();
       const note = byId('oeNote').value.trim();
+      if (isBusinessDateClosed(date)) return showToast(businessDateClosedMessage(date));
       if (!(amount > 0)) return showToast('Enter amount');
       const account = [...state.operations.incomeAccounts, ...state.operations.expenseAccounts].find(a=>a.id===accountId);
       if (!account) return showToast('Select account');
@@ -3392,6 +3485,7 @@ function renderTellerBalances() {
         onClick: async () => {
           const amount = Number(byId('floatAmount')?.value || 0);
           if (!(amount > 0)) return showToast('Enter valid form');
+          if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
           if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
 
           closeModal();
@@ -3428,6 +3522,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
 
   function openCODModal() {
     if (!canCloseBusinessDay()) return showToast('Only Approval Officer or Admin can close day');
+    if (isBusinessDateClosed(businessDate())) return showToast(`Business date ${businessDate()} is already closed`);
     const postingStaff = state.staff.filter(st => hasPermission('credit', st) || hasPermission('debit', st));
     const rows = postingStaff.map(st => {
       const formAmount = getOpeningBalanceForDate(st.id, businessDate());
@@ -3482,7 +3577,12 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
           state.cod.unshift({id:uid('cod'), staffId:st.id, staffName:st.name, date:businessDate(), formAmount, openingBalance:formAmount, totalCreditCash:creditCash, totalCreditTransfer:creditTransfer, totalDebitCash:debitCash, totalDebitTransfer:debitTransfer, totalCredits:credits, totalDebits:debits, netBookBalance:netBook, actualCash:running, expectedCash:running, runningFloat:running, remainingBalance:running, variance, overdraw, note, fieldPapers:[], status: variance===0 && overdraw===0 ? 'balanced':'flagged', approvedAt:new Date().toISOString(), approvedBy:currentStaff()?.name||''});
         });
       }
-      state.dayClosures.push({date:businessDate(), closedAt:new Date().toISOString(), closedBy:currentStaff()?.name||''}); state.businessDate = nextDate(businessDate()); save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`); }}]);
+      const closingDate = businessDate();
+      if (!finalizeBusinessDay(closingDate, postingStaff)) {
+        showToast(`Business date ${closingDate} is already closed`);
+        return;
+      }
+      save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`); }}]);
   }
 
   function openAuditModal() {
