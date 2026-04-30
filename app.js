@@ -580,9 +580,42 @@
     const result = await gateway.approvals.listApprovalRequests(filters);
     if (result?.ok && Array.isArray(result.data)) {
       state.approvals = result.data;
+      syncOperationalEffectsFromApprovedRequests();
       save();
     }
     return result;
+  }
+
+  function syncOperationalEffectsFromApprovedRequests() {
+    state.operations ||= { incomeAccounts: [], expenseAccounts: [], entries: [] };
+    state.operations.incomeAccounts ||= [];
+    state.operations.expenseAccounts ||= [];
+    state.operations.entries ||= [];
+    (state.approvals || []).forEach(req => {
+      if (!req || req.status !== 'approved') return;
+      const p = req.payload || {};
+      if (req.type === 'operational_entry') {
+        if (state.operations.entries.some(e => e.sourceApprovalId === req.id)) return;
+        state.operations.entries.unshift({
+          id: uid('op'),
+          kind: p.kind,
+          accountId: p.accountId,
+          accountName: p.accountName,
+          amount: Number(p.amount || 0),
+          note: p.note || '',
+          date: `${p.date || today()}T12:00:00.000Z`,
+          postedBy: req.requestedByName || staffName(req.requestedBy) || 'System',
+          approvedBy: req.approvedBy || req.approvedByName || '',
+          sourceApprovalId: req.id
+        });
+      }
+      if (req.type === 'create_operational_account') {
+        const dest = p.category === 'income' ? state.operations.incomeAccounts : state.operations.expenseAccounts;
+        if (!Array.isArray(dest)) return;
+        const exists = dest.some(a => a.sourceApprovalId === req.id || (String(a.accountNumber || '') === String(p.accountNumber || '') && String(a.name || '').toLowerCase() === String(p.name || '').toLowerCase()));
+        if (!exists) dest.push({ id: uid('oa'), name: p.name, accountNumber: p.accountNumber, createdAt: req.approvedAt || new Date().toISOString(), sourceApprovalId: req.id });
+      }
+    });
   }
 
 
@@ -1113,13 +1146,16 @@ if (approvalRecord.type === 'float_topup') {
           note: req.payload.note,
           date: `${req.payload.date}T12:00:00.000Z`,
           postedBy: req.requestedByName,
-          approvedBy: currentStaff()?.name || ''
+          approvedBy: currentStaff()?.name || '',
+          sourceApprovalId: req.id
         });
         break;
       }
       case 'create_operational_account': {
         const dest = req.payload.category === 'income' ? state.operations.incomeAccounts : state.operations.expenseAccounts;
-        dest.push({ id: uid('oa'), name: req.payload.name, accountNumber: req.payload.accountNumber, createdAt: new Date().toISOString() });
+        if (!dest.some(a => a.sourceApprovalId === req.id || (String(a.accountNumber || '') === String(req.payload.accountNumber || '') && String(a.name || '').toLowerCase() === String(req.payload.name || '').toLowerCase()))) {
+          dest.push({ id: uid('oa'), name: req.payload.name, accountNumber: req.payload.accountNumber, createdAt: new Date().toISOString(), sourceApprovalId: req.id });
+        }
         break;
       }
       case 'close_of_day': {
@@ -1597,7 +1633,7 @@ function hideProcessing() {
             <div class="field"><label>Details</label><input id="txDetails" class="entry-input"></div>
           </div>
         </div>
-        <div class="w-full flex justify-center journal-center-wrap ${journalVisible ? '' : 'hidden'}" id="journalPaneWrap">
+        ${journalVisible ? `<div class="w-full flex justify-center journal-center-wrap" id="journalPaneWrap">
         <div class="journal-wrapper">
         <div class="journal-pane form-card spacious-journal-pane standalone-journal-pane" id="journalPane">
           <div class="journal-pane-head compact-journal-head">
@@ -1626,7 +1662,7 @@ function hideProcessing() {
           </div>
         </div>
         </div>
-        </div>
+        </div>` : ''}
       </div>`;
   }
 
