@@ -329,7 +329,12 @@
       acc.linkedCustomerId = wallet?.id || acc.linkedCustomerId || null;
     });
   }
-  function canCloseBusinessDay(staff=currentStaff()){ return !!staff && ['admin_officer','approving_officer'].includes(staff.role); }
+  function isAdminStaff(staff=currentStaff()) {
+    const role = String(staff?.role || staff?.roleCode || '').trim().toLowerCase();
+    const label = String(staff?.roleLabel || staff?.title || '').trim().toLowerCase();
+    return role === 'admin_officer' || role === 'admin' || label.includes('admin');
+  }
+  function canCloseBusinessDay(staff=currentStaff()){ return !!staff && (isAdminStaff(staff) || ['approving_officer'].includes(staff.role)); }
 
   function ensureStaffAccount(staffId, sourceState=state) {
     sourceState.staffAccounts ||= {};
@@ -3400,8 +3405,14 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
 
   function openAuditModal() {
     const st = currentStaff();
-    const rows = state.audit.filter(a => st?.role === 'admin_officer' || a.actorId === st?.id || a.actor === st?.name).map(a=>`<tr><td>${fmtDate(a.at)}</td><td>${a.actor}</td><td>${a.action}</td><td>${a.details}</td></tr>`).join('');
-    openModal('Audit Trail', `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No audit records</td></tr>'}</tbody></table></div></div>`, [{label:'Close', onClick: closeModal}]);
+    const adminView = isAdminStaff(st);
+    const visibleAudit = (state.audit || []).filter(a => {
+      if (adminView) return true;
+      return a.actorId === st?.id || a.actor_id === st?.id || a.actorUuid === st?.uuid || a.actor_uuid === st?.uuid || a.actor === st?.name;
+    });
+    const rows = visibleAudit.map(a=>`<tr><td>${fmtDate(a.at || a.timestamp || a.createdAt)}</td><td>${escapeHtml(a.actor || a.actorName || a.actor_name || 'System')}</td><td>${escapeHtml(a.action || a.actionType || a.action_type || '')}</td><td>${escapeHtml(a.details || a.detail || '')}</td></tr>`).join('');
+    const scopeNote = adminView ? '<div class="note">Admin Global Audit View: showing all staff actions.</div>' : '<div class="note">Showing audit records linked to your staff profile.</div>';
+    openModal('Audit Trail', `${scopeNote}<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No audit records</td></tr>'}</tbody></table></div>`, [{label:'Close', onClick: closeModal}]);
   }
 
   function staffName(id) { return state.staff.find(s=>s.id===id)?.name || id; }
