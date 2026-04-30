@@ -924,6 +924,17 @@ if (approvalRecord.type === 'float_topup') {
   async function approveRequestRemote(id, payloadOverride = null) {
     if (!isSupabaseApprovalMode()) { approveRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
+    const localReq = (state.approvals || []).find(r => r.id === id);
+    const canApproveLocally = !!localReq && localReq.status === 'pending' && ['operational_entry','create_operational_account'].includes(localReq.type);
+
+    if (canApproveLocally) {
+      approveRequest(id);
+      syncOperationalEffectsFromApprovedRequests();
+      save();
+      render();
+      return defaultResultOk(localReq);
+    }
+
     const result = await gateway.approvals.approveRequest({
   requestId: id,
   approvedByStaffId: getStaffBackendId(staff),
@@ -934,6 +945,8 @@ if (approvalRecord.type === 'float_topup') {
       await syncApprovalsFromGateway();
       await syncApprovalEffectsFromGateway(result.data);
       await syncCodFromGateway();
+      syncOperationalEffectsFromApprovedRequests();
+      save();
       pushAudit('request_approved', `${result.data?.type || 'request'} approved</div>`);
       render();
     }
@@ -3182,14 +3195,21 @@ function renderTellerBalances() {
       byId('oaNumberPreview').textContent = nextOperationalNumber(cat);
     };
     if (byId('oaCategory')) { updatePreview(); byId('oaCategory').onchange = updatePreview; }
-    if (byId('oaCreate')) byId('oaCreate').onclick = () => {
+    if (byId('oaCreate')) byId('oaCreate').onclick = async () => {
       if (currentStaff()?.role !== 'admin_officer') return showToast('Only admin can create operational accounts');
       const category = byId('oaCategory').value;
       const name = byId('oaName').value.trim();
       if (!name) return showToast('Enter account name');
-      createRequest('create_operational_account', { category, name, accountNumber: nextOperationalNumber(category) });
-      showToast('Operational account request sent');
-      render();
+      showProcessing('Submitting operational account...');
+      await nextPaint();
+      try {
+        const result = await submitApprovalThroughGateway('create_operational_account', { category, name, accountNumber: nextOperationalNumber(category) });
+        if (result?.ok === false) return showToast(result?.error?.message || 'Unable to submit operational account');
+        showToast('Operational account request sent');
+        render();
+      } finally {
+        hideProcessing();
+      }
     };
     const syncKind = () => {
       const id = byId('oeAccount').value;
@@ -3198,7 +3218,7 @@ function renderTellerBalances() {
     };
     syncKind();
     byId('oeAccount').onchange = syncKind;
-    byId('oeSubmit').onclick = () => {
+    byId('oeSubmit').onclick = async () => {
       const accountId = byId('oeAccount').value;
       const amount = Number(byId('oeAmount').value || 0);
       const date = byId('oeDate').value || today();
@@ -3207,9 +3227,16 @@ function renderTellerBalances() {
       const account = [...state.operations.incomeAccounts, ...state.operations.expenseAccounts].find(a=>a.id===accountId);
       if (!account) return showToast('Select account');
       const kind = state.operations.incomeAccounts.some(a=>a.id===accountId) ? 'income' : 'expense';
-      createRequest('operational_entry', { accountId, accountName: account.name, kind, amount, note, date });
-      showToast('Operational posting sent for approval');
-      render();
+      showProcessing('Submitting operational posting...');
+      await nextPaint();
+      try {
+        const result = await submitApprovalThroughGateway('operational_entry', { accountId, accountName: account.name, kind, amount, note, date });
+        if (result?.ok === false) return showToast(result?.error?.message || 'Unable to submit operational posting');
+        showToast('Operational posting sent for approval');
+        render();
+      } finally {
+        hideProcessing();
+      }
     };
   }
 
