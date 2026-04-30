@@ -465,6 +465,17 @@
     return `${rows.map(row => `To ${row.label} ${money(row.amount)}`).join(' • ')} • To Customer Account ${money(getCustomerCreditAmount(payload))}`;
   }
 
+
+  function cleanOperationalNote(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    return raw
+      .replace(/\s*•\s*Trace\s+[A-Za-z0-9_-]+/gi, '')
+      .replace(/\s*Trace\s+[A-Za-z0-9_-]+/gi, '')
+      .replace(/\s*•\s*$/g, '')
+      .trim();
+  }
+
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
     if (['check_balance','operational_accounts','my_balance','my_close_day'].includes(tool)) return true;
@@ -608,7 +619,7 @@
             accountId: incomeAccount?.id || chargeRow.key || '',
             accountName: incomeAccount?.name || chargeRow.accountName || chargeRow.label || 'Charge Income',
             amount: Number(chargeRow.amount || 0),
-            note: `${chargeRow.label || 'Charge'} from ${customerAccount} • Trace ${traceId}`,
+            note: cleanOperationalNote(`${chargeRow.label || 'Charge'} from ${customerAccount}`),
             date: `${entry?.date || req.payload?.date || req.payload?.businessDate || today()}T12:00:00.000Z`,
             postedBy: req.requestedByName || staffName(req.requestedBy) || 'System',
             approvedBy: req.approvedBy || req.approvedByName || '',
@@ -1119,7 +1130,7 @@ if (approvalRecord.type === 'float_topup') {
               accountId: incomeAccount?.id || row.key,
               accountName: incomeAccount?.name || row.accountName || row.label,
               amount: row.amount,
-              note: `${row.label} from ${c.accountNumber} • Trace ${chargeTraceId}`,
+              note: cleanOperationalNote(`${row.label} from ${c.accountNumber}`),
               date: `${req.payload.date}T12:00:00.000Z`,
               postedBy: req.requestedByName,
               approvedBy: currentStaff()?.name || '',
@@ -1130,7 +1141,7 @@ if (approvalRecord.type === 'float_topup') {
               date: `${req.payload.date}T12:00:00.000Z`,
               accountNumber: incomeAccount?.accountNumber || 'INC-2000',
               accountName: incomeAccount?.name || row.accountName || row.label,
-              details: `${row.label} from ${c.accountNumber} • Trace ${chargeTraceId}`,
+              details: cleanOperationalNote(`${row.label} from ${c.accountNumber}`),
               kind: 'credit',
               amount: row.amount,
               balanceAfter: 0,
@@ -1752,7 +1763,7 @@ function hideProcessing() {
     const p = a.payload || {};
     if (a.type === 'customer_credit') return `${money(p.amount)} to ${customerName(p.customerId) || p.accountNumber}${chargeSummaryText(p)}${p.details ? ' • ' + p.details : ''}`;
     if (a.type === 'customer_debit') return `${money(p.amount)} from ${customerName(p.customerId) || p.accountNumber}${p.details ? ' • ' + p.details : ''}`;
-    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') { const rows = p.rows || p.entries || []; const total = rows.reduce((s,r)=>s+Number(r.amount||0),0); const totalCharges = rows.reduce((s,r)=>s+getTotalChargeAmount(r),0); const attachmentTag = p.fieldNote ? ' • Note attached' : ''; const chargeTag = a.type === 'customer_credit_journal' && totalCharges > 0 ? ` • Charges ${money(totalCharges)}` : ''; return `${rows.length} item${rows.length===1?'':'s'} • Total ${money(total)}${chargeTag}${attachmentTag}`; }
+    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') { const rows = p.rows || p.entries || []; const total = rows.reduce((s,r)=>s+Number(r.amount||0),0); const totalCharges = rows.reduce((s,r)=>s+getTotalChargeAmount(r),0); const attachmentTag = p.fieldNote ? ' • Note attached' : ''; const chargeTag = a.type === 'customer_credit_journal' && totalCharges > 0 ? ` • Total Charge ${money(totalCharges)}` : ''; return `${rows.length} item${rows.length===1?'':'s'} • Total ${money(total)}${chargeTag}${attachmentTag}`; }
     if (a.type === 'wallet_fund') return `${staffName(p.staffId)} • Wallet fund • ${money(p.amount)}`;
     if (a.type === 'debt_repayment') return `${staffName(p.staffId)} • Debt repayment • ${money(p.amount)}`;
     return requestSummary(a);
@@ -2096,7 +2107,7 @@ function nextPaint() {
           <div class="kpi compact-page-kpi"><div class="label">Net Operational</div><div class="number">${money(income.reduce((s,e)=>s+Number(e.amount||0),0)-expense.reduce((s,e)=>s+Number(e.amount||0),0))}</div></div>
           <div class="kpi compact-page-kpi"><div class="label">Entries</div><div class="number">${filtered.length}</div></div>
         </div>
-        <div class="table-card"><h3>Operational Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Amount</th><th>Note</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.operationalEntriesLimit || 20).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${e.accountName}</td><td>${e.kind}</td><td>${money(e.amount)}</td><td>${e.note||'—'}</td><td>${e.postedBy}</td><td>${e.approvedBy}</td></tr>`).join('') || '<tr><td colspan="7">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.operationalEntriesLimit || 20) ? `<button id="operationalMore" class="secondary">Show More</button>` : ''}${(state.ui.operationalEntriesLimit || 20) > 20 ? `<button id="operationalLess" class="secondary">Show Less</button>` : ''}</div></div>
+        <div class="table-card"><h3>Operational Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Amount</th><th>Note</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.operationalEntriesLimit || 20).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${e.accountName}</td><td>${e.kind}</td><td>${money(e.amount)}</td><td>${cleanOperationalNote(e.note || e.details) || '—'}</td><td>${e.postedBy}</td><td>${e.approvedBy}</td></tr>`).join('') || '<tr><td colspan="7">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.operationalEntriesLimit || 20) ? `<button id="operationalMore" class="secondary">Show More</button>` : ''}${(state.ui.operationalEntriesLimit || 20) > 20 ? `<button id="operationalLess" class="secondary">Show Less</button>` : ''}</div></div>
       </div>`;
   }
 
@@ -2120,8 +2131,8 @@ function nextPaint() {
         type,
         accountName: e.accountName || e.account || '—',
         amount,
-        note: e.note || e.details || '',
-        details: e.details || e.note || '',
+        note: cleanOperationalNote(e.note || e.details) || '',
+        details: cleanOperationalNote(e.details || e.note) || '',
         balanceAfter: runningBalance,
         receivedOrPaidBy: e.receivedOrPaidBy || e.postedBy || '—',
         postedBy: e.postedBy || '—'
@@ -2246,7 +2257,7 @@ function nextPaint() {
         type: normalizedType,
         accountName: e.customer?.name || e.accountName || e.customerName || e.accountNumber || '—',
         amount: Number(e.amount || 0),
-        details: e.details || e.note || '',
+        details: cleanOperationalNote(e.details || e.note) || '',
         balanceAfter: Number(e.balanceAfter || 0),
         receivedOrPaidBy: e.receivedBy || e.receivedOrPaidBy || e.postedBy || '',
         postedBy: e.postedBy || ''
@@ -3820,8 +3831,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       ...e,
       accountNumber: e.accountNumber || 'STAFF',
       accountName: e.accountName || e.customerName || e.accountNumber || 'STAFF',
-      details: e.details || e.note || '',
-      note: e.note || e.details || '',
+      details: cleanOperationalNote(e.details || e.note) || '',
+      note: cleanOperationalNote(e.note || e.details) || '',
       type: e.type || e.kind || (Number(e.delta || 0) >= 0 ? 'credit' : 'debit'),
       kind: e.kind || e.type || (Number(e.delta || 0) >= 0 ? 'credit' : 'debit'),
       delta: Number(e.delta || ((e.type || e.kind) === 'debit' ? -Number(e.amount || 0) : Number(e.amount || 0))),
