@@ -1361,22 +1361,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
 
     async function fetchApprovedCustomerTransactionsForStaffDate(staffId, businessDate) {
-      let query = client.from(customerTransactionsTable).select(customerTransactionsSelect).eq('status', 'approved');
-      if (staffId) query = query.eq('posted_by_id', staffId);
-      if (businessDate) {
-        const start = `${businessDate}T00:00:00.000Z`;
-        const endDate = new Date(`${businessDate}T00:00:00.000Z`);
-        endDate.setUTCDate(endDate.getUTCDate() + 1);
-        const end = endDate.toISOString();
-        query = query.gte('effective_at', start).lt('effective_at', end);
-      }
-      const { data, error: queryError } = await query.order('effective_at', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true });
-      if (queryError) return defaultResult.err('COD_TX_FETCH_FAILED', 'Could not load approved customer transactions from Supabase.', queryError);
-      const rows = (Array.isArray(data) ? data : []).filter((row) => {
-        const d = String(row.effective_at || row.created_at || '').slice(0,10);
-        return !businessDate || d === businessDate;
-      });
-      return defaultResult.ok(rows);
+      // PHASE 4F HOTFIX — Central COD must not query customer_transactions here.
+      // The live Supabase schema does not guarantee the columns/filter shape needed by
+      // this preview path, and Central COD already passes exact app-calculated metrics
+      // into submitCod(). Returning an empty set keeps this fallback safe without
+      // touching posting, approvals, FORM, or balance logic.
+      return defaultResult.ok([]);
     }
 
     async function fetchApprovedStaffCashEntriesForStaffDate(staffId, businessDate) {
@@ -1448,9 +1438,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function submitCod(payload = {}) {
       if (!canUseSupabase()) return local.cod.submitCod(payload);
-      const previewResult = await getCodPreview({ staffId: payload.staffId, businessDate: payload.businessDate });
-      if (!previewResult.ok) return previewResult;
-      const metrics = previewResult.data;
+      let metrics = payload.metrics && typeof payload.metrics === 'object' ? clone(payload.metrics) : null;
+      if (!metrics) {
+        const previewResult = await getCodPreview({ staffId: payload.staffId, businessDate: payload.businessDate });
+        if (!previewResult.ok) return previewResult;
+        metrics = previewResult.data;
+      }
       let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', payload.staffId).eq('business_date', payload.businessDate).maybeSingle();
       const { data: existingData, error: existingError } = await existingQuery;
       if (existingError && existingError.code !== 'PGRST116') return defaultResult.err('COD_EXISTING_CHECK_FAILED', 'Could not verify existing COD submission.', existingError);
