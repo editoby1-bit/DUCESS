@@ -5,7 +5,23 @@
     err(code, message, details) { return { ok: false, error: { code, message, details } }; }
   };
 
-  const ROLE_DEFAULT_TOOLS = {
+  
+  async function resolveStaffUuid(client, localId) {
+    if (!localId) return localId;
+    // if already uuid
+    if (/^[0-9a-f-]{36}$/i.test(localId)) return localId;
+    try {
+      const { data } = await client
+        .from('staff')
+        .select('id, staff_code')
+        .eq('staff_code', localId)
+        .maybeSingle();
+      return data?.id || localId;
+    } catch (e) {
+      return localId;
+    }
+  }
+const ROLE_DEFAULT_TOOLS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
     teller: ['check_balance','account_statement','credit','debit'],
     approving_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','credit','debit','approval_queue','business_balance','operational_balance'],
@@ -860,7 +876,7 @@ function subscribeRealtime() {
       if (!existingResult.ok) return existingResult;
       if (existingResult.data) return defaultResult.ok(existingResult.data);
       const insertRow = {
-        staff_id: payload.staffId || null,
+        staff_id: await resolveStaffUuid(client, payload.staffId) || null,
         entry_type: payload.entryType || 'approval_posting',
         amount: normalizeNumber(payload.amount),
         delta: normalizeNumber(payload.delta),
@@ -1454,11 +1470,11 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (!previewResult.ok) return previewResult;
         metrics = previewResult.data;
       }
-      let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', payload.staffId).eq('business_date', payload.businessDate).maybeSingle();
+      let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', await resolveStaffUuid(client, payload.staffId)).eq('business_date', payload.businessDate).maybeSingle();
       const { data: existingData, error: existingError } = await existingQuery;
       if (existingError && existingError.code !== 'PGRST116') return defaultResult.err('COD_EXISTING_CHECK_FAILED', 'Could not verify existing COD submission.', existingError);
       const row = {
-        staff_id: payload.staffId || '',
+        staff_id: await resolveStaffUuid(client, payload.staffId) || '',
         business_date: payload.businessDate || '',
         opening_balance: normalizeNumber(metrics.openingBalance),
         float_topups: normalizeNumber(metrics.floatTopUps),
@@ -1473,7 +1489,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         overdraw: normalizeNumber(metrics.overdraw),
         note: payload.note || '',
         status: (normalizeNumber(payload.actualCash) - normalizeNumber(metrics.expectedCash) === 0 && normalizeNumber(metrics.overdraw) === 0) ? 'submitted' : 'flagged',
-        submitted_by_staff_id: payload.submittedByStaffId || payload.staffId || '',
+        submitted_by_staff_id: await resolveStaffUuid(client, payload.submittedByStaffId || payload.staffId) || '',
         submitted_at: new Date().toISOString(),
       };
       let res;
@@ -1864,7 +1880,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const rpcName = config?.supabase?.updateStaffStatusRpc || 'ducess_update_staff_status';
       try {
         const { data: rpcData, error: rpcError } = await client.rpc(rpcName, {
-          staff_id: payload.staffId,
+          staff_id: await resolveStaffUuid(client, payload.staffId),
           is_active: payload.isActive !== false,
           reason: payload.reason || '',
           override_used: payload.override === true,
