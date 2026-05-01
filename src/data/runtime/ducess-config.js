@@ -36,10 +36,10 @@ window.__DUCESS_CONFIG__ = Object.assign(
       approvalRequestsSelect: 'id, request_type, status, payload, requested_at, requested_by_staff_id, requested_by_name, approved_at, approved_by_staff_id, approved_by_name, decision_note, entity_type, entity_id',
 
       codSubmissionsTable: 'cod_submissions',
-      codSubmissionsSelect: '*',
+      codSubmissionsSelect: 'id, staff_id, business_date, opening_balance, float_topups, effective_opening_balance, total_credits, total_debits, net_book_balance, remaining_balance, expected_cash, actual_cash, variance, overdraw, note, status, submitted_by_staff_id, submitted_at',
 
       codResolutionsTable: 'cod_resolutions',
-      codResolutionsSelect: '*',
+      codResolutionsSelect: 'id, cod_submission_id, final_agreed_amount, adjustment_amount, debt_amount, resolution_note, resolved_by_staff_id, resolved_at',
 
       debtsTable: 'debts',
       debtsSelect: 'id, staff_id, business_date, source_cod_submission_id, amount, status, note, created_by_staff_id, created_at, updated_at',

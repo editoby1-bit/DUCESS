@@ -1,4 +1,3 @@
-function getStaffBackendId(localId){try{const state=window.__DUCESS_STATE__||window.state;const staff=state?.staff?.find(s=>s.id===localId);return staff?.uuid||localId;}catch(e){return localId;}}
 (function (global) {
   console.log("DUCESS GATEWAY LOADED", Date.now());
   const defaultResult = {
@@ -729,9 +728,9 @@ const anonKey = "sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I";
     const auditLogTable = config?.supabase?.auditLogTable || 'audit_log';
     const auditLogSelect = config?.supabase?.auditLogSelect || 'id, actor_staff_id, action_type, entity_type, entity_id, metadata, created_at';
     const codSubmissionsTable = config?.supabase?.codSubmissionsTable || 'cod_submissions';
-    const codSubmissionsSelect = '*';
+    const codSubmissionsSelect = config?.supabase?.codSubmissionsSelect || 'id, staff_id, business_date, opening_balance, float_topups, effective_opening_balance, total_credits, total_debits, net_book_balance, remaining_balance, expected_cash, actual_cash, variance, overdraw, note, status, submitted_by_staff_id, submitted_at';
     const codResolutionsTable = config?.supabase?.codResolutionsTable || 'cod_resolutions';
-    const codResolutionsSelect = '*';
+    const codResolutionsSelect = config?.supabase?.codResolutionsSelect || 'id, cod_submission_id, final_agreed_amount, adjustment_amount, debt_amount, resolution_note, resolved_by_staff_id, resolved_at';
     const debtsTable = config?.supabase?.debtsTable || 'debts';
     const debtsSelect = config?.supabase?.debtsSelect || 'id, staff_id, business_date, source_cod_submission_id, amount, status, note, created_by_staff_id, created_at, updated_at';
     const debtRepaymentsTable = config?.supabase?.debtRepaymentsTable || 'debt_repayments';
@@ -799,7 +798,7 @@ function subscribeRealtime() {
     }
 
     async function fetchApprovalRequestRow(requestId, requiredStatus) {
-      let query = client.from(approvalRequestsTable).select('id').eq('id', requestId);
+      let query = client.from(approvalRequestsTable).select(approvalRequestsSelect).eq('id', requestId);
       if (requiredStatus) query = query.eq('status', requiredStatus);
       const { data, error: queryError } = await query.maybeSingle();
       if (queryError) return defaultResult.err('APPROVAL_FETCH_FAILED', 'Could not load approval request from Supabase.', queryError);
@@ -820,7 +819,7 @@ function subscribeRealtime() {
       if (!requestId) return defaultResult.ok([]);
       const { data, error: queryError } = await client
         .from(customerTransactionsTable)
-        .select('id')
+        .select('id, account_id, customer_id, amount, tx_type, balance_after, approval_request_id')
         .eq('approval_request_id', requestId)
         .order('created_at', { ascending: true });
       if (queryError) {
@@ -837,7 +836,7 @@ function subscribeRealtime() {
       if (!requestId) return defaultResult.ok(null);
       const { data, error: queryError } = await client
         .from(staffCashLedgerTable)
-        .select('id')
+        .select(staffCashLedgerSelect)
         .eq('approval_request_id', requestId)
         .maybeSingle();
       if (queryError && queryError.code !== 'PGRST116') return defaultResult.err('STAFF_LEDGER_CHECK_FAILED', 'Could not verify previously posted staff cash entry.', queryError);
@@ -861,32 +860,32 @@ function subscribeRealtime() {
       if (!existingResult.ok) return existingResult;
       if (existingResult.data) return defaultResult.ok(existingResult.data);
       const insertRow = {
-        staff_id: getStaffBackendId(payload).staffId || null,
+        staff_id: payload.staffId || null,
         entry_type: payload.entryType || 'approval_posting',
         amount: normalizeNumber(payload.amount),
         delta: normalizeNumber(payload.delta),
         note: payload.note || '',
         approval_request_id: payload.approvalRequestId || null,
         float_date: payload.floatDate || null,
-        created_by_staff_id: getStaffBackendId(payload).createdByStaffId || null,
-        approved_by_staff_id: getStaffBackendId(payload).approvedByStaffId || null,
+        created_by_staff_id: payload.createdByStaffId || null,
+        approved_by_staff_id: payload.approvedByStaffId || null,
         created_at: new Date().toISOString(),
       };
-      const { data, error: insertError } = await client.from(staffCashLedgerTable).insert(insertRow).select('id').maybeSingle();
+      const { data, error: insertError } = await client.from(staffCashLedgerTable).insert(insertRow).select(staffCashLedgerSelect).maybeSingle();
       if (insertError) return defaultResult.err('STAFF_LEDGER_INSERT_FAILED', 'Could not write staff cash ledger entry in Supabase.', insertError);
       return defaultResult.ok(data || insertRow);
     }
 
     async function insertAuditLogEntry(payload = {}) {
       const insertRow = {
-        actor_staff_id: getStaffBackendId(payload).actorStaffId || null,
+        actor_staff_id: payload.actorStaffId || null,
         action_type: payload.actionType || 'approval_posted',
         entity_type: payload.entityType || 'approval_request',
         entity_id: payload.entityId || null,
         metadata: clone(payload.metadata || {}),
         created_at: new Date().toISOString(),
       };
-      const { data, error: insertError } = await client.from(auditLogTable).insert(insertRow).select('id').maybeSingle();
+      const { data, error: insertError } = await client.from(auditLogTable).insert(insertRow).select(auditLogSelect).maybeSingle();
       if (insertError) return defaultResult.err('AUDIT_LOG_INSERT_FAILED', 'Could not write audit log entry in Supabase.', insertError);
       return defaultResult.ok(data || insertRow);
     }
@@ -980,7 +979,7 @@ function subscribeRealtime() {
 
   const existing = await client
     .from(customersTable)
-    .select('id')
+    .select(customersSelect)
     .eq('full_name', fullName)
     .eq('phone', phone)
     .limit(1)
@@ -1026,7 +1025,7 @@ if (!generatedAccountNumber) {
     phone: phone,
     photo_path: payload.photo || payload.photoRef || payload.photo_path || '',
     status: 'active',
-    linked_staff_id: getStaffBackendId(requestRow).requested_by_staff_id || null,
+    linked_staff_id: requestRow.requested_by_staff_id || null,
     account_type: 'customer',
     created_at: new Date().toISOString(),
     is_active: true
@@ -1035,7 +1034,7 @@ if (!generatedAccountNumber) {
   const inserted = await client
   .from(customersTable)
   .insert([customerRow])
-  .select('id')
+  .select(customersSelect)
   .maybeSingle();
 
 if (inserted.error) {
@@ -1115,17 +1114,17 @@ if (inserted.error) {
             amount: repaymentAmount,
             payment_date: payload.paymentDate || payload.payment_date || new Date().toISOString().slice(0,10),
             note: payload.note || '',
-            requested_by_staff_id: getStaffBackendId(requestRow).requested_by_staff_id || null,
-            approved_by_staff_id: getStaffBackendId(approver)?.staffId || null,
+            requested_by_staff_id: requestRow.requested_by_staff_id || null,
+            approved_by_staff_id: approver?.staffId || null,
             approval_request_id: requestRow.id,
             status: 'approved',
             created_at: new Date().toISOString(),
           };
-          const ins = await client.from(debtRepaymentsTable).insert(repaymentRow).select('id').maybeSingle();
+          const ins = await client.from(debtRepaymentsTable).insert(repaymentRow).select(debtRepaymentsSelect).maybeSingle();
           if (ins.error) return defaultResult.err('DEBT_REPAYMENT_INSERT_FAILED', 'Could not post debt repayment in Supabase.', ins.error);
           const remaining = Math.max(0, normalizeNumber(debt.amount) - repaymentAmount);
           const nextStatus = remaining === 0 ? 'paid' : 'part_paid';
-          const upd = await client.from(debtsTable).update({ amount: remaining, status: nextStatus, updated_at: new Date().toISOString() }).eq('id', debt.id).select('id').maybeSingle();
+          const upd = await client.from(debtsTable).update({ amount: remaining, status: nextStatus, updated_at: new Date().toISOString() }).eq('id', debt.id).select(debtsSelect).maybeSingle();
           if (upd.error) return defaultResult.err('DEBT_UPDATE_FAILED', 'Could not update debt after repayment.', upd.error);
           return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, debt: normalizeDebtRecord(upd.data), repayment: ins.data, decisionNote: decisionNote || '' });
         }
@@ -1173,12 +1172,12 @@ if (inserted.error) {
       const patch = {
         status,
         approved_at: new Date().toISOString(),
-        approved_by_staff_id: getStaffBackendId(actor)?.staffId || '',
+        approved_by_staff_id: actor?.staffId || '',
         approved_by_name: actor?.name || '',
         decision_note: note || '',
         payload: mergeApprovalPayload(current?.payload, payloadPatch),
       };
-      const { data, error: updateError } = await client.from(approvalRequestsTable).update(patch).eq('id', requestId).eq('status', 'pending').select('id').maybeSingle();
+      const { data, error: updateError } = await client.from(approvalRequestsTable).update(patch).eq('id', requestId).eq('status', 'pending').select(approvalRequestsSelect).maybeSingle();
       if (updateError) return defaultResult.err(status === 'approved' ? 'APPROVAL_APPROVE_FAILED' : 'APPROVAL_REJECT_FAILED', status === 'approved' ? 'Could not approve request in Supabase.' : 'Could not reject request in Supabase.', updateError);
       if (!data) return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
       return defaultResult.ok(normalizeApprovalRecord(data));
@@ -1186,7 +1185,7 @@ if (inserted.error) {
 
     async function listApprovalRequests(filters = {}) {
       if (!canUseSupabase()) return local.approvals.listApprovalRequests(filters);
-      let query = client.from(approvalRequestsTable).select('id').order('requested_at', { ascending: false });
+      let query = client.from(approvalRequestsTable).select(approvalRequestsSelect).order('requested_at', { ascending: false });
       if (filters?.status) query = query.eq('status', filters.status);
       if (filters?.requestType) query = query.eq('request_type', filters.requestType);
       if (filters?.requestedByStaffId) query = query.eq('requested_by_staff_id', filters.requestedByStaffId);
@@ -1199,7 +1198,7 @@ if (inserted.error) {
 
     async function getApprovalRequestById(requestId) {
       if (!canUseSupabase()) return local.approvals.getApprovalRequestById(requestId);
-      const { data, error: queryError } = await client.from(approvalRequestsTable).select('id').eq('id', requestId).maybeSingle();
+      const { data, error: queryError } = await client.from(approvalRequestsTable).select(approvalRequestsSelect).eq('id', requestId).maybeSingle();
       if (queryError) return defaultResult.err('APPROVAL_FETCH_FAILED', 'Could not load approval request from Supabase.', queryError);
       return defaultResult.ok(normalizeApprovalRecord(data));
     }
@@ -1215,7 +1214,7 @@ if (inserted.error) {
     request_type: payload.requestType || payload.type || '',
     status: 'pending',
     payload: clone(payload.payload || {}),
-    requested_by_staff_id: getStaffBackendId(payload).requestedByStaffId || payload.requested_by_staff_id || '',
+    requested_by_staff_id: payload.requestedByStaffId || payload.requested_by_staff_id || '',
     requested_by_name: payload.requestedByName || payload.requested_by_name || '',
     requested_at: new Date().toISOString(),
     entity_type: payload.entityType || payload.entity_type || null,
@@ -1228,7 +1227,7 @@ if (inserted.error) {
   const { data, error: insertError } = await client
     .from(approvalRequestsTable)
     .insert([insertPayload])
-    .select('id')
+    .select(approvalRequestsSelect)
     .single();
 
   console.log('APPROVAL INSERT RESULT', { data, insertError });
@@ -1253,7 +1252,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (approvalPostingRpc) {
         const { data, error: rpcError } = await client.rpc(approvalPostingRpc, {
           p_request_id: payload.requestId,
-          p_approved_by_staff_id: getStaffBackendId(approver).staffId,
+          p_approved_by_staff_id: approver.staffId,
           p_approved_by_name: approver.name,
           p_decision_note: decisionNote,
         });
@@ -1362,17 +1361,15 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
 
     async function fetchApprovedCustomerTransactionsForStaffDate(staffId, businessDate) {
-      // PHASE 4F HOTFIX — Central COD must not query customer_transactions here.
-      // The live Supabase schema does not guarantee the columns/filter shape needed by
-      // this preview path, and Central COD already passes exact app-calculated metrics
-      // into submitCod(). Returning an empty set keeps this fallback safe without
-      // touching posting, approvals, FORM, or balance logic.
+      // COD finalization is driven by the app-calculated totals passed from app.js.
+      // Do not query customer_transactions here: live schemas may not yet have posted_by_id/effective_at,
+      // and that optional preview query was causing Supabase 400 errors during Central COD.
       return defaultResult.ok([]);
     }
 
     async function fetchApprovedStaffCashEntriesForStaffDate(staffId, businessDate) {
-      let query = client.from(staffCashLedgerTable).select('id');
-      if (staffId) query = query.eq('staff_id', getStaffBackendId(staffId));
+      let query = client.from(staffCashLedgerTable).select(staffCashLedgerSelect);
+      if (staffId) query = query.eq('staff_id', staffId);
       if (businessDate) query = query.eq('float_date', businessDate);
       const { data, error: queryError } = await query.order('created_at', { ascending: true });
       if (queryError) return defaultResult.err('COD_LEDGER_FETCH_FAILED', 'Could not load staff cash ledger entries from Supabase.', queryError);
@@ -1409,20 +1406,20 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function listCodSubmissions(filters = {}) {
       if (!canUseSupabase()) return local.cod.listCodSubmissions(filters);
-      let query = client.from(codSubmissionsTable).select('id');
+      let query = client.from(codSubmissionsTable).select(codSubmissionsSelect).order('submitted_at', { ascending: false });
       if (filters.staffId) query = query.eq('staff_id', filters.staffId);
       if (filters.businessDate || filters.date) query = query.eq('business_date', filters.businessDate || filters.date);
       const limit = Number(filters?.limit || 100);
       if (Number.isFinite(limit) && limit > 0) query = query.limit(Math.min(limit, 500));
-      let { data, error: queryError } = await query;
-      if (queryError) return defaultResult.ok([]);
-      const baseRows = (data || []).map(normalizeCodSubmissionRecord).filter(Boolean)
-        .sort((a, b) => new Date(b.submittedAt || b.date || 0) - new Date(a.submittedAt || a.date || 0));
+      const { data, error: queryError } = await query;
+      if (queryError) return defaultResult.err('COD_LIST_FAILED', 'Could not load COD submissions from Supabase.', queryError);
+      const baseRows = (data || []).map(normalizeCodSubmissionRecord).filter(Boolean);
       const ids = baseRows.map((row) => row.id).filter(Boolean);
       let resolutionMap = new Map();
       if (ids.length) {
-        const { data: resData, error: resErr } = await client.from(codResolutionsTable).select('id').in('cod_submission_id', ids);
-        if (!resErr) resolutionMap = new Map((resData || []).map((row) => [String(row.cod_submission_id), row]));
+        const { data: resData, error: resErr } = await client.from(codResolutionsTable).select(codResolutionsSelect).in('cod_submission_id', ids);
+        if (resErr) return defaultResult.err('COD_RESOLUTION_LIST_FAILED', 'Could not load COD resolutions from Supabase.', resErr);
+        resolutionMap = new Map((resData || []).map((row) => [String(row.cod_submission_id), row]));
       }
       return defaultResult.ok(baseRows.map((row) => {
         const res = resolutionMap.get(row.id);
@@ -1445,17 +1442,11 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (!previewResult.ok) return previewResult;
         metrics = previewResult.data;
       }
-      const { data: existingData, error: existingError } = await client
-        .from(codSubmissionsTable)
-        .select('id')
-        .eq('staff_id', payload.staffId)
-        .eq('business_date', payload.businessDate)
-        .maybeSingle();
-      if (existingError && existingError.code !== 'PGRST116') {
-        return defaultResult.err('COD_EXISTING_CHECK_FAILED', 'Could not verify existing COD submission.', existingError);
-      }
+      let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', payload.staffId).eq('business_date', payload.businessDate).maybeSingle();
+      const { data: existingData, error: existingError } = await existingQuery;
+      if (existingError && existingError.code !== 'PGRST116') return defaultResult.err('COD_EXISTING_CHECK_FAILED', 'Could not verify existing COD submission.', existingError);
       const row = {
-        staff_id: getStaffBackendId(payload).staffId || '',
+        staff_id: payload.staffId || '',
         business_date: payload.businessDate || '',
         opening_balance: normalizeNumber(metrics.openingBalance),
         float_topups: normalizeNumber(metrics.floatTopUps),
@@ -1470,26 +1461,15 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         overdraw: normalizeNumber(metrics.overdraw),
         note: payload.note || '',
         status: (normalizeNumber(payload.actualCash) - normalizeNumber(metrics.expectedCash) === 0 && normalizeNumber(metrics.overdraw) === 0) ? 'submitted' : 'flagged',
-        submitted_by_staff_id: getStaffBackendId(payload).submittedByStaffId || payload.staffId || '',
+        submitted_by_staff_id: payload.submittedByStaffId || payload.staffId || '',
         submitted_at: new Date().toISOString(),
       };
-      async function saveCodRowSafe(targetRow, existingId = null) {
-        let workingRow = Object.assign({}, targetRow);
-        for (let attempt = 0; attempt < 12; attempt += 1) {
-          const response = existingId
-            ? await client.from(codSubmissionsTable).update(workingRow).eq('id', existingId).select('id').single()
-            : await client.from(codSubmissionsTable).insert(workingRow).select('id').single();
-          if (!response.error) return response;
-          const msg = String(response.error.message || response.error.details || '');
-          const missing = (msg.match(/'([^']+)' column/) || msg.match(/column [^.]+\.([a-zA-Z0-9_]+) does not exist/) || [])[1];
-          if (!missing || !(missing in workingRow)) return response;
-          delete workingRow[missing];
-        }
-        return existingId
-          ? await client.from(codSubmissionsTable).update(workingRow).eq('id', existingId).select('id').single()
-          : await client.from(codSubmissionsTable).insert(workingRow).select('id').single();
+      let res;
+      if (existingData?.id) {
+        res = await client.from(codSubmissionsTable).update(row).eq('id', existingData.id).select(codSubmissionsSelect).single();
+      } else {
+        res = await client.from(codSubmissionsTable).insert(row).select(codSubmissionsSelect).single();
       }
-      const res = await saveCodRowSafe(row, existingData?.id || null);
       if (res.error) return defaultResult.err('COD_SUBMIT_FAILED', 'Could not submit COD record to Supabase.', res.error);
       await insertAuditLogEntry({ actorStaffId: payload.submittedByStaffId || payload.staffId || null, actionType: 'cod_submission', entityType: 'cod_submission', entityId: res.data?.id || null, metadata: clone(row) });
       return defaultResult.ok(normalizeCodSubmissionRecord(res.data));
@@ -1497,7 +1477,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function listDebts(filters = {}) {
       if (!canUseSupabase()) return local.cod.listDebts(filters);
-      let query = client.from(debtsTable).select('id').order('created_at', { ascending: false });
+      let query = client.from(debtsTable).select(debtsSelect).order('created_at', { ascending: false });
       if (filters.staffId) query = query.eq('staff_id', filters.staffId);
       if (filters.status) query = query.eq('status', filters.status);
       const { data, error: queryError } = await query;
@@ -1507,7 +1487,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function getDebtById(debtId) {
       if (!canUseSupabase()) return local.cod.getDebtById(debtId);
-      const { data, error: queryError } = await client.from(debtsTable).select('id').eq('id', debtId).maybeSingle();
+      const { data, error: queryError } = await client.from(debtsTable).select(debtsSelect).eq('id', debtId).maybeSingle();
       if (queryError) return defaultResult.err('DEBT_FETCH_FAILED', 'Could not load debt from Supabase.', queryError);
       return defaultResult.ok(normalizeDebtRecord(data));
     }
@@ -1533,7 +1513,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const finalAgreedAmount = normalizeNumber(payload.finalAgreedAmount);
       const adjustmentAmount = finalAgreedAmount - normalizeNumber(cod.netBookBalance);
       const debtAmount = Math.max(0, normalizeNumber(payload.debtAmount));
-      let existingRes = await client.from(codResolutionsTable).select('id').eq('cod_submission_id', payload.codSubmissionId).maybeSingle();
+      let existingRes = await client.from(codResolutionsTable).select(codResolutionsSelect).eq('cod_submission_id', payload.codSubmissionId).maybeSingle();
       if (existingRes.error && existingRes.error.code != 'PGRST116') return defaultResult.err('COD_RESOLUTION_CHECK_FAILED', 'Could not verify COD resolution.', existingRes.error);
       const resolutionRow = {
         cod_submission_id: payload.codSubmissionId,
@@ -1541,12 +1521,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         adjustment_amount: adjustmentAmount,
         debt_amount: debtAmount,
         resolution_note: payload.resolutionNote || '',
-        resolved_by_staff_id: getStaffBackendId(payload).resolvedByStaffId || '',
+        resolved_by_staff_id: payload.resolvedByStaffId || '',
         resolved_at: new Date().toISOString(),
       };
       let resolutionResult;
-      if (existingRes.data?.id) resolutionResult = await client.from(codResolutionsTable).update(resolutionRow).eq('id', existingRes.data.id).select('id').single();
-      else resolutionResult = await client.from(codResolutionsTable).insert(resolutionRow).select('id').single();
+      if (existingRes.data?.id) resolutionResult = await client.from(codResolutionsTable).update(resolutionRow).eq('id', existingRes.data.id).select(codResolutionsSelect).single();
+      else resolutionResult = await client.from(codResolutionsTable).insert(resolutionRow).select(codResolutionsSelect).single();
       if (resolutionResult.error) return defaultResult.err('COD_RESOLUTION_FAILED', 'Could not store COD resolution in Supabase.', resolutionResult.error);
       if (adjustmentAmount !== 0) {
         const existingAdj = await fetchExistingPostedTransactionsByRequest(`cod-resolution:${payload.codSubmissionId}`);
@@ -1574,15 +1554,15 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         }
       }
       if (debtAmount > 0) {
-        const existingDebt = await client.from(debtsTable).select('id').eq('source_cod_submission_id', payload.codSubmissionId).maybeSingle();
+        const existingDebt = await client.from(debtsTable).select(debtsSelect).eq('source_cod_submission_id', payload.codSubmissionId).maybeSingle();
         const debtRow = {
-          staff_id: getStaffBackendId(cod).staffId,
+          staff_id: cod.staffId,
           business_date: cod.businessDate,
           source_cod_submission_id: payload.codSubmissionId,
           amount: debtAmount,
           status: debtAmount > 0 ? 'open' : 'paid',
           note: payload.resolutionNote || '',
-          created_by_staff_id: getStaffBackendId(payload).resolvedByStaffId || '',
+          created_by_staff_id: payload.resolvedByStaffId || '',
           updated_at: new Date().toISOString(),
         };
         if (existingDebt.data?.id) await client.from(debtsTable).update(debtRow).eq('id', existingDebt.data.id);
@@ -1611,7 +1591,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function getStaffProfileBySelector(selector) {
       if (!canUseSupabase()) return error;
-      let query = client.from(staffTable).select('id').limit(1);
+      let query = client.from(staffTable).select(staffProfileSelect).limit(1);
       Object.entries(selector || {}).forEach(([column, value]) => {
         if (value !== undefined && value !== null && value !== '') query = query.eq(column, value);
       });
@@ -1625,7 +1605,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!canUseSupabase() || !roleCode) return defaultResult.ok([]);
       const { data, error: queryError } = await client
         .from(staffRolePermissionsTable)
-        .select('id')
+        .select('tool_code, allowed')
         .eq('role_code', roleCode);
       if (queryError) return defaultResult.err('ROLE_PERMISSIONS_FETCH_FAILED', 'Could not fetch role permissions from Supabase.', queryError);
       const normalized = (Array.isArray(data) ? data : [])
@@ -1638,8 +1618,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!canUseSupabase() || !staffId) return defaultResult.ok([]);
       const { data, error: queryError } = await client
         .from(staffTempGrantsTable)
-        .select('id')
-        .eq('staff_id', getStaffBackendId(staffId))
+        .select('id, staff_id, tool_code, starts_at, ends_at, note, enabled, granted_by_staff_id')
+        .eq('staff_id', staffId)
         .eq('enabled', true);
       if (queryError) return defaultResult.err('TEMP_GRANTS_FETCH_FAILED', 'Could not fetch temporary grants from Supabase.', queryError);
       const normalized = (Array.isArray(data) ? data : [])
@@ -1651,7 +1631,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function fetchCustomersRows(filters = {}) {
       if (!canUseSupabase()) return defaultResult.err('SUPABASE_UNAVAILABLE', 'Supabase client is not available.');
-      let query = client.from(customersTable).select('id');
+      let query = client.from(customersTable).select(customersSelect);
       if (filters.customerId) query = query.eq('id', filters.customerId);
       if (filters.accountNumber) query = query.eq('account_number', String(filters.accountNumber).trim());
       if (filters.linkedStaffId) query = query.eq('linked_staff_id', filters.linkedStaffId);
@@ -1671,7 +1651,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!ids.length) return defaultResult.ok([]);
       const { data, error: queryError } = await client
         .from(customerTransactionsTable)
-        .select('id')
+        .select(customerTransactionsSelect)
         .in('customer_id', ids)
         .order('effective_at', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true });
@@ -1684,7 +1664,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!accountId) return defaultResult.ok([]);
       let primary = await client
         .from(customerTransactionsTable)
-        .select('id')
+        .select(customerTransactionsSelect)
         .eq('account_id', accountId)
         .order('effective_at', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true });
@@ -1693,7 +1673,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!rows.length) {
         const secondary = await client
           .from(customerTransactionsTable)
-          .select('id')
+          .select(customerTransactionsSelect)
           .eq('customer_id', accountId)
           .order('effective_at', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: true });
@@ -1709,7 +1689,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!ids.length) return defaultResult.ok([]);
       const { data, error: queryError } = await client
         .from(customerBalancesTable)
-        .select('id')
+        .select(customerBalancesSelect)
         .in('account_id', ids);
       if (queryError) return defaultResult.err('ACCOUNT_BALANCE_FETCH_FAILED', 'Could not fetch account balances from Supabase.', queryError);
       return defaultResult.ok(Array.isArray(data) ? data : []);
@@ -1717,7 +1697,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function fetchAccountBySelector(selector = {}) {
       if (!canUseSupabase()) return defaultResult.err('SUPABASE_UNAVAILABLE', 'Supabase client is not available.');
-      let query = client.from(customerAccountsTable).select('id').limit(1);
+      let query = client.from(customerAccountsTable).select(customerAccountsSelect).limit(1);
       Object.entries(selector).forEach(([column, value]) => {
         if (value !== undefined && value !== null && value !== '') query = query.eq(column, value);
       });
@@ -1770,7 +1750,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         phone: row.phone,
         photo_path: row.photo_path,
         status: row.status,
-        linked_staff_id: getStaffBackendId(row).linked_staff_id,
+        linked_staff_id: row.linked_staff_id,
         account_type: row.account_type,
         created_at: row.created_at,
         is_active: row.is_active,
@@ -1820,7 +1800,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function listStaff(filters = {}) {
       if (!canUseSupabase()) return local.staff.listStaff(filters);
-      let query = client.from(staffTable).select('id');
+      let query = client.from(staffTable).select(staffProfileSelect);
       if (filters.roleCode) query = query.eq('role_code', filters.roleCode);
       if (typeof filters.isActive === 'boolean') query = query.eq('is_active', filters.isActive);
       if (filters.search) {
@@ -1847,7 +1827,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         branch_id: payload.branchId || null,
         auth_email: payload.authEmail || null,
         temporary_password: payload.temporaryPassword || null,
-        created_by_staff_id: getStaffBackendId(payload).createdByStaffId || null,
+        created_by_staff_id: payload.createdByStaffId || null,
         created_by_name: payload.createdByName || null,
       };
       try {
@@ -1862,7 +1842,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         auth_email: rpcPayload.auth_email,
         is_active: true,
       };
-      const { data, error: insertError } = await client.from(staffTable).insert(insertRow).select('id').single();
+      const { data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single();
       if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Could not create staff profile in Supabase.', insertError);
       return defaultResult.ok(normalizeStaffSummary(data));
     }
@@ -1872,16 +1852,16 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const rpcName = config?.supabase?.updateStaffStatusRpc || 'ducess_update_staff_status';
       try {
         const { data: rpcData, error: rpcError } = await client.rpc(rpcName, {
-          staff_id: getStaffBackendId(payload).staffId,
+          staff_id: payload.staffId,
           is_active: payload.isActive !== false,
           reason: payload.reason || '',
           override_used: payload.override === true,
-          updated_by_staff_id: getStaffBackendId(payload).updatedByStaffId || null,
+          updated_by_staff_id: payload.updatedByStaffId || null,
           updated_by_name: payload.updatedByName || null,
         });
         if (!rpcError) return defaultResult.ok(normalizeStaffSummary(Array.isArray(rpcData) ? rpcData[0] : rpcData));
       } catch (err) {}
-      const { data, error: updateError } = await client.from(staffTable).update({ is_active: payload.isActive !== false }).eq('id', payload.staffId).select('id').single();
+      const { data, error: updateError } = await client.from(staffTable).update({ is_active: payload.isActive !== false }).eq('id', payload.staffId).select(staffProfileSelect).single();
       if (updateError) return defaultResult.err('STAFF_STATUS_UPDATE_FAILED', 'Could not update staff status in Supabase.', updateError);
       return defaultResult.ok(normalizeStaffSummary(data));
     }
