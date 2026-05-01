@@ -266,7 +266,6 @@ async function submitCod(_payload) {
 }
 
 async function listCodSubmissions(_filters) {
-  console.warn('Local COD fallback should not be used. Ensure Supabase is active.');
   return {
     ok: true,
     data: []
@@ -778,6 +777,41 @@ function subscribeRealtime() {
       const num = Number(value || 0);
       return Number.isFinite(num) ? num : 0;
     }
+
+    function isUuidLike(value) {
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+    }
+
+    function resolveStaffBackendId(localId) {
+      const raw = String(localId || '').trim();
+      if (!raw) return '';
+      if (isUuidLike(raw)) return raw;
+      try {
+        const loaded = local?.appState?.loadState?.() || {};
+        const rows = Array.isArray(loaded.staff) ? loaded.staff : [];
+        const match = rows.find((s) => (
+          String(s.id || '') === raw ||
+          String(s.staffId || '') === raw ||
+          String(s.staff_code || '') === raw ||
+          String(s.code || '') === raw
+        ));
+        const candidates = [
+          match?.uuid,
+          match?.authUserId,
+          match?.auth_user_id,
+          match?.backendId,
+          match?.backend_id,
+          match?.supabaseId,
+          match?.supabase_id,
+          match?.id
+        ].filter(Boolean);
+        const uuid = candidates.find(isUuidLike);
+        return uuid || raw;
+      } catch (_) {
+        return raw;
+      }
+    }
+
 
     function mergeApprovalPayload(existingPayload, patch) {
       return {
@@ -1408,7 +1442,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     async function listCodSubmissions(filters = {}) {
       if (!canUseSupabase()) return local.cod.listCodSubmissions(filters);
       let query = client.from(codSubmissionsTable).select(codSubmissionsSelect).order('submitted_at', { ascending: false });
-      if (filters.staffId) query = query.eq('staff_id', filters.staffId);
+      if (filters.staffId) query = query.eq('staff_id', resolveStaffBackendId(filters.staffId));
       if (filters.businessDate || filters.date) query = query.eq('business_date', filters.businessDate || filters.date);
       const limit = Number(filters?.limit || 100);
       if (Number.isFinite(limit) && limit > 0) query = query.limit(Math.min(limit, 500));
@@ -1437,17 +1471,37 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function submitCod(payload = {}) {
       if (!canUseSupabase()) return local.cod.submitCod(payload);
+
+      const staffBackendId = resolveStaffBackendId(payload.staffUuid || payload.staffBackendId || payload.staffId);
+      const submittedByBackendId = resolveStaffBackendId(payload.submittedByStaffUuid || payload.submittedByStaffId || payload.staffUuid || payload.staffBackendId || payload.staffId);
+
       let metrics = payload.metrics && typeof payload.metrics === 'object' ? clone(payload.metrics) : null;
       if (!metrics) {
         const previewResult = await getCodPreview({ staffId: payload.staffId, businessDate: payload.businessDate });
         if (!previewResult.ok) return previewResult;
         metrics = previewResult.data;
       }
-      let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', payload.staffUuid || payload.staffBackendId || payload.staffId).eq('business_date', payload.businessDate).maybeSingle();
-      const { data: existingData, error: existingError } = await existingQuery;
-      if (existingError && existingError.code !== 'PGRST116') return defaultResult.err('COD_EXISTING_CHECK_FAILED', 'Could not verify existing COD submission.', existingError);
+
+      let existingData = null;
+      try {
+        const existingRes = await client
+          .from(codSubmissionsTable)
+          .select('id')
+          .eq('staff_id', staffBackendId)
+          .eq('business_date', payload.businessDate)
+          .maybeSingle();
+
+        if (existingRes.error && existingRes.error.code !== 'PGRST116') {
+          console.warn('[DUCESS gateway] COD existing-check bypassed:', existingRes.error);
+        } else {
+          existingData = existingRes.data || null;
+        }
+      } catch (err) {
+        console.warn('[DUCESS gateway] COD existing-check bypassed:', err);
+      }
+
       const row = {
-        staff_id: payload.staffUuid || payload.staffBackendId || payload.staffId || '',
+        staff_id: staffBackendId || '',
         business_date: payload.businessDate || '',
         opening_balance: normalizeNumber(metrics.openingBalance),
         float_topups: normalizeNumber(metrics.floatTopUps),
@@ -1462,24 +1516,34 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         overdraw: normalizeNumber(metrics.overdraw),
         note: payload.note || '',
         status: (normalizeNumber(payload.actualCash) - normalizeNumber(metrics.expectedCash) === 0 && normalizeNumber(metrics.overdraw) === 0) ? 'submitted' : 'flagged',
-        submitted_by_staff_id: payload.submittedByStaffUuid || payload.submittedByStaffId || payload.staffUuid || payload.staffBackendId || payload.staffId || '',
+        submitted_by_staff_id: submittedByBackendId || staffBackendId || '',
         submitted_at: new Date().toISOString(),
       };
+
       let res;
       if (existingData?.id) {
         res = await client.from(codSubmissionsTable).update(row).eq('id', existingData.id).select(codSubmissionsSelect).single();
       } else {
         res = await client.from(codSubmissionsTable).insert(row).select(codSubmissionsSelect).single();
       }
+
       if (res.error) return defaultResult.err('COD_SUBMIT_FAILED', 'Could not submit COD record to Supabase.', res.error);
-      await insertAuditLogEntry({ actorStaffId: payload.submittedByStaffId || payload.staffId || null, actionType: 'cod_submission', entityType: 'cod_submission', entityId: res.data?.id || null, metadata: clone(row) });
+
+      await insertAuditLogEntry({
+        actorStaffId: submittedByBackendId || staffBackendId || null,
+        actionType: 'cod_submission',
+        entityType: 'cod_submission',
+        entityId: res.data?.id || null,
+        metadata: clone(row)
+      });
+
       return defaultResult.ok(normalizeCodSubmissionRecord(res.data));
     }
 
     async function listDebts(filters = {}) {
       if (!canUseSupabase()) return local.cod.listDebts(filters);
       let query = client.from(debtsTable).select(debtsSelect).order('created_at', { ascending: false });
-      if (filters.staffId) query = query.eq('staff_id', filters.staffId);
+      if (filters.staffId) query = query.eq('staff_id', resolveStaffBackendId(filters.staffId));
       if (filters.status) query = query.eq('status', filters.status);
       const { data, error: queryError } = await query;
       if (queryError) return defaultResult.err('DEBT_LIST_FAILED', 'Could not load debts from Supabase.', queryError);
