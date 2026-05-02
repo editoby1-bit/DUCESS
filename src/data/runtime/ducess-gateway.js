@@ -1850,31 +1850,41 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function createStaff(payload = {}) {
       if (!canUseSupabase()) return local.staff.createStaff(payload);
-      const rpcName = config?.supabase?.createStaffRpc || 'ducess_create_staff';
-      const rpcPayload = {
-        staff_code: payload.staffCode || payload.staffId || '',
-        full_name: payload.name || payload.fullName || '',
-        role_code: payload.role || payload.roleCode || 'customer_service',
-        branch_id: payload.branchId || null,
-        auth_email: payload.authEmail || null,
-        temporary_password: payload.temporaryPassword || null,
-        created_by_staff_id: payload.createdByStaffId || null,
-        created_by_name: payload.createdByName || null,
-      };
-      try {
-        const { data: rpcData, error: rpcError } = await client.rpc(rpcName, rpcPayload);
-        if (!rpcError) return defaultResult.ok(normalizeStaffSummary(Array.isArray(rpcData) ? rpcData[0] : rpcData));
-      } catch (err) {}
+      const staffCode = (payload.staffCode || payload.staffId || '').toUpperCase();
+      const fullName = payload.name || payload.fullName || '';
+      const roleCode = payload.role || payload.roleCode || 'customer_service';
+      const password = payload.password || payload.temporaryPassword || '';
+      const syntheticEmail = `${staffCode}${syntheticEmailSuffix}`;
+      if (!staffCode) return defaultResult.err('STAFF_CREATE_FAILED', 'Staff ID is required.');
+      if (!password) return defaultResult.err('STAFF_CREATE_FAILED', 'Password is required.');
+      // Step 1: Create auth user via Supabase Admin API
+      const authRes = await fetch(`${config.supabase.url}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': config.supabase.serviceRoleKey || config.supabase.anonKey,
+          'Authorization': `Bearer ${config.supabase.serviceRoleKey || config.supabase.anonKey}`,
+        },
+        body: JSON.stringify({
+          email: syntheticEmail,
+          password,
+          email_confirm: true,
+        }),
+      });
+      const authData = await authRes.json();
+      if (!authRes.ok) return defaultResult.err('STAFF_AUTH_CREATE_FAILED', authData?.message || 'Could not create auth user.', authData);
+      const authUserId = authData.id;
+      // Step 2: Insert staff record linked to auth user
       const insertRow = {
-        staff_code: rpcPayload.staff_code,
-        full_name: rpcPayload.full_name,
-        role_code: rpcPayload.role_code,
-        branch_id: rpcPayload.branch_id,
-        auth_email: rpcPayload.auth_email,
+        staff_code: staffCode,
+        full_name: fullName,
+        role_code: roleCode,
         is_active: true,
+        auth_user_id: authUserId,
+        auth_email: syntheticEmail,
       };
       const { data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single();
-      if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Could not create staff profile in Supabase.', insertError);
+      if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Auth user created but staff profile failed. Contact admin.', insertError);
       return defaultResult.ok(normalizeStaffSummary(data));
     }
 

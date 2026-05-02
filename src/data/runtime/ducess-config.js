@@ -5,6 +5,7 @@ window.__DUCESS_CONFIG__ = Object.assign(
     supabase: {
       url: 'https://ghhqlxwuvqilusisieom.supabase.co',
       anonKey: 'sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I',
+      serviceRoleKey: 'sb_secret_b5ep9RkXlP0UcyS20hIdyg_HHiRiqFn',
 
       staffEmailMode: 'synthetic_suffix',
       syntheticEmailSuffix: '@ducess.local',

@@ -1395,23 +1395,12 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   function bindHeader() {
-    const staffSel = byId('staffSelect');
-    const activeStaffList = state.staff.filter(s => s.active !== false);
-    const selectorStaffList = activeStaffList.length ? activeStaffList : state.staff;
-    if (!selectorStaffList.some(s => s.id === state.activeStaffId) && selectorStaffList[0]) {
-      state.activeStaffId = selectorStaffList[0].id;
-      save();
-    }
-    staffSel.innerHTML = selectorStaffList.map(s => `<option value="${s.id}">${s.name} — ${ROLE_LABELS[s.role] || s.role}</option>`).join('');
-    staffSel.value = state.activeStaffId;
-    staffSel.onchange = () => {
-      state.activeStaffId = staffSel.value;
-      state.ui.module = null;
-      state.ui.tool = null;
-      resetJournalUiState();
-      save();
-      render();
-    };
+    // Populate staff identity display
+    const activeStaff = state.staff.find(s => s.id === state.activeStaffId);
+    const nameEl = byId('staffNameDisplay');
+    const roleEl = byId('staffRoleDisplay');
+    if (nameEl) nameEl.textContent = activeStaff?.name || '';
+    if (roleEl) roleEl.textContent = ROLE_LABELS[activeStaff?.role] || activeStaff?.role || '';
     byId('btnTodayFloat').onclick = openFloatModal;
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
@@ -4322,12 +4311,34 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function bindStaffDirectory() {
     const addBtn = byId('addStaffBtn');
     if (addBtn) addBtn.onclick = () => openModal('Add Staff', `
-      <div class="form-grid three">
-        <div class="field"><label>Name</label><input id="newStaffName" class="entry-input"></div>
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="field"><label>Full Name</label><input id="newStaffName" class="entry-input" placeholder="e.g. John Doe"></div>
+        <div class="field"><label>Staff ID</label><input id="newStaffCode" class="entry-input" placeholder="e.g. TELLER003"></div>
         <div class="field"><label>Role</label><select id="newStaffRole" class="entry-input">${Object.keys(ROLE_LABELS).map(k=>`<option value="${k}">${ROLE_LABELS[k]}</option>`).join('')}</select></div>
-        <div class="field"><label>Status</label><div class="display-field">Active</div></div>
+        <div class="field"><label>Password</label><input id="newStaffPassword" class="entry-input" type="password" placeholder="Temporary password"></div>
       </div>
-    `,[{label:'Cancel', className:'secondary', onClick: closeModal},{label:'Add Staff', onClick:()=>{ const name=byId('newStaffName').value.trim(); const role=byId('newStaffRole').value; if(!name) return showToast('Enter staff name'); state.staff.push({id:uid('st'), name, role, active:true}); ensureStaffAccount(state.staff[state.staff.length-1].id); save(); closeModal(); render(); showToast('Staff added'); }}]);
+    `,[{label:'Cancel', className:'secondary', onClick: closeModal},{label:'Add Staff', onClick: async ()=>{
+      const name = byId('newStaffName').value.trim();
+      const staffCode = byId('newStaffCode').value.trim().toUpperCase();
+      const role = byId('newStaffRole').value;
+      const password = byId('newStaffPassword').value.trim();
+      if (!name) return showToast('Enter staff name');
+      if (!staffCode) return showToast('Enter a staff ID');
+      if (!password || password.length < 6) return showToast('Password must be at least 6 characters');
+      showToast('Creating staff account…');
+      // Create Supabase auth user + staff record
+      if (isSupabaseApprovalMode() && gateway.staff?.createStaff) {
+        const result = await gateway.staff.createStaff({ fullName: name, staffCode, roleCode: role, password });
+        if (!result.ok) return showToast(result.error?.message || 'Could not create staff account');
+        await syncStaffFromGateway();
+        closeModal(); render(); showToast('Staff added successfully');
+      } else {
+        // Local mode fallback
+        state.staff.push({id:uid('st'), name, role, active:true, staffId: staffCode});
+        ensureStaffAccount(state.staff[state.staff.length-1].id);
+        save(); closeModal(); render(); showToast('Staff added');
+      }
+    }}]);
     qq('[data-staff-toggle]').forEach(btn => btn.onclick = ()=> {
       const st = state.staff.find(s=>s.id===btn.dataset.staffToggle);
       if(!st) return;
