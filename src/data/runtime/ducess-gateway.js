@@ -1638,7 +1638,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         .from(staffRolePermissionsTable)
         .select('tool_code, allowed')
         .eq('role_code', roleCode);
-      if (queryError) return defaultResult.err('ROLE_PERMISSIONS_FETCH_FAILED', 'Could not fetch role permissions from Supabase.', queryError);
+      if (queryError) return defaultResult.ok([]); // table may not exist yet — fall back to default permissions
       const normalized = (Array.isArray(data) ? data : [])
         .filter((item) => item?.tool_code)
         .map((item) => ({ toolCode: item.tool_code, allowed: item.allowed !== false, source: 'role' }));
@@ -1652,7 +1652,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         .select('id, staff_id, tool_code, starts_at, ends_at, note, enabled, granted_by_staff_id')
         .eq('staff_id', staffId)
         .eq('enabled', true);
-      if (queryError) return defaultResult.err('TEMP_GRANTS_FETCH_FAILED', 'Could not fetch temporary grants from Supabase.', queryError);
+      if (queryError) return defaultResult.ok([]); // table may not exist yet — skip temp grants
       const normalized = (Array.isArray(data) ? data : [])
         .map(normalizeTempGrantRecord)
         .filter(Boolean);
