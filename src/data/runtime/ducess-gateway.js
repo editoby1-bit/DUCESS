@@ -7,8 +7,8 @@
 
   
   async function resolveStaffUuid(client, localId) {
-    if (!localId) return localId;
-    // if already uuid
+    if (!localId) return null;
+    // if already a UUID, return as-is
     if (/^[0-9a-f-]{36}$/i.test(localId)) return localId;
     try {
       const { data } = await client
@@ -16,9 +16,10 @@
         .select('id, staff_code')
         .eq('staff_code', localId)
         .maybeSingle();
-      return data?.id || localId;
+      // return the real UUID if found, otherwise null (never pass a non-UUID to a UUID column)
+      return data?.id || null;
     } catch (e) {
-      return localId;
+      return null;
     }
   }
 const ROLE_DEFAULT_TOOLS = {
@@ -1470,11 +1471,13 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (!previewResult.ok) return previewResult;
         metrics = previewResult.data;
       }
-      let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', await resolveStaffUuid(client, payload.staffId)).eq('business_date', payload.businessDate).maybeSingle();
+      const resolvedStaffId = await resolveStaffUuid(client, payload.staffId);
+      if (!resolvedStaffId) return defaultResult.ok(null); // placeholder staff not in Supabase yet — skip silently
+      let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', resolvedStaffId).eq('business_date', payload.businessDate).maybeSingle();
       const { data: existingData, error: existingError } = await existingQuery;
       if (existingError && existingError.code !== 'PGRST116') return defaultResult.err('COD_EXISTING_CHECK_FAILED', 'Could not verify existing COD submission.', existingError);
       const row = {
-        staff_id: await resolveStaffUuid(client, payload.staffId) || '',
+        staff_id: resolvedStaffId,
         business_date: payload.businessDate || '',
         opening_balance: normalizeNumber(metrics.openingBalance),
         float_topups: normalizeNumber(metrics.floatTopUps),
