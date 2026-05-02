@@ -745,7 +745,7 @@ const anonKey = "sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I";
     const auditLogTable = config?.supabase?.auditLogTable || 'audit_log';
     const auditLogSelect = config?.supabase?.auditLogSelect || 'id, actor_staff_id, action_type, entity_type, entity_id, metadata, created_at';
     const codSubmissionsTable = config?.supabase?.codSubmissionsTable || 'cod_submissions';
-    const codSubmissionsSelect = config?.supabase?.codSubmissionsSelect || 'id, staff_id, business_date, opening_balance, float_topups, effective_opening_balance, total_credits, total_debits, net_book_balance, remaining_balance, expected_cash, actual_cash, variance, note, status, submitted_by_staff_id, submitted_at';
+    const codSubmissionsSelect = config?.supabase?.codSubmissionsSelect || 'id, staff_id, business_date, opening_balance, float_topups, effective_opening_balance, total_credits, total_debits, net_book_balance, remaining_balance, expected_cash, actual_cash, variance, overdraw, note, status, submitted_by_staff_id, submitted_at';
     const codResolutionsTable = config?.supabase?.codResolutionsTable || 'cod_resolutions';
     const codResolutionsSelect = config?.supabase?.codResolutionsSelect || 'id, cod_submission_id, final_agreed_amount, adjustment_amount, debt_amount, resolution_note, resolved_by_staff_id, resolved_at';
     const debtsTable = config?.supabase?.debtsTable || 'debts';
@@ -1489,9 +1489,10 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         expected_cash: normalizeNumber(metrics.expectedCash),
         actual_cash: normalizeNumber(payload.actualCash),
         variance: normalizeNumber(payload.actualCash) - normalizeNumber(metrics.expectedCash),
+        overdraw: normalizeNumber(metrics.overdraw),
         note: payload.note || '',
         status: (normalizeNumber(payload.actualCash) - normalizeNumber(metrics.expectedCash) === 0 && normalizeNumber(metrics.overdraw) === 0) ? 'submitted' : 'flagged',
-        submitted_by_staff_id: await resolveStaffUuid(client, payload.submittedByStaffId || payload.staffId) || '',
+        submitted_by_staff_id: (await resolveStaffUuid(client, payload.submittedByStaffId || payload.staffId)) || resolvedStaffId || null,
         submitted_at: new Date().toISOString(),
       };
       let res;
