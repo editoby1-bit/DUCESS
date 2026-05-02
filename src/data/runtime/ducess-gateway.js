@@ -1880,19 +1880,19 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         }
       }
 
-      // Step 2: Insert staff profile row linked to the auth UUID
-      const insertRow = {
-        staff_code: staffCode,
-        full_name: fullName,
-        role_code: roleCode,
-        branch_id: branchId,
-        auth_email: syntheticEmail,
-        auth_user_id: authUserId || null,
-        is_active: true,
-        created_by_staff_id: payload.createdByStaffId || null,
-      };
-      const { data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single();
-      if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Staff auth user was created but profile insert failed. Check Supabase.', insertError);
+      // Step 2: Insert staff profile row - build defensively, only add optional cols if they exist
+      const insertRow = { staff_code: staffCode, full_name: fullName, role_code: roleCode, is_active: true };
+      if (branchId) insertRow.branch_id = branchId;
+      if (authUserId) insertRow.auth_user_id = authUserId;
+      if (syntheticEmail) insertRow.auth_email = syntheticEmail;
+      if (payload.createdByStaffId) insertRow.created_by_staff_id = payload.createdByStaffId;
+      let data, insertError;
+      ({ data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single());
+      if (insertError && (insertError.code === '42703' || (insertError.message || '').includes('column'))) {
+        const minRow = { staff_code: staffCode, full_name: fullName, role_code: roleCode, is_active: true };
+        ({ data, error: insertError } = await client.from(staffTable).insert(minRow).select('id, staff_code, full_name, role_code, is_active').single());
+      }
+      if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Staff auth user created but profile insert failed: ' + insertError.message, insertError);
 
       // Step 3: Log audit
       try {
