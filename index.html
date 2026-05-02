@@ -16,6 +16,30 @@
   </div>
 </div>
 <body>
+
+  <!-- LOGIN SCREEN -->
+  <div id="loginScreen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-brand">
+        <img src="logo.png" alt="Ducess" class="login-logo">
+        <div class="login-title">DUCESS ENTERPRISE</div>
+        <div class="login-sub">Staff Portal</div>
+      </div>
+      <div class="login-form">
+        <div class="login-field">
+          <label for="loginStaffId">Staff ID</label>
+          <input id="loginStaffId" class="entry-input" type="text" placeholder="e.g. ADMIN001" autocomplete="username" />
+        </div>
+        <div class="login-field">
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" class="entry-input" type="password" placeholder="Enter your password" autocomplete="current-password" />
+        </div>
+        <div id="loginError" class="login-error hidden"></div>
+        <button id="loginBtn" class="login-btn">Sign In</button>
+      </div>
+    </div>
+  </div>
+  <!-- END LOGIN SCREEN -->
   <div class="shell">
     <header class="topbar">
       <div class="brand-wrap">
@@ -33,6 +57,7 @@
         <button class="ghost-btn" id="btnTodayFloat">Opening Balance</button>
         <button class="ghost-btn" id="btnCOD">Close of Day</button>
         <button class="ghost-btn" id="btnAudit">Audit Trail</button>
+        <button class="ghost-btn" id="btnLogout" style="color:var(--danger);border-color:var(--danger);">Logout</button>
 <button id="btnThemeCycle" class="ghost-btn theme-cycle-btn">Theme: Classic</button>
       </div>
     </header>

@@ -1415,6 +1415,15 @@ if (approvalRecord.type === 'float_topup') {
     byId('btnTodayFloat').onclick = openFloatModal;
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
+    if (byId('btnLogout') && isSupabaseApprovalMode()) {
+      byId('btnLogout').onclick = async () => {
+        await gateway.auth.logout();
+        showLoginScreen();
+        byId('loginStaffId').value = '';
+        byId('loginPassword').value = '';
+        byId('loginError').classList.add('hidden');
+      };
+    }
     byId('btnAudit').onclick = openAuditModal;
     const themeBtn = byId('btnThemeCycle');
     if (themeBtn) {
@@ -4367,6 +4376,66 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     }
   }
 
+  // ===== LOGIN SCREEN =====
+  function showLoginScreen() {
+    const screen = byId('loginScreen');
+    if (screen) screen.classList.remove('hidden');
+    const shell = document.querySelector('.shell');
+    if (shell) shell.style.visibility = 'hidden';
+  }
+
+  function hideLoginScreen() {
+    const screen = byId('loginScreen');
+    if (screen) screen.classList.add('hidden');
+    const shell = document.querySelector('.shell');
+    if (shell) shell.style.visibility = '';
+  }
+
+  function bindLoginScreen() {
+    const btn = byId('loginBtn');
+    const staffInput = byId('loginStaffId');
+    const passInput = byId('loginPassword');
+    const errEl = byId('loginError');
+    if (!btn) return;
+
+    async function attemptLogin() {
+      const staffId = (staffInput?.value || '').trim();
+      const password = (passInput?.value || '').trim();
+      if (!staffId || !password) {
+        errEl.textContent = 'Please enter your Staff ID and password.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+      errEl.classList.add('hidden');
+      const result = await gateway.auth.loginWithStaffId({ staffId, password });
+      if (!result.ok) {
+        errEl.textContent = result.error?.message || 'Invalid Staff ID or password.';
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        return;
+      }
+      // Login success — set active staff from session
+      const sessionStaff = result.data?.staff;
+      if (sessionStaff?.id) {
+        state.activeStaffId = sessionStaff.id;
+        save();
+      }
+      hideLoginScreen();
+      await syncStaffFromGateway();
+      await syncApprovalsFromGateway();
+      await syncCodFromGateway();
+      render();
+    }
+
+    btn.onclick = attemptLogin;
+    passInput.onkeydown = (e) => { if (e.key === 'Enter') attemptLogin(); };
+    staffInput.onkeydown = (e) => { if (e.key === 'Enter') passInput?.focus(); };
+  }
+  // ===== END LOGIN SCREEN =====
+
   function startApp() {
     try {
       const navEntry = performance.getEntriesByType?.('navigation')?.[0];
@@ -4377,9 +4446,33 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       }
     } catch (err) {}
     applyTheme(state.ui.theme || 'classic', false);
-    render();
+    bindLoginScreen();
+
     if (isSupabaseApprovalMode()) {
-      syncApprovalsFromGateway().then((result) => { if (result?.ok) render(); });
+      // Check for existing session first
+      gateway.auth.getSession().then(async (sessionResult) => {
+        if (sessionResult?.ok && sessionResult.data?.staff?.id) {
+          // Already logged in — restore session
+          const sessionStaff = sessionResult.data.staff;
+          if (sessionStaff.id && !state.staff.find(s => s.id === sessionStaff.id)) {
+            state.activeStaffId = sessionStaff.id;
+            save();
+          }
+          hideLoginScreen();
+          render();
+          syncApprovalsFromGateway().then((r) => { if (r?.ok) render(); });
+        } else {
+          // No session — show login
+          showLoginScreen();
+          render(); // render shell behind login (populates theme etc)
+        }
+      }).catch(() => {
+        showLoginScreen();
+        render();
+      });
+    } else {
+      // Local mode — skip login
+      render();
     }
   }
 
