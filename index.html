@@ -50,15 +50,15 @@
       </div>
       <h1 class="dashboard-title">DASHBOARD</h1>
       <div class="top-actions">
-        <div class="staff-identity">
-          <span id="staffNameDisplay" class="staff-name-display"></span>
-          <span id="staffRoleDisplay" class="staff-role-display"></span>
-        </div>
+        <label class="inline-field compact">
+          <span>Role / Staff</span>
+          <select id="staffSelect"></select>
+        </label>
         <button class="ghost-btn" id="btnTodayFloat">Opening Balance</button>
         <button class="ghost-btn" id="btnCOD">Close of Day</button>
         <button class="ghost-btn" id="btnAudit">Audit Trail</button>
-        <button id="btnThemeCycle" class="ghost-btn theme-cycle-btn">Theme: Classic</button>
-        <button id="btnLogout" class="logout-link">Logout</button>
+        <button class="ghost-btn" id="btnLogout" style="color:var(--danger);border-color:var(--danger);">Logout</button>
+<button id="btnThemeCycle" class="ghost-btn theme-cycle-btn">Theme: Classic</button>
       </div>
     </header>
 

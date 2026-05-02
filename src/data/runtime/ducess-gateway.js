@@ -1850,41 +1850,61 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
     async function createStaff(payload = {}) {
       if (!canUseSupabase()) return local.staff.createStaff(payload);
+
       const staffCode = (payload.staffCode || payload.staffId || '').toUpperCase();
       const fullName = payload.name || payload.fullName || '';
       const roleCode = payload.role || payload.roleCode || 'customer_service';
-      const password = payload.password || payload.temporaryPassword || '';
-      const syntheticEmail = `${staffCode}${syntheticEmailSuffix}`;
-      if (!staffCode) return defaultResult.err('STAFF_CREATE_FAILED', 'Staff ID is required.');
-      if (!password) return defaultResult.err('STAFF_CREATE_FAILED', 'Password is required.');
-      // Step 1: Create auth user via Supabase Admin API
-      const authRes = await fetch(`${config.supabase.url}/auth/v1/admin/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': config.supabase.serviceRoleKey || config.supabase.anonKey,
-          'Authorization': `Bearer ${config.supabase.serviceRoleKey || config.supabase.anonKey}`,
-        },
-        body: JSON.stringify({
-          email: syntheticEmail,
-          password,
-          email_confirm: true,
-        }),
-      });
-      const authData = await authRes.json();
-      if (!authRes.ok) return defaultResult.err('STAFF_AUTH_CREATE_FAILED', authData?.message || 'Could not create auth user.', authData);
-      const authUserId = authData.id;
-      // Step 2: Insert staff record linked to auth user
+      const branchId = payload.branchId || null;
+      const temporaryPassword = payload.temporaryPassword || null;
+      const syntheticEmail = `${staffCode}${config?.supabase?.syntheticEmailSuffix || '@ducess.local'}`;
+
+      // Step 1: Call Edge Function to create the Supabase Auth user (keeps service key off frontend)
+      let authUserId = null;
+      const edgeFnUrl = config?.supabase?.createStaffEdgeFn
+        || `${config?.supabase?.url || ''}/functions/v1/create-staff-user`;
+      if (temporaryPassword && edgeFnUrl) {
+        try {
+          const resp = await fetch(edgeFnUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config?.supabase?.anonKey || ''}` },
+            body: JSON.stringify({ staffCode, password: temporaryPassword, fullName, roleCode }),
+          });
+          const json = await resp.json().catch(() => ({}));
+          if (resp.ok && json.id) {
+            authUserId = json.id;
+          } else {
+            return defaultResult.err('AUTH_USER_CREATE_FAILED', json.error || 'Edge Function failed to create auth user', json);
+          }
+        } catch (err) {
+          return defaultResult.err('EDGE_FN_ERROR', 'Could not reach create-staff-user Edge Function', err);
+        }
+      }
+
+      // Step 2: Insert staff profile row linked to the auth UUID
       const insertRow = {
         staff_code: staffCode,
         full_name: fullName,
         role_code: roleCode,
-        is_active: true,
-        auth_user_id: authUserId,
+        branch_id: branchId,
         auth_email: syntheticEmail,
+        auth_user_id: authUserId || null,
+        is_active: true,
+        created_by_staff_id: payload.createdByStaffId || null,
       };
       const { data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single();
-      if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Auth user created but staff profile failed. Contact admin.', insertError);
+      if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Staff auth user was created but profile insert failed. Check Supabase.', insertError);
+
+      // Step 3: Log audit
+      try {
+        await client.from(config?.supabase?.auditLogTable || 'audit_log').insert({
+          actor_staff_id: payload.createdByStaffId || null,
+          action_type: 'staff_created',
+          entity_type: 'staff',
+          entity_id: data.id,
+          metadata: { staff_code: staffCode, full_name: fullName, role_code: roleCode, auth_user_id: authUserId },
+        });
+      } catch (_e) {}
+
       return defaultResult.ok(normalizeStaffSummary(data));
     }
 

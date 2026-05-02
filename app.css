@@ -11190,14 +11190,3 @@ body #btnAudit{
   font-size: 13px;
 }
 .login-error.hidden { display: none; }
-
-/* ===== STAFF IDENTITY (replaces dropdown) ===== */
-.staff-identity { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
-.staff-name-display { font-size: 13px; font-weight: 700; color: var(--text); }
-.staff-role-display { font-size: 11px; color: var(--muted); }
-.logout-link {
-  background: none; border: none; padding: 4px 6px;
-  font-size: 11px; color: var(--muted); cursor: pointer;
-  text-decoration: underline; text-underline-offset: 2px;
-}
-.logout-link:hover { color: var(--danger); }
