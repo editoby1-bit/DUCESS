@@ -25,7 +25,7 @@ window.__DUCESS_CONFIG__ = Object.assign(
       customerTransactionsSelect: 'id, customer_id, tx_type, amount, created_at',
 
       staffCashLedgerTable: 'staff_cash_ledger',
-      staffCashLedgerSelect: 'id, staff_id, entry_type, amount, delta, note, approval_request_id, float_date, created_by_staff_id, approved_by_staff_id, created_at',
+      staffCashLedgerSelect: 'id, staff_id, entry_type, amount, delta, note, approval_request_id, float_date, created_at',
 
       auditLogTable: 'audit_log',
       auditLogSelect: 'id, actor_staff_id, action_type, entity_type, entity_id, metadata, created_at',
@@ -42,7 +42,7 @@ window.__DUCESS_CONFIG__ = Object.assign(
       codResolutionsSelect: 'id, cod_submission_id, final_agreed_amount, adjustment_amount, debt_amount, resolution_note, resolved_by_staff_id, resolved_at',
 
       debtsTable: 'debts',
-      debtsSelect: 'id, staff_id, business_date, source_cod_submission_id, amount, status, note, created_by_staff_id, created_at, updated_at',
+      debtsSelect: 'id, staff_id, business_date, source_cod_submission_id, amount, status, note, created_at, updated_at',
 
       debtRepaymentsTable: 'debt_repayments',
       debtRepaymentsSelect: 'id, debt_id, amount, payment_date, note, requested_by_staff_id, approved_by_staff_id, approval_request_id, status, created_at'
