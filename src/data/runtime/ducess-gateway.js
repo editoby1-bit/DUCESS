@@ -1892,7 +1892,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (branchId) insertRow.branch_id = branchId;
       if (authUserId) insertRow.auth_user_id = authUserId;
       if (syntheticEmail) insertRow.auth_email = syntheticEmail;
-      if (payload.createdByStaffId) insertRow.created_by_staff_id = payload.createdByStaffId;
+     
       let data, insertError;
       ({ data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single());
       if (insertError && (insertError.code === '42703' || (insertError.message || '').includes('column'))) {
