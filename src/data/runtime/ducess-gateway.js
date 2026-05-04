@@ -2274,6 +2274,10 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         getDebtById,
         submitDebtRepayment,
       },
+      audit: {
+        listAuditLog,
+        insertAuditLogEntry,
+      },
       __meta: {
         adapter: 'supabase',
         phase: '3E',
