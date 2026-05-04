@@ -918,13 +918,14 @@ function subscribeRealtime() {
 
     async function listAuditLog(filters = {}) {
       if (!canUseSupabase()) return defaultResult.ok([]);
-      let query = client.from(auditLogTable).select(auditLogSelect).order('created_at', { ascending: false }).limit(filters.limit || 200);
+      let query = client.from(auditLogTable).select(auditLogSelect).limit(filters.limit || 200);
       if (filters.actorStaffId) query = query.eq('actor_staff_id', filters.actorStaffId);
       if (filters.actionType) query = query.eq('action_type', filters.actionType);
       if (filters.entityType) query = query.eq('entity_type', filters.entityType);
       if (filters.fromDate) query = query.gte('created_at', filters.fromDate);
       if (filters.toDate) query = query.lte('created_at', filters.toDate + 'T23:59:59Z');
-      const { data, error } = await query;
+      const { data, error, count, status, statusText } = await query;
+      console.log('[DUCESS audit raw]', { status, statusText, count, dataLen: data?.length, error, firstRow: data?.[0] });
       if (error) { console.warn('[DUCESS audit] listAuditLog failed:', error); return defaultResult.ok([]); }
       const normalized = (data || []).map(row => ({
         id: row.id,
