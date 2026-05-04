@@ -3615,10 +3615,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   }
 
   async function openAuditModal() {
-    // Open modal immediately with loading state
-    openModal('Audit Trail', '<div style="padding:20px;color:var(--muted);text-align:center;">Loading audit records…</div>', [{label:'Close', onClick: closeModal}]);
     await syncAuditFromGateway();
-    closeModal();
     const st = currentStaff();
     const adminView = isAdminStaff(st);
     const audits = state.audit || [];

@@ -925,7 +925,7 @@ function subscribeRealtime() {
       if (filters.fromDate) query = query.gte('created_at', filters.fromDate);
       if (filters.toDate) query = query.lte('created_at', filters.toDate + 'T23:59:59Z');
       const { data, error } = await query;
-      if (error) return defaultResult.ok([]); // fail silently
+      if (error) { console.warn('[DUCESS audit] listAuditLog failed:', error); return defaultResult.ok([]); }
       const normalized = (data || []).map(row => ({
         id: row.id,
         actorStaffId: row.actor_staff_id || '',
