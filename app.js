@@ -2527,26 +2527,76 @@ function staffLedgerEvents(staffId) {
     }).sort((a,b)=> new Date(`${b.date}T12:00:00Z`) - new Date(`${a.date}T12:00:00Z`));
   }
 
-  function openStaffLedgerModal(staffId) {
+  async function openStaffLedgerModal(staffId) {
     const staff = staffById(staffId);
     if (!staff) return showToast('Staff not found');
     const acc = ensureStaffAccount(staffId);
-    const rows = staffLedgerEvents(staffId).map((row, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${row.date}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(row.details || '—')}</td></tr>`).join('');
-    const cod = staffCODRecords(staffId).slice().sort((a,b)=>new Date(b.submittedAt||b.resolvedAt||b.date)-new Date(a.submittedAt||a.resolvedAt||a.date))[0];
-    openModal('Staff Ledger', `
+    const staffName = staff.name || staff.full_name || staffId;
+    const staffRole = ROLE_LABELS[staff.role] || staff.role || '';
+
+    // Show modal immediately with local data, then upgrade with Supabase data
+    function buildRows(events) {
+      return events.map((row, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${row.date}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(row.details || '—')}</td></tr>`).join('');
+    }
+
+    function buildModal(rows, loading) {
+      const cod = staffCODRecords(staffId).slice().sort((a,b)=>new Date(b.submittedAt||b.resolvedAt||b.date)-new Date(a.submittedAt||a.resolvedAt||a.date))[0];
+      return `
       <div class="stack">
         <div class="kpi-row wrap">
-          <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(staff.name)}</div></div>
-          <div class="kpi"><div class="label">Office</div><div class="number">${escapeHtml(ROLE_LABELS[staff.role] || staff.role)}</div></div>
-          <div class="kpi"><div class="label">Account Number</div><div class="number">${escapeHtml(acc.accountNumber || '')}</div></div>
+          <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(staffName)}</div></div>
+          <div class="kpi"><div class="label">Office</div><div class="number">${escapeHtml(staffRole)}</div></div>
+          <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(acc.accountNumber || '—')}</div></div>
           <div class="kpi"><div class="label">FORM Today</div><div class="number">${money(getOpeningBalanceForDate(staffId, businessDate()))}</div></div>
-          <div class="kpi"><div class="label">Remaining Today</div><div class="number">${money(currentFloatAvailable(staffId, businessDate()))}</div></div>
+          <div class="kpi"><div class="label">Remaining</div><div class="number">${money(currentFloatAvailable(staffId, businessDate()))}</div></div>
           <div class="kpi"><div class="label">Debt</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">${money(acc.debtBalance||0)}</div></div>
         </div>
         ${cod ? `<div class="note">Latest COD: <strong>${fmtDate(`${cod.date || cod.submittedAt}T12:00:00.000Z`)}</strong> • ${escapeHtml(cod.status || 'submitted')} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0)}</div>` : '<div class="note">No COD record yet for this staff.</div>'}
+        ${loading ? '<div class="note" style="color:var(--text-muted)">Loading ledger from server…</div>' : ''}
         <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No ledger entries yet</td></tr>'}</tbody></table></div>
-      </div>
-    `, [{ label:'Close', className:'secondary', onClick: closeModal }]);
+      </div>`;
+    }
+
+    // Show immediately with local data
+    const localEvents = staffLedgerEvents(staffId);
+    openModal(`Staff Ledger — ${escapeHtml(staffName)}`, buildModal(buildRows(localEvents), isSupabaseApprovalMode()), [{ label:'Close', className:'secondary', onClick: closeModal }]);
+
+    // Fetch from Supabase and upgrade
+    if (isSupabaseApprovalMode() && gateway.staff?.listStaffLedger) {
+      try {
+        const supabaseStaffId = staff.uuid || staff.auth_user_id || staffId;
+        const result = await gateway.staff.listStaffLedger(supabaseStaffId);
+        if (result?.ok && Array.isArray(result.data) && result.data.length > 0) {
+          // Normalize Supabase ledger rows into the same format as local events
+          let running = 0;
+          const sbEvents = result.data.map((row, i) => {
+            const entryType = String(row.entry_type || '').toLowerCase();
+            const amount = Number(row.amount || 0);
+            const delta = Number(row.delta || 0);
+            let type = 'Entry';
+            let runningType = 'other';
+            if (['approved_form','approved_float'].includes(entryType)) { type = 'FORM'; runningType = 'form'; }
+            else if (['customer_credit','credit'].includes(entryType)) { type = 'Credit Impact'; runningType = 'credit'; }
+            else if (['customer_debit','debit'].includes(entryType)) { type = 'Debit Impact'; runningType = 'debit'; }
+            else if (entryType === 'debt_repayment') { type = 'Debt Repayment'; }
+            else if (['wallet_fund','wallet_funding'].includes(entryType)) { type = 'Wallet'; }
+            else { type = entryType.replace(/_/g,' ').replace(/\w/g,c=>c.toUpperCase()); }
+            if (['form','credit','debit'].includes(runningType)) running += delta || (runningType === 'form' ? amount : -amount);
+            return { date: String(row.float_date || row.created_at || '').slice(0,10), type, amount, runningBalance: running, details: row.note || '—' };
+          }).sort((a,b)=> new Date(`${b.date}T12:00:00Z`) - new Date(`${a.date}T12:00:00Z`));
+
+          // Update modal content
+          const modalBody = document.querySelector('.modal-body, .modal .stack')?.closest('.modal-body') || document.querySelector('.modal-body');
+          if (modalBody) modalBody.innerHTML = buildModal(buildRows(sbEvents), false);
+        } else {
+          // No Supabase data — remove loading indicator
+          const modalBody = document.querySelector('.modal-body');
+          if (modalBody) modalBody.innerHTML = buildModal(buildRows(localEvents), false);
+        }
+      } catch (err) {
+        console.warn('[DUCESS] Staff ledger Supabase fetch failed:', err);
+      }
+    }
   }
 
 function renderTellerBalances() {
