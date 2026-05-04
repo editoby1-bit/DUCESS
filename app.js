@@ -2172,17 +2172,36 @@ function nextPaint() {
   }
 
   function renderStaffDirectory() {
+    state.ui.staffDirectorySearch = state.ui.staffDirectorySearch || '';
+    state.ui.staffDirectoryRole = state.ui.staffDirectoryRole || 'all';
+    const staffSearch = String(state.ui.staffDirectorySearch || '').trim().toLowerCase();
+    const staffRoleFilter = state.ui.staffDirectoryRole || 'all';
+    const filteredStaff = state.staff.filter((s) => {
+      const staffCode = String(s.staffCode || s.staff_code || s.id || '').toLowerCase();
+      const staffName = String(s.name || s.full_name || '').toLowerCase();
+      const staffRole = s.role || s.role_code || '';
+      const matchesSearch = !staffSearch || staffName.includes(staffSearch) || staffCode.includes(staffSearch);
+      const matchesRole = staffRoleFilter === 'all' || staffRole === staffRoleFilter;
+      return matchesSearch && matchesRole;
+    });
     return `
       <div class="table-card">
         <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="addStaffBtn">ADD STAFF</button></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff Code</th><th>Name</th><th>Role</th><th>Status</th><th>Wallet</th><th>Debt</th><th>Float</th><th>Action</th></tr></thead><tbody>${state.staff.map((s,i)=>{
+        <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
+          <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
+          <select id="staffDirectoryRoleFilter" class="entry-input" style="height:24px;max-width:170px;font-size:0.78em;padding:2px 8px">
+            <option value="all" ${staffRoleFilter==='all'?'selected':''}>All Roles</option>
+            ${Object.keys(ROLE_LABELS).map(role => `<option value="${role}" ${staffRoleFilter===role?'selected':''}>${ROLE_LABELS[role]}</option>`).join('')}
+          </select>
+        </div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff Code</th><th>Name</th><th>Role</th><th>Status</th><th>Wallet</th><th>Debt</th><th>Float</th><th>Action</th></tr></thead><tbody>${filteredStaff.map((s,i)=>{
           const acc = ensureStaffAccount(s.id);
           const staffCode = s.staffCode || s.staff_code || s.id || '—';
           const staffName = s.name || s.full_name || '—';
           const staffRole = s.role || s.role_code || '';
           const isActive = s.active !== false && s.is_active !== false;
-          return `<tr><td>${i+1}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${escapeHtml(staffName)}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td>${money(acc.walletBalance)}</td><td class="${Number(acc.debtBalance||0)>0?'balance-negative':''}">-${money(acc.debtBalance)}</td><td>${money(acc.balance)}</td><td><button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
-        }).join('')}</tbody></table></div>
+          return `<tr><td>${i+1}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${escapeHtml(staffName)}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td>${money(acc.walletBalance)}</td><td class="${Number(acc.debtBalance||0)>0?'balance-negative':''}">-${money(acc.debtBalance)}</td><td>${money(acc.balance)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button><button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
+        }).join('') || '<tr><td colspan="9">No staff found</td></tr>'}</tbody></table></div>
       </div>`;
   }
 
@@ -4472,6 +4491,24 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         }
       }}
     ]);
+
+    const staffDirectorySearch = byId('staffDirectorySearch');
+    if (staffDirectorySearch) {
+      staffDirectorySearch.oninput = () => {
+        state.ui.staffDirectorySearch = staffDirectorySearch.value || '';
+        save();
+        renderWorkspace();
+      };
+    }
+    const staffDirectoryRoleFilter = byId('staffDirectoryRoleFilter');
+    if (staffDirectoryRoleFilter) {
+      staffDirectoryRoleFilter.onchange = () => {
+        state.ui.staffDirectoryRole = staffDirectoryRoleFilter.value || 'all';
+        save();
+        renderWorkspace();
+      };
+    }
+    qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
 
     qq('[data-staff-toggle]').forEach(btn => btn.onclick = async () => {
       const st = state.staff.find(s => s.id === btn.dataset.staffToggle);
