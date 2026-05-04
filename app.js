@@ -820,8 +820,12 @@
   }
 
   async function syncAuditFromGateway(filters = {}) {
-    if (!isSupabaseApprovalMode() || !gateway.audit?.listAuditLog) return;
+    if (!isSupabaseApprovalMode() || !gateway.audit?.listAuditLog) {
+      console.warn('[DUCESS audit] skipping - supabase mode:', isSupabaseApprovalMode(), 'gateway.audit:', !!gateway.audit?.listAuditLog);
+      return;
+    }
     const result = await gateway.audit.listAuditLog(filters);
+    console.log('[DUCESS audit] result:', result);
     if (result?.ok && Array.isArray(result.data)) {
       state.audit = result.data;
       save();
@@ -3615,6 +3619,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   }
 
   async function openAuditModal() {
+    await syncStaffFromGateway();
     await syncAuditFromGateway();
     const st = currentStaff();
     const adminView = isAdminStaff(st);
@@ -3647,9 +3652,9 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
     const filterHtml = `<div class="audit-filter-row" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;align-items:center;">
       ${adminView ? `<select id="auditRoleFilter" class="entry-input" style="width:auto;min-width:140px;"><option value="">All roles</option>${roleOptions}</select><select id="auditStaffFilter" class="entry-input" style="width:auto;min-width:170px;"><option value="">All staff</option>${staffOptions}</select>` : ''}
       <select id="auditActionFilter" class="entry-input" style="width:auto;min-width:150px;"><option value="">All actions</option>${actionOptions}</select>
-      <input id="auditDateFrom" class="entry-input" type="date" style="width:auto;min-width:130px;" title="From date">
+      <input id="auditDateFrom" class="entry-input" type="date" style="width:auto;min-width:130px;" title="From date" value="">
       <span style="font-size:12px;color:var(--muted)">to</span>
-      <input id="auditDateTo" class="entry-input" type="date" style="width:auto;min-width:130px;" title="To date">
+      <input id="auditDateTo" class="entry-input" type="date" style="width:auto;min-width:130px;" title="To date" value="">
     </div>`;
     const formatActionType = (a) => {
       const raw = a.action || a.actionType || a.action_type || '';
@@ -3696,6 +3701,9 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       const el = byId(id);
       if (el) el.onchange = renderAuditRows;
     });
+    // Clear date inputs in case browser auto-filled them
+    const dfEl = byId('auditDateFrom'); if (dfEl) dfEl.value = '';
+    const dtEl = byId('auditDateTo'); if (dtEl) dtEl.value = '';
     renderAuditRows();
   }
 
