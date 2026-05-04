@@ -637,6 +637,7 @@ async function submitDebtRepayment(_payload) {
         listActiveStaff,
         createStaff,
         updateStaffStatus,
+        listStaffLedger,
       },
       permissions: {
         getEffectivePermissions,
@@ -745,7 +746,7 @@ const anonKey = "sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I";
     const approvalRequestsTable = config?.supabase?.approvalRequestsTable || 'approval_requests';
     const approvalRequestsSelect = config?.supabase?.approvalRequestsSelect || 'id, request_type, status, payload, requested_at, requested_by_staff_id, requested_by_name, approved_at, approved_by_staff_id, approved_by_name, decision_note, entity_type, entity_id';
     const staffCashLedgerTable = config?.supabase?.staffCashLedgerTable || 'staff_cash_ledger';
-    const staffCashLedgerSelect = config?.supabase?.staffCashLedgerSelect || 'id, staff_id, entry_type, amount, delta, note, approval_request_id, float_date, created_by_staff_id, approved_by_staff_id, created_at';
+    const staffCashLedgerSelect = config?.supabase?.staffCashLedgerSelect || 'id, staff_id, entry_type, amount, delta, note, approval_request_id, float_date, created_at';
     const auditLogTable = config?.supabase?.auditLogTable || 'audit_log';
     const auditLogSelect = config?.supabase?.auditLogSelect || 'id, actor_staff_id, action_type, entity_type, entity_id, metadata, created_at';
     const codSubmissionsTable = config?.supabase?.codSubmissionsTable || 'cod_submissions';
@@ -2217,7 +2218,26 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       });
     }
 
-    return {
+    async function listStaffLedger(staffId, filters = {}) {
+      if (!canUseSupabase() || !client) return defaultResult.ok([]);
+      try {
+        let query = client.from(staffCashLedgerTable).select(staffCashLedgerSelect);
+        if (staffId) query = query.eq('staff_id', staffId);
+        if (filters.startDate) query = query.gte('float_date', filters.startDate);
+        if (filters.endDate) query = query.lte('float_date', filters.endDate);
+        const { data, error } = await query.order('created_at', { ascending: true });
+        if (error) {
+          console.warn('[DUCESS] listStaffLedger error:', error.message);
+          return defaultResult.ok([]);
+        }
+        return defaultResult.ok(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.warn('[DUCESS] listStaffLedger exception:', err);
+        return defaultResult.ok([]);
+      }
+    }
+
+        return {
       ...local,
       auth: {
         loginWithStaffId,
