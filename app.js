@@ -1395,23 +1395,12 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   function bindHeader() {
-    const staffSel = byId('staffSelect');
-    const activeStaffList = state.staff.filter(s => s.active !== false);
-    const selectorStaffList = activeStaffList.length ? activeStaffList : state.staff;
-    if (!selectorStaffList.some(s => s.id === state.activeStaffId) && selectorStaffList[0]) {
-      state.activeStaffId = selectorStaffList[0].id;
-      save();
-    }
-    staffSel.innerHTML = selectorStaffList.map(s => `<option value="${s.id}">${s.name} — ${ROLE_LABELS[s.role] || s.role}</option>`).join('');
-    staffSel.value = state.activeStaffId;
-    staffSel.onchange = () => {
-      state.activeStaffId = staffSel.value;
-      state.ui.module = null;
-      state.ui.tool = null;
-      resetJournalUiState();
-      save();
-      render();
-    };
+    // Show logged-in staff identity — no dropdown switching after login
+    const activeStaff = state.staff.find(s => s.id === state.activeStaffId);
+    const nameEl = byId('staffNameDisplay');
+    const roleEl = byId('staffRoleDisplay');
+    if (nameEl) nameEl.textContent = activeStaff?.name || '';
+    if (roleEl) roleEl.textContent = ROLE_LABELS[activeStaff?.role] || activeStaff?.role || '';
     byId('btnTodayFloat').onclick = openFloatModal;
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();

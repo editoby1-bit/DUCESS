@@ -1829,20 +1829,27 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(normalizeStaffSummary(staffResult.data));
     }
 
-    async function listStaff(filters = {}) {
-      if (!canUseSupabase()) return local.staff.listStaff(filters);
-      let query = client.from(staffTable).select(staffProfileSelect);
-      if (filters.roleCode) query = query.eq('role_code', filters.roleCode);
-      if (typeof filters.isActive === 'boolean') query = query.eq('is_active', filters.isActive);
-      if (filters.search) {
-        const escaped = String(filters.search).replace(/,/g, ' ');
-        query = query.or(`full_name.ilike.%${escaped}%,staff_code.ilike.%${escaped}%`);
+   async function listStaff(filters = {}) {
+      if (!canUseSupabase() || !client) return local.staff.listStaff(filters);
+      try {
+        let query = client.from(staffTable).select('id, staff_code, full_name, role_code, is_active, branch_id, auth_user_id, auth_email');
+        if (filters.roleCode) query = query.eq('role_code', filters.roleCode);
+        if (typeof filters.isActive === 'boolean') query = query.eq('is_active', filters.isActive);
+        if (filters.search) {
+          const escaped = String(filters.search).replace(/,/g, ' ');
+          query = query.or(`full_name.ilike.%${escaped}%,staff_code.ilike.%${escaped}%`);
+        }
+        const { data, error: queryError } = await query.order('full_name', { ascending: true });
+        if (queryError) {
+          console.warn('[DUCESS] listStaff:', queryError.message);
+          return local.staff.listStaff(filters);
+        }
+        return defaultResult.ok((Array.isArray(data) ? data : []).map(normalizeStaffSummary).filter(Boolean));
+      } catch (err) {
+        console.warn('[DUCESS] listStaff exception:', err);
+        return local.staff.listStaff(filters);
       }
-      const { data, error: queryError } = await query.order('full_name', { ascending: true });
-      if (queryError) return defaultResult.err('STAFF_LIST_FETCH_FAILED', 'Could not fetch staff list from Supabase.', queryError);
-      return defaultResult.ok((Array.isArray(data) ? data : []).map(normalizeStaffSummary).filter(Boolean));
     }
-
     async function listActiveStaff() {
       return listStaff({ isActive: true });
     }
@@ -1885,7 +1892,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (branchId) insertRow.branch_id = branchId;
       if (authUserId) insertRow.auth_user_id = authUserId;
       if (syntheticEmail) insertRow.auth_email = syntheticEmail;
-      if (payload.createdByStaffId) insertRow.created_by_staff_id = payload.createdByStaffId;
+     
       let data, insertError;
       ({ data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single());
       if (insertError && (insertError.code === '42703' || (insertError.message || '').includes('column'))) {
