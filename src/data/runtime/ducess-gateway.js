@@ -917,6 +917,7 @@ function subscribeRealtime() {
     }
 
     async function listAuditLog(filters = {}) {
+      console.log('[DUCESS audit] listAuditLog called, canUseSupabase:', canUseSupabase(), 'client:', !!client);
       if (!canUseSupabase()) return defaultResult.ok([]);
       let query = client.from(auditLogTable).select(auditLogSelect).limit(filters.limit || 200);
       if (filters.actorStaffId) query = query.eq('actor_staff_id', filters.actorStaffId);
