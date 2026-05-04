@@ -11201,3 +11201,18 @@ body #btnAudit{
   text-decoration: underline; text-underline-offset: 2px;
 }
 .logout-link:hover { color: var(--danger); }
+
+/* ===== AUDIT TRAIL ===== */
+.audit-action-badge {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--brand);
+  font-size: 11px; font-weight: 600;
+  padding: 2px 7px; border-radius: 20px;
+  white-space: nowrap;
+}
+.audit-change {
+  display: block; font-size: 11px;
+  color: var(--muted); margin-top: 2px;
+  word-break: break-all;
+}

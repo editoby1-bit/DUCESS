@@ -819,6 +819,15 @@
     return result;
   }
 
+  async function syncAuditFromGateway(filters = {}) {
+    if (!isSupabaseApprovalMode() || !gateway.audit?.listAuditLog) return;
+    const result = await gateway.audit.listAuditLog(filters);
+    if (result?.ok && Array.isArray(result.data)) {
+      state.audit = result.data;
+      save();
+    }
+  }
+
   async function syncAllSharedStateFromGateway() {
     await syncStaffFromGateway();
     await syncCustomersListFromGateway();
@@ -841,6 +850,7 @@
       await syncApprovalsFromGateway();
       await syncCodFromGateway();
       await syncDebtBalancesFromGateway();
+      await syncAuditFromGateway();
       state.__lastRealtimeRefresh = { reason, at: new Date().toISOString() };
       save();
       render();
@@ -3604,7 +3614,8 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`); }}]);
   }
 
-  function openAuditModal() {
+  async function openAuditModal() {
+    await syncAuditFromGateway();
     const st = currentStaff();
     const adminView = isAdminStaff(st);
     const audits = state.audit || [];
@@ -3636,16 +3647,37 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
     const filterHtml = `<div class="audit-filter-row" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;align-items:center;">
       ${adminView ? `<select id="auditRoleFilter" class="entry-input" style="width:auto;min-width:140px;"><option value="">All roles</option>${roleOptions}</select><select id="auditStaffFilter" class="entry-input" style="width:auto;min-width:170px;"><option value="">All staff</option>${staffOptions}</select>` : ''}
       <select id="auditActionFilter" class="entry-input" style="width:auto;min-width:150px;"><option value="">All actions</option>${actionOptions}</select>
-      <input id="auditDateFilter" class="entry-input" type="date" style="width:auto;min-width:135px;">
+      <input id="auditDateFrom" class="entry-input" type="date" style="width:auto;min-width:130px;" title="From date">
+      <span style="font-size:12px;color:var(--muted)">to</span>
+      <input id="auditDateTo" class="entry-input" type="date" style="width:auto;min-width:130px;" title="To date">
     </div>`;
-    const rowForAudit = (a) => `<tr><td>${fmtDate(a.at || a.timestamp || a.createdAt)}</td><td>${escapeHtml(a.actor || a.actorName || a.actor_name || 'System')}</td><td>${escapeHtml(a.action || a.actionType || a.action_type || '')}</td><td>${escapeHtml(a.details || a.detail || '')}</td></tr>`;
+    const formatActionType = (a) => {
+      const raw = a.action || a.actionType || a.action_type || '';
+      return raw.replace(/_/g, ' ').replace(/\w/g, c => c.toUpperCase());
+    };
+    const formatAuditDetail = (a) => {
+      const parts = [];
+      if (a.details || a.detail) parts.push(escapeHtml(a.details || a.detail));
+      if (a.before != null || a.after != null) {
+        const b = a.before != null ? JSON.stringify(a.before) : '—';
+        const af = a.after != null ? JSON.stringify(a.after) : '—';
+        if (b !== af) parts.push(`<span class="audit-change">Before: ${escapeHtml(b)} → After: ${escapeHtml(af)}</span>`);
+      }
+      return parts.join('<br>') || '—';
+    };
+    const actorName = (a) => {
+      const actorStaff = getAuditActorStaff(a);
+      return escapeHtml(actorStaff?.name || a.actor || a.actorName || a.actor_name || 'System');
+    };
+    const rowForAudit = (a) => `<tr><td style="white-space:nowrap">${fmtDate(a.at || a.timestamp || a.createdAt)}</td><td>${actorName(a)}</td><td><span class="audit-action-badge">${escapeHtml(formatActionType(a))}</span></td><td style="font-size:12px">${formatAuditDetail(a)}</td></tr>`;
     const scopeNote = adminView ? '<div class="note">Admin Global Audit View: showing all staff actions. Use role/staff filters to narrow the trail.</div>' : '<div class="note">Showing only your own audit trail.</div>';
     openModal('Audit Trail', `${scopeNote}${filterHtml}<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody id="auditTrailRows"></tbody></table></div>`, [{label:'Close', onClick: closeModal}]);
     const renderAuditRows = () => {
       const roleFilter = byId('auditRoleFilter')?.value || '';
       const staffFilter = byId('auditStaffFilter')?.value || '';
       const actionFilter = byId('auditActionFilter')?.value || '';
-      const dateFilter = byId('auditDateFilter')?.value || '';
+      const dateFrom = byId('auditDateFrom')?.value || '';
+      const dateTo = byId('auditDateTo')?.value || '';
       const filtered = baseAudit.filter(a => {
         const actorStaff = getAuditActorStaff(a);
         const action = String(a.action || a.actionType || a.action_type || '').trim();
@@ -3653,13 +3685,14 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
         if (adminView && roleFilter && actorStaff?.role !== roleFilter) return false;
         if (adminView && staffFilter && actorStaff?.id !== staffFilter) return false;
         if (actionFilter && action !== actionFilter) return false;
-        if (dateFilter && isoDate !== dateFilter) return false;
+        if (dateFrom && isoDate < dateFrom) return false;
+        if (dateTo && isoDate > dateTo) return false;
         return true;
       });
       const tbody = byId('auditTrailRows');
       if (tbody) tbody.innerHTML = filtered.map(rowForAudit).join('') || '<tr><td colspan="4">No audit records</td></tr>';
     };
-    ['auditRoleFilter','auditStaffFilter','auditActionFilter','auditDateFilter'].forEach(id => {
+    ['auditRoleFilter','auditStaffFilter','auditActionFilter','auditDateFrom','auditDateTo'].forEach(id => {
       const el = byId(id);
       if (el) el.onchange = renderAuditRows;
     });

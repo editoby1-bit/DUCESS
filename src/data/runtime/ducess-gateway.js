@@ -685,6 +685,10 @@ async function submitDebtRepayment(_payload) {
         getOperationalBalanceSummary: () => notYet('dashboard.getOperationalBalanceSummary'),
       },
       appState,
+      audit: {
+        listAuditLog,
+        insertAuditLogEntry,
+      },
       __meta: {
         adapter: 'local',
         phase: '3B.3',
@@ -894,17 +898,51 @@ function subscribeRealtime() {
     }
 
     async function insertAuditLogEntry(payload = {}) {
+      const meta = clone(payload.metadata || {});
+      if (payload.before != null) meta.before = payload.before;
+      if (payload.after != null) meta.after = payload.after;
+      if (payload.actorName) meta.actorName = payload.actorName;
+      if (payload.details) meta.details = payload.details;
       const insertRow = {
         actor_staff_id: payload.actorStaffId || null,
         action_type: payload.actionType || 'approval_posted',
         entity_type: payload.entityType || 'approval_request',
         entity_id: payload.entityId || null,
-        metadata: clone(payload.metadata || {}),
+        metadata: meta,
         created_at: new Date().toISOString(),
       };
       const { data, error: insertError } = await client.from(auditLogTable).insert(insertRow).select(auditLogSelect).maybeSingle();
       if (insertError) return defaultResult.err('AUDIT_LOG_INSERT_FAILED', 'Could not write audit log entry in Supabase.', insertError);
       return defaultResult.ok(data || insertRow);
+    }
+
+    async function listAuditLog(filters = {}) {
+      if (!canUseSupabase()) return defaultResult.ok([]);
+      let query = client.from(auditLogTable).select(auditLogSelect).order('created_at', { ascending: false }).limit(filters.limit || 200);
+      if (filters.actorStaffId) query = query.eq('actor_staff_id', filters.actorStaffId);
+      if (filters.actionType) query = query.eq('action_type', filters.actionType);
+      if (filters.entityType) query = query.eq('entity_type', filters.entityType);
+      if (filters.fromDate) query = query.gte('created_at', filters.fromDate);
+      if (filters.toDate) query = query.lte('created_at', filters.toDate + 'T23:59:59Z');
+      const { data, error } = await query;
+      if (error) return defaultResult.ok([]); // fail silently
+      const normalized = (data || []).map(row => ({
+        id: row.id,
+        actorStaffId: row.actor_staff_id || '',
+        actionType: row.action_type || '',
+        action: row.action_type || '',
+        entityType: row.entity_type || '',
+        entityId: row.entity_id || '',
+        metadata: row.metadata || {},
+        before: row.metadata?.before || null,
+        after: row.metadata?.after || null,
+        details: row.metadata?.details || row.metadata?.note || '',
+        actor: row.metadata?.actorName || '',
+        actorId: row.actor_staff_id || '',
+        at: row.created_at,
+        createdAt: row.created_at,
+      }));
+      return defaultResult.ok(normalized);
     }
 
    async function postSingleCustomerTransaction(requestRow, entry, txType, approver, options = {}) {
@@ -2126,13 +2164,37 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       }
 
       const authSession = signInResult.data?.session;
-      return buildSessionFromSupabaseAuthSession(authSession);
+      const sessionResult = await buildSessionFromSupabaseAuthSession(authSession);
+      // Audit: login
+      if (sessionResult.ok && sessionResult.data?.staff?.id) {
+        await insertAuditLogEntry({
+          actorStaffId: sessionResult.data.staff.id,
+          actorName: sessionResult.data.staff.fullName || '',
+          actionType: 'staff_login',
+          entityType: 'staff',
+          entityId: sessionResult.data.staff.id,
+          details: `${sessionResult.data.staff.fullName || ''} logged in`,
+        }).catch(() => {});
+      }
+      return sessionResult;
     }
 
     async function logout() {
       if (!canUseSupabase()) return local.auth.logout();
+      // Audit: logout before signing out
+      const sessionBefore = await client.auth.getSession();
+      const logoutStaffId = sessionBefore.data?.session?.user?.id || null;
       const { error: signOutError } = await client.auth.signOut();
       if (signOutError) return defaultResult.err('AUTH_LOGOUT_FAILED', signOutError.message || 'Unable to sign out.', signOutError);
+      if (logoutStaffId) {
+        await insertAuditLogEntry({
+          actorStaffId: logoutStaffId,
+          actionType: 'staff_logout',
+          entityType: 'staff',
+          entityId: logoutStaffId,
+          details: 'Staff logged out',
+        }).catch(() => {});
+      }
       return defaultResult.ok({ success: true });
     }
 
