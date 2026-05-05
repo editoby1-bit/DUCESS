@@ -430,6 +430,16 @@ async function submitDebtRepayment(_payload) {
     }
 
 
+
+    async function listStaffLedger(staffId, filters = {}) {
+      const state = getLocalState();
+      const acc = (state.staffAccounts || {})[staffId] || null;
+      let rows = Array.isArray(acc?.entries) ? acc.entries : [];
+      if (filters.startDate) rows = rows.filter((row) => String(row.floatDate || row.float_date || row.date || row.createdAt || row.created_at || '').slice(0,10) >= filters.startDate);
+      if (filters.endDate) rows = rows.filter((row) => String(row.floatDate || row.float_date || row.date || row.createdAt || row.created_at || '').slice(0,10) <= filters.endDate);
+      return defaultResult.ok(rows);
+    }
+
     async function createStaff(payload = {}) {
       const state = getLocalState();
       state.staff ||= [];
@@ -2252,6 +2262,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         listActiveStaff,
         createStaff,
         updateStaffStatus,
+        listStaffLedger,
       },
       permissions: {
         getEffectivePermissions,
