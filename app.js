@@ -853,11 +853,9 @@
 
   async function syncAuditFromGateway(filters = {}) {
     if (!isSupabaseApprovalMode() || !gateway.audit?.listAuditLog) {
-      console.warn('[DUCESS audit] skipping - supabase mode:', isSupabaseApprovalMode(), 'gateway.audit:', !!gateway.audit?.listAuditLog);
       return;
     }
     const result = await gateway.audit.listAuditLog(filters);
-    console.log('[DUCESS audit] result:', result);
     if (result?.ok && Array.isArray(result.data)) {
       state.audit = result.data;
       save();
@@ -900,6 +898,14 @@
     }
   }
 
+  function debounce(fn, wait = 200) {
+    let t;
+    return function(...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+  }
+
   function debounceAsync(fn, wait = 250) {
     let timer = null;
     return (...args) => {
@@ -910,8 +916,8 @@
 
   function setupRealtimeSubscriptions() {
     if (!isSupabaseApprovalMode() || !gateway.__realtime?.subscribe || realtimeBound) return;
-    const refreshApprovals = debounceAsync(async () => { await syncApprovalsFromGateway(); render(); }, 120);
-    const refreshCod = debounceAsync(async () => { await syncCodFromGateway(); await syncDebtBalancesFromGateway(); render(); }, 120);
+    const refreshApprovals = debounceAsync(async () => { await syncApprovalsFromGateway(); scheduleRender(); }, 120);
+    const refreshCod = debounceAsync(async () => { await syncCodFromGateway(); await syncDebtBalancesFromGateway(); scheduleRender(); }, 120);
     const refreshBalances = debounceAsync(async (payload) => {
       const row = payload?.new || payload?.old || {};
       if (row.customer_id) await syncCustomerFromGateway({ customerId: row.customer_id });
@@ -926,8 +932,8 @@
       await syncDebtBalancesFromGateway();
       render();
     }, 120);
-    const refreshCustomers = debounceAsync(async () => { await syncCustomersListFromGateway(); render(); }, 160);
-    const refreshStaff = debounceAsync(async () => { await syncStaffFromGateway(); render(); }, 160);
+    const refreshCustomers = debounceAsync(async () => { await syncCustomersListFromGateway(); scheduleRender(); }, 160);
+    const refreshStaff = debounceAsync(async () => { await syncStaffFromGateway(); scheduleRender(); }, 160);
     const refreshAll = debounceAsync(async () => { await refreshRealtimeState('realtime-event'); }, 220);
     realtimeUnsub = gateway.__realtime.subscribe({
       approval: refreshApprovals,
@@ -1431,6 +1437,13 @@ if (approvalRecord.type === 'float_topup') {
     if (nm && customer && customerStatusLabel(customer) === 'Frozen') nm.innerHTML = `${customer.name} <span class="badge rejected">Frozen</span>`;
   }
 
+  let _renderScheduled = false;
+  function scheduleRender() {
+    if (_renderScheduled) return;
+    _renderScheduled = true;
+    requestAnimationFrame(() => { _renderScheduled = false; render(); });
+  }
+
   function render() {
     document.body.classList.remove('home-lock-scroll');
     if (!state.ui.module) document.body.classList.add('home-lock-scroll');
@@ -1471,11 +1484,11 @@ if (approvalRecord.type === 'float_topup') {
         showToast(`Theme: ${THEME_LABELS[next]}`);
       };
     }
-    byId('globalNameSearch').oninput = (e) => {
-      const results = searchCustomersByName(e.target.value);
+    byId('globalNameSearch').oninput = debounce((e) => {
       if (!e.target.value.trim()) return;
+      const results = searchCustomersByName(e.target.value);
       openCustomerSearchModal(results);
-    };
+    }, 200);
     byId('modalClose').onclick = closeModal;
     byId('modalBack').onclick = (e) => { if (e.target === byId('modalBack')) closeModal(); };
   }
@@ -2760,7 +2773,7 @@ function renderTellerBalances() {
       lookupFill(byId('workspace'), c);
     };
     byId('lookupBtn').onclick = () => openCustomerSearchModal(state.customers);
-    byId('lookupAcc').oninput = () => {
+    byId('lookupAcc').oninput = debounce(() => {
       const v = (byId('lookupAcc')?.value || '').trim();
       if (!v) return doLookup(true);
       if (/^\d{4}$/.test(v)) doLookup(true);
@@ -3176,7 +3189,7 @@ function renderTellerBalances() {
 
     if (byId('txSearch')) byId('txSearch').onclick = () => openCustomerSearchModal(state.customers);
     if (byId('txAcc')) {
-      byId('txAcc').oninput = () => {
+      byId('txAcc').oninput = debounce(() => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
         if (!v) {
@@ -3214,7 +3227,7 @@ function renderTellerBalances() {
     }
 
     if (byId('txApplyCharges')) byId('txApplyCharges').onchange = updateSingleCommissionPreview;
-    if (byId('txAmount')) byId('txAmount').oninput = updateSingleCommissionPreview;
+    if (byId('txAmount')) byId('txAmount').oninput = debounce(updateSingleCommissionPreview, 150);
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="single"]`);
@@ -3250,7 +3263,7 @@ function renderTellerBalances() {
 
     if (byId('journalSearchBtn')) byId('journalSearchBtn').onclick = () => openJournalCustomerSearchModal(state.customers);
     if (byId('journalAcc')) {
-      byId('journalAcc').oninput = () => {
+      byId('journalAcc').oninput = debounce(() => {
         const v = (byId('journalAcc').value || '').trim();
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
         if (!v) {
@@ -3280,7 +3293,7 @@ function renderTellerBalances() {
     }
 
     if (byId('journalApplyCharges')) byId('journalApplyCharges').onchange = updateJournalCommissionPreview;
-    if (byId('journalAmount')) byId('journalAmount').oninput = updateJournalCommissionPreview;
+    if (byId('journalAmount')) byId('journalAmount').oninput = debounce(updateJournalCommissionPreview, 150);
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
@@ -4531,7 +4544,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
 
     const staffDirectorySearch = byId('staffDirectorySearch');
     if (staffDirectorySearch) {
-      staffDirectorySearch.oninput = () => {
+      staffDirectorySearch.oninput = debounce(() => {
         state.ui.staffDirectorySearch = staffDirectorySearch.value || '';
         save();
         renderWorkspace();

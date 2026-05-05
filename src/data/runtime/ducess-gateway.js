@@ -342,7 +342,6 @@ async function submitDebtRepayment(_payload) {
           const raw = global.localStorage.getItem(storageKey);
           return raw ? JSON.parse(raw) : null;
         } catch (error) {
-          console.warn('[DUCESS gateway] Failed to load local state.', error);
           return null;
         }
       },
@@ -588,7 +587,6 @@ async function submitDebtRepayment(_payload) {
           const specific = handlers[kind];
           if (typeof specific === 'function') specific(payload);
         } catch (err) {
-          console.warn('[DUCESS realtime] handler failed', err);
         }
       };
       const tables = [
@@ -856,7 +854,6 @@ function subscribeRealtime() {
         .order('created_at', { ascending: true });
       if (queryError) {
         if (isMissingColumnOrRelationError(queryError)) {
-          console.warn('[DUCESS gateway] approval_request_id is not available on customer_transactions yet; skipping prior-post check.', queryError);
           return defaultResult.ok([]);
         }
         return defaultResult.err('POSTED_TX_CHECK_FAILED', 'Could not verify previously posted transactions.', queryError);
@@ -928,7 +925,6 @@ function subscribeRealtime() {
     }
 
     async function listAuditLog(filters = {}) {
-      console.log('[DUCESS audit] listAuditLog called, canUseSupabase:', canUseSupabase(), 'client:', !!client);
       if (!canUseSupabase()) return defaultResult.ok([]);
       let query = client.from(auditLogTable).select(auditLogSelect).limit(filters.limit || 200);
       if (filters.actorStaffId) query = query.eq('actor_staff_id', filters.actorStaffId);
@@ -937,7 +933,6 @@ function subscribeRealtime() {
       if (filters.fromDate) query = query.gte('created_at', filters.fromDate);
       if (filters.toDate) query = query.lte('created_at', filters.toDate + 'T23:59:59Z');
       const { data, error, count, status, statusText } = await query;
-      console.log('[DUCESS audit raw]', { status, statusText, count, dataLen: data?.length, error, firstRow: data?.[0] });
       if (error) { console.warn('[DUCESS audit] listAuditLog failed:', error); return defaultResult.ok([]); }
       const normalized = (data || []).map(row => ({
         id: row.id,
@@ -1008,7 +1003,6 @@ function subscribeRealtime() {
     .from(customerTransactionsTable)
     .insert(insertRow);
 
-  console.log('CUSTOMER TRANSACTION INSERT RESULT:', insertAttempt);
 
   if (insertAttempt.error && insertAttempt.error.message) {
     return defaultResult.err(
@@ -1272,10 +1266,8 @@ if (inserted.error) {
     }
 
     async function submitApprovalRequest(payload = {}) {
-  console.log("submitApprovalRequest HIT", payload);
   // FORCE Supabase (temporary debug override)
   if (!canUseSupabase()) {
-    console.warn("⚠️ Falling back to local, but forcing Supabase instead");
   }
 
   const insertPayload = {
@@ -1289,8 +1281,6 @@ if (inserted.error) {
     entity_id: payload.entityId || payload.entity_id || null,
   };
 
-  console.log("APPROVAL INSERT PAYLOAD", insertPayload);
-  console.log("APPROVAL TABLE", approvalRequestsTable);
 
   const { data, error: insertError } = await client
     .from(approvalRequestsTable)
@@ -1298,7 +1288,6 @@ if (inserted.error) {
     .select(approvalRequestsSelect)
     .single();
 
-  console.log('APPROVAL INSERT RESULT', { data, insertError });
 
 if (insertError) {
   console.error('APPROVAL INSERT ERROR MESSAGE:', insertError.message);
@@ -1382,7 +1371,6 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
     async function submitAccountOpening(payload = {}) {
-      console.log("submitAccountOpening HIT", payload);
       return submitApprovalRequest({
         requestType: 'account_opening',
         requestedByStaffId: payload.openedByStaffId || payload.requestedByStaffId || '',
@@ -1529,12 +1517,10 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         const existingQuery = client.from(codSubmissionsTable).select('id').eq('staff_id', resolvedStaffId).eq('business_date', payload.businessDate).maybeSingle();
         const existingResult = await existingQuery;
         if (existingResult.error && existingResult.error.code !== 'PGRST116') {
-          console.warn('[DUCESS gateway] COD existing-check bypassed:', existingResult.error);
         } else {
           existingData = existingResult.data || null;
         }
       } catch (existingError) {
-        console.warn('[DUCESS gateway] COD existing-check bypassed:', existingError);
       }
       const row = {
         staff_id: resolvedStaffId,
@@ -1901,12 +1887,10 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         }
         const { data, error: queryError } = await query.order('full_name', { ascending: true });
         if (queryError) {
-          console.warn('[DUCESS] listStaff:', queryError.message);
           return local.staff.listStaff(filters);
         }
         return defaultResult.ok((Array.isArray(data) ? data : []).map(normalizeStaffSummary).filter(Boolean));
       } catch (err) {
-        console.warn('[DUCESS] listStaff exception:', err);
         return local.staff.listStaff(filters);
       }
     }
@@ -2246,12 +2230,10 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (filters.endDate) query = query.lte('float_date', filters.endDate);
         const { data, error } = await query.order('created_at', { ascending: true });
         if (error) {
-          console.warn('[DUCESS] listStaffLedger error:', error.message);
           return defaultResult.ok([]);
         }
         return defaultResult.ok(Array.isArray(data) ? data : []);
       } catch (err) {
-        console.warn('[DUCESS] listStaffLedger exception:', err);
         return defaultResult.ok([]);
       }
     }
