@@ -386,12 +386,9 @@
   }
 
   function carryForwardForms(fromDate, toDate, postingStaff = []) {
-    postingStaff.forEach(st => {
-      const remaining = currentFloatAvailable(st.id, fromDate);
-      if (!(remaining > 0)) return;
-      if (hasBaseOpeningBalanceForDate(st.id, toDate)) return;
-      addStaffEntry(st.id, 'approved_form', remaining, remaining, `Auto carried forward from ${fromDate}`, { formDate: toDate, floatDate: toDate, carriedFromDate: fromDate, autoCarryForward: true });
-    });
+    // Disabled: each business day requires a fresh FORM declaration.
+    // COD resolution handles previous day reconciliation.
+    // No automatic carry-forward of remaining balance.
   }
 
   function finalizeBusinessDay(dateStr, postingStaff = []) {
