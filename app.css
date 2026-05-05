@@ -4623,7 +4623,7 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 .vertical-tool-tabs {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 2px;
   margin-bottom: 0;
 }
 
@@ -4631,8 +4631,8 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   width: 100%;
   justify-content: flex-start;
   text-align: left;
-  min-height: 54px;
-  font-size: 16px;
+  min-height: auto;
+  font-size: 11px;
 }
 
 .workspace-tool-body {
@@ -6165,7 +6165,7 @@ body{background:#f4f7fa;}
 .topbar{padding:10px 16px !important;grid-template-columns:auto 1fr auto;align-items:center;}
 .brand-wrap{gap:10px;}
 .logo{width:40px;height:40px;border-radius:12px;font-size:18px;}
-.eyebrow{font-size:11px;letter-spacing:.16em;}
+.eyebrow{font-size:9px;letter-spacing:.12em;margin-bottom:1px;}
 .dashboard-title{display:none !important;}
 .hero-card{display:none !important;}
 .top-actions{gap:8px;align-items:flex-end;}
@@ -6191,13 +6191,13 @@ body{background:#f4f7fa;}
 .module-card[data-module-key="balances"]{left:59%;top:76%;}
 
 .workspace-card{margin-top:4px;padding:8px 12px 10px;}
-.workspace-head{margin-bottom:6px;}
-.workspace-head h2{font-size:12px;margin-top:1px;font-weight:700;}
+.workspace-head{margin-bottom:4px;}
+.workspace-head h2{font-size:11px;margin-top:0;font-weight:700;margin-bottom:4px;}
 .global-search{display:none;}
 .workspace-switcher{grid-template-columns:160px 1fr !important;gap:8px !important;align-items:start;}
 .vertical-tool-tabs,.tool-columns{gap:0px !important;}
 .tool-column-title{font-size:8px;letter-spacing:.10em;margin-bottom:2px;}
-.tool-tab{background:transparent !important;border:none !important;padding:2px 0 !important;border-radius:0 !important;box-shadow:none !important;justify-content:flex-start;font-size:11px;font-weight:600;color:var(--text) !important;text-align:left;line-height:1.3;}
+.tool-tab{background:transparent !important;border:none !important;padding:1px 0 !important;border-radius:0 !important;box-shadow:none !important;justify-content:flex-start;font-size:10px;font-weight:600;color:var(--text) !important;text-align:left;line-height:1.2;margin:0 !important;}
 .tool-tab.active{color:var(--brand) !important;background:transparent !important;}
 .tellering-tool-tabs .tool-tab,.vertical-tool-tabs .tool-tab{width:100%;}
 
@@ -11290,3 +11290,5 @@ body #btnAudit{
 .staff-ledger-modal .table th {
   font-size: 10px;
 }
+
+.vertical-tool-tabs .tool-tab,.tellering-tool-tabs .tool-tab{margin:0 !important;padding:1px 0 !important;line-height:1.15 !important;font-size:10px !important;min-height:auto !important;height:auto !important;}
