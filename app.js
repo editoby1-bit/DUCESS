@@ -3640,10 +3640,14 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
           const overdraw=Math.max(0,-running);
           const result = await gateway.cod.submitCod({
             staffId: st.id,
+            staffUuid: getStaffBackendId(st),
+            staffBackendId: getStaffBackendId(st),
             businessDate: businessDate(),
             actualCash: running,
             note,
             submittedByStaffId: currentStaff()?.id || st.id,
+            submittedByStaffUuid: getStaffBackendId(currentStaff()),
+            submittedByStaffBackendId: getStaffBackendId(currentStaff()),
             metrics: {
               openingBalance: formAmount,
               floatTopUps: 0,

@@ -1522,11 +1522,20 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (!previewResult.ok) return previewResult;
         metrics = previewResult.data;
       }
-      const resolvedStaffId = await resolveStaffUuid(client, payload.staffId);
+      const resolvedStaffId = await resolveStaffUuid(client, payload.staffUuid || payload.staffBackendId || payload.staffId);
       if (!resolvedStaffId) return defaultResult.ok(null); // placeholder staff not in Supabase yet — skip silently
-      let existingQuery = client.from(codSubmissionsTable).select(codSubmissionsSelect).eq('staff_id', resolvedStaffId).eq('business_date', payload.businessDate).maybeSingle();
-      const { data: existingData, error: existingError } = await existingQuery;
-      if (existingError && existingError.code !== 'PGRST116') return defaultResult.err('COD_EXISTING_CHECK_FAILED', 'Could not verify existing COD submission.', existingError);
+      let existingData = null;
+      try {
+        const existingQuery = client.from(codSubmissionsTable).select('id').eq('staff_id', resolvedStaffId).eq('business_date', payload.businessDate).maybeSingle();
+        const existingResult = await existingQuery;
+        if (existingResult.error && existingResult.error.code !== 'PGRST116') {
+          console.warn('[DUCESS gateway] COD existing-check bypassed:', existingResult.error);
+        } else {
+          existingData = existingResult.data || null;
+        }
+      } catch (existingError) {
+        console.warn('[DUCESS gateway] COD existing-check bypassed:', existingError);
+      }
       const row = {
         staff_id: resolvedStaffId,
         business_date: payload.businessDate || '',
@@ -1543,7 +1552,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         overdraw: normalizeNumber(metrics.overdraw),
         note: payload.note || '',
         status: (normalizeNumber(payload.actualCash) - normalizeNumber(metrics.expectedCash) === 0 && normalizeNumber(metrics.overdraw) === 0) ? 'submitted' : 'flagged',
-        submitted_by_staff_id: (await resolveStaffUuid(client, payload.submittedByStaffId || payload.staffId)) || resolvedStaffId || null,
+        submitted_by_staff_id: (await resolveStaffUuid(client, payload.submittedByStaffUuid || payload.submittedByStaffBackendId || payload.submittedByStaffId || payload.staffUuid || payload.staffBackendId || payload.staffId)) || resolvedStaffId || null,
         submitted_at: new Date().toISOString(),
       };
       let res;
@@ -1553,7 +1562,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         res = await client.from(codSubmissionsTable).insert(row).select(codSubmissionsSelect).single();
       }
       if (res.error) return defaultResult.err('COD_SUBMIT_FAILED', 'Could not submit COD record to Supabase.', res.error);
-      await insertAuditLogEntry({ actorStaffId: payload.submittedByStaffId || payload.staffId || null, actionType: 'cod_submission', entityType: 'cod_submission', entityId: res.data?.id || null, metadata: clone(row) });
+      await insertAuditLogEntry({ actorStaffId: row.submitted_by_staff_id || resolvedStaffId || null, actionType: 'cod_submission', entityType: 'cod_submission', entityId: res.data?.id || null, metadata: clone(row) });
       return defaultResult.ok(normalizeCodSubmissionRecord(res.data));
     }
 
