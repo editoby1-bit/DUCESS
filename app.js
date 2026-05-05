@@ -2561,8 +2561,8 @@ function staffLedgerEvents(staffId) {
     function buildModal(rows, loading) {
       const cod = staffCODRecords(staffId).slice().sort((a,b)=>new Date(b.submittedAt||b.resolvedAt||b.date)-new Date(a.submittedAt||a.resolvedAt||a.date))[0];
       return `
-      <div class="stack">
-        <div class="kpi-row wrap">
+      <div class="stack staff-ledger-modal">
+        <div class="kpi-row wrap staff-ledger-kpis">
           <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(staffName)}</div></div>
           <div class="kpi"><div class="label">Office</div><div class="number">${escapeHtml(staffRole)}</div></div>
           <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(acc.accountNumber || '—')}</div></div>

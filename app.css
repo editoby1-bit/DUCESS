@@ -11216,3 +11216,76 @@ body #btnAudit{
   color: var(--muted); margin-top: 2px;
   word-break: break-all;
 }
+
+
+/* Staff Ledger compact client polish */
+.modal:has(.staff-ledger-modal) {
+  width: min(760px, 96vw);
+  border-radius: 16px;
+}
+.modal:has(.staff-ledger-modal) .modal-head,
+.modal:has(.staff-ledger-modal) .modal-actions {
+  padding: 10px 14px;
+}
+.modal:has(.staff-ledger-modal) .modal-head h3 {
+  font-size: 16px;
+  line-height: 1.2;
+}
+.modal:has(.staff-ledger-modal) .modal-body {
+  padding: 12px 14px;
+}
+.modal:has(.staff-ledger-modal) .icon-btn {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 10px;
+}
+.modal:has(.staff-ledger-modal) .modal-actions button {
+  min-height: 26px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+.staff-ledger-modal {
+  gap: 8px;
+}
+.staff-ledger-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+.staff-ledger-kpis .kpi {
+  flex: 0 0 auto;
+  min-width: 118px;
+  max-width: 170px;
+  padding: 7px 9px;
+  border-radius: 11px;
+}
+.staff-ledger-kpis .kpi .label {
+  font-size: 9px;
+  line-height: 1.1;
+  letter-spacing: .035em;
+}
+.staff-ledger-kpis .kpi .number {
+  font-size: 15px;
+  line-height: 1.15;
+  margin-top: 4px;
+  word-break: break-word;
+}
+.staff-ledger-modal .note {
+  font-size: 11px;
+  line-height: 1.35;
+}
+.staff-ledger-modal .table-wrap {
+  border-radius: 12px;
+}
+.staff-ledger-modal .table th,
+.staff-ledger-modal .table td {
+  padding: 7px 8px;
+  font-size: 11px;
+}
+.staff-ledger-modal .table th {
+  font-size: 10px;
+}
