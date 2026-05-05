@@ -2777,7 +2777,7 @@ function renderTellerBalances() {
       const v = (byId('lookupAcc')?.value || '').trim();
       if (!v) return doLookup(true);
       if (/^\d{4}$/.test(v)) doLookup(true);
-    };
+    }, 200);
     byId('lookupAcc').onchange = () => doLookup(true);
     byId('lookupAcc').onkeyup = (e) => { if (e.key === "Enter") doLookup(false); };
     byId('openStatementBtn').onclick = () => { state.ui.tool = 'account_statement'; renderWorkspace(); setTimeout(()=>{ byId('stmtAcc').value = getSelectedCustomer()?.accountNumber || ''; }, 30); };
@@ -3205,7 +3205,7 @@ function renderTellerBalances() {
           return;
         }
         if (/^\d{4}$/.test(v)) searchSingle();
-      };
+      }, 200);
       byId('txAcc').onchange = () => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
@@ -3278,7 +3278,7 @@ function renderTellerBalances() {
           save();
         }
         if (/^\d{4}$/.test(v)) searchJournal();
-      };
+      }, 200);
       byId('journalAcc').onchange = () => {
         const v = (byId('journalAcc').value || '').trim();
         if (!v) {
@@ -4548,7 +4548,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         state.ui.staffDirectorySearch = staffDirectorySearch.value || '';
         save();
         renderWorkspace();
-      };
+      }, 200);
     }
     const staffDirectoryRoleFilter = byId('staffDirectoryRoleFilter');
     if (staffDirectoryRoleFilter) {
