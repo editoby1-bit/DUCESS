@@ -261,6 +261,7 @@
     state.businessDate ||= today();
     ensureDefaultIncomeAccounts(state);
     state.dayClosures ||= [];
+    reconcileBusinessDateFromClosures();
     state.staff.forEach(st => { ensureStaffWalletCustomer(st.id); ensureStaffAccount(st.id); });
     normalizeStaffWalletAccounts();
     syncAllStaffWallets();
@@ -305,6 +306,37 @@
   }
   function businessDate() { return state.businessDate || today(); }
   function nextDate(iso) { const d=new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10); }
+
+  function latestClosedBusinessDay() {
+    const rows = Array.isArray(state.dayClosures) ? state.dayClosures : [];
+    return rows
+      .map(row => ({
+        date: String(row.date || row.businessDate || '').slice(0,10),
+        nextBusinessDate: String(row.nextBusinessDate || '').slice(0,10)
+      }))
+      .filter(row => row.date)
+      .sort((a,b) => a.date.localeCompare(b.date))
+      .pop() || null;
+  }
+
+  function reconcileBusinessDateFromClosures() {
+    // DUCESS business date is sequential, not real calendar date.
+    // Only advance when the current business date points to a day already closed.
+    const latest = latestClosedBusinessDay();
+    if (!latest?.date) return false;
+    const expectedOpenDate = latest.nextBusinessDate || nextDate(latest.date);
+    const current = String(state.businessDate || '').slice(0,10);
+    if (!current || current <= latest.date) {
+      state.businessDate = expectedOpenDate;
+      return true;
+    }
+    return false;
+  }
+
+  function approvalDisplayDate(approval) {
+    const payloadDate = approvalBusinessDate(approval?.type, approval?.payload || {});
+    return payloadDate || approval?.requestedAt || approval?.requested_at || '';
+  }
 
   const COD_LOCKED_POSTING_TYPES = ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','operational_entry'];
 
@@ -363,6 +395,7 @@
   }
 
   function finalizeBusinessDay(dateStr, postingStaff = []) {
+    reconcileBusinessDateFromClosures();
     const closedDate = String(dateStr || businessDate()).slice(0,10);
     if (isBusinessDateClosed(closedDate)) return false;
     const nextOpenDate = nextDate(closedDate);
@@ -673,6 +706,7 @@
     if (result?.ok && Array.isArray(result.data)) {
       state.approvals = result.data;
       syncOperationalEffectsFromApprovedRequests();
+      reconcileBusinessDateFromClosures();
       save();
     }
     return result;
@@ -760,6 +794,7 @@
         existing.set(item.id, Object.assign({}, existing.get(item.id) || {}, item, { staffName: staffName(item.staffId) || item.staffName || item.staffId }));
       });
       state.cod = Array.from(existing.values()).sort((a,b)=>new Date(b.submittedAt||b.resolvedAt||b.date)-new Date(a.submittedAt||a.resolvedAt||a.date));
+      reconcileBusinessDateFromClosures();
       save();
     }
     return result;
@@ -1839,7 +1874,7 @@ function hideProcessing() {
     const allRows = state.approvals.filter(a => categories[currentSection].includes(a.type));
     const limit = state.ui.approvalsLimit || 20;
     const approvals = allRows.slice(0, limit);
-    const rows = approvals.map((a, i) => `<tr><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(a.requestedAt)}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success">Approve</button><button type="button" data-reject="${a.id}" class="danger">Reject</button></div>`:''}</div>`:''}${['account_opening','account_maintenance','account_reactivation'].includes(a.type) ? `<button type="button" data-inspect-request="${a.id}" class="secondary">View</button> `:''}${!a.type.includes('_journal') ? (a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success">Approve</button><button type="button" data-reject="${a.id}" class="danger">Reject</button></div>` : a.approvedBy || '—') : ''}</td></tr>`).join('');
+    const rows = approvals.map((a, i) => `<tr><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success">Approve</button><button type="button" data-reject="${a.id}" class="danger">Reject</button></div>`:''}</div>`:''}${['account_opening','account_maintenance','account_reactivation'].includes(a.type) ? `<button type="button" data-inspect-request="${a.id}" class="secondary">View</button> `:''}${!a.type.includes('_journal') ? (a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success">Approve</button><button type="button" data-reject="${a.id}" class="danger">Reject</button></div>` : a.approvedBy || '—') : ''}</td></tr>`).join('');
     const codRows=(state.cod||[]).filter(c=>c.status==='flagged').map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
@@ -3606,6 +3641,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   }
 
   function openCODModal() {
+    reconcileBusinessDateFromClosures();
     if (!canCloseBusinessDay()) return showToast('Only Approval Officer or Admin can close day');
     if (isBusinessDateClosed(businessDate())) return showToast(`Business date ${businessDate()} is already closed`);
     const postingStaff = state.staff.filter(st => hasPermission('credit', st) || hasPermission('debit', st));
