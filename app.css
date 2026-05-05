@@ -6182,7 +6182,7 @@ body{background:#f4f7fa;}
 .module-card.active .module-title{color:var(--brand);}
 .module-card.disabled{opacity:.5;}
 .module-card .module-icon{width:22px;height:22px;border-radius:7px;font-size:13px;background:#edf4fb;flex:0 0 auto;}
-.module-card .module-title{margin:0 !important;font-size:14px !important;font-weight:700;white-space:nowrap;}
+.module-card .module-title{margin:0 !important;font-size:12px !important;font-weight:700;white-space:nowrap;}
 .module-card .module-desc{display:none !important;}
 .module-card[data-module-key="customer_service"]{left:17%;top:18%;}
 .module-card[data-module-key="tellering"]{left:67%;top:18%;}
@@ -6191,17 +6191,17 @@ body{background:#f4f7fa;}
 .module-card[data-module-key="balances"]{left:59%;top:76%;}
 
 .workspace-card{margin-top:4px;padding:8px 12px 10px;}
-.workspace-head{margin-bottom:10px;}
-.workspace-head h2{font-size:15px;margin-top:2px;}
+.workspace-head{margin-bottom:6px;}
+.workspace-head h2{font-size:12px;margin-top:1px;font-weight:700;}
 .global-search{display:none;}
-.workspace-switcher{grid-template-columns:200px 1fr !important;gap:10px !important;align-items:start;}
-.vertical-tool-tabs,.tool-columns{gap:2px !important;}
-.tool-column-title{font-size:9px;letter-spacing:.12em;margin-bottom:4px;}
-.tool-tab{background:transparent !important;border:none !important;padding:4px 0 !important;border-radius:0 !important;box-shadow:none !important;justify-content:flex-start;font-size:12px;font-weight:600;color:var(--text) !important;text-align:left;}
+.workspace-switcher{grid-template-columns:160px 1fr !important;gap:8px !important;align-items:start;}
+.vertical-tool-tabs,.tool-columns{gap:0px !important;}
+.tool-column-title{font-size:8px;letter-spacing:.10em;margin-bottom:2px;}
+.tool-tab{background:transparent !important;border:none !important;padding:2px 0 !important;border-radius:0 !important;box-shadow:none !important;justify-content:flex-start;font-size:11px;font-weight:600;color:var(--text) !important;text-align:left;line-height:1.3;}
 .tool-tab.active{color:var(--brand) !important;background:transparent !important;}
 .tellering-tool-tabs .tool-tab,.vertical-tool-tabs .tool-tab{width:100%;}
 
-.sheet-label,.field label,.journal-cell-label,.sheet-label-cell,.sheet-label-inline,.info-item .k{background:transparent !important;border:none !important;padding:0 !important;min-height:auto !important;color:var(--muted) !important;font-size:13px !important;font-weight:700 !important;}
+.sheet-label,.field label,.journal-cell-label,.sheet-label-cell,.sheet-label-inline,.info-item .k{background:transparent !important;border:none !important;padding:0 !important;min-height:auto !important;color:var(--muted) !important;font-size:10px !important;font-weight:700 !important;}
 .field label{margin-bottom:2px !important;}
 .form-grid,.cs-sheet-grid,.sheet-grid,.info-grid{gap:6px 10px !important;}
 .cs-sheet-grid{background:transparent !important;}
@@ -6386,6 +6386,7 @@ body[data-theme="ducess-sheet"] .module-hub{
   align-items:start;
 }
 .tellering-mixed-columns .tool-column-title{margin-bottom:2px !important;}
+.tellering-tools-only-title{display:none !important;}
 .tellering-mixed-columns .tool-tab{padding:4px 0 !important;line-height:1.1 !important;}
 .tool-tab{
   transition:transform .15s ease, color .15s ease, opacity .15s ease;
