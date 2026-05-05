@@ -3884,15 +3884,71 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
     if (persist) save();
   }
 
-  function hasFloatDeclaredOrPending(staffId, dateStr) {
-  return hasBaseOpeningBalanceForDate(staffId, dateStr) ||
-    state.approvals.some(r =>
-      r.type === 'float_declaration' &&
-      ['pending', 'approved'].includes(String(r.status || '').toLowerCase()) &&
-      r.payload?.staffId === staffId &&
-      r.payload?.date === dateStr
+
+  function staffIdCandidates(staffId) {
+    const raw = String(staffId || '').trim();
+    const staff = state.staff.find(s =>
+      String(s.id || '') === raw ||
+      String(s.staffId || '') === raw ||
+      String(s.staffCode || '') === raw ||
+      String(s.staff_code || '') === raw ||
+      String(s.uuid || '') === raw ||
+      String(s.authUserId || '') === raw ||
+      String(s.auth_user_id || '') === raw ||
+      String(s.backendId || '') === raw ||
+      String(s.backend_id || '') === raw
     );
-}
+    return new Set([
+      raw,
+      staff?.id,
+      staff?.staffId,
+      staff?.staffCode,
+      staff?.staff_code,
+      staff?.uuid,
+      staff?.authUserId,
+      staff?.auth_user_id,
+      staff?.backendId,
+      staff?.backend_id
+    ].filter(Boolean).map(v => String(v).trim()));
+  }
+
+  function staffIdsMatch(a, b) {
+    if (!a || !b) return false;
+    const left = staffIdCandidates(a);
+    const right = staffIdCandidates(b);
+    for (const value of left) if (right.has(value)) return true;
+    return false;
+  }
+
+  function approvalStaffMatches(record, staffId) {
+    const payload = record?.payload || {};
+    return staffIdsMatch(payload.staffId, staffId) ||
+      staffIdsMatch(payload.staff_id, staffId) ||
+      staffIdsMatch(payload.requestedByStaffId, staffId) ||
+      staffIdsMatch(record?.requestedByStaffId, staffId) ||
+      staffIdsMatch(record?.requestedBy, staffId);
+  }
+
+  function approvalDateMatches(record, dateStr) {
+    const target = String(dateStr || '').slice(0,10);
+    const payload = record?.payload || {};
+    return [payload.date, payload.float_date, payload.businessDate, record?.businessDate, record?.date]
+      .filter(Boolean)
+      .map(v => String(v).slice(0,10))
+      .includes(target);
+  }
+
+  function hasFloatDeclaredOrPending(staffId, dateStr) {
+    const approvedAmount = openingBalanceOnlyForDate(staffId, dateStr);
+    if (approvedAmount > 0) return true;
+    return (state.approvals || []).some(r =>
+      r.type === 'float_declaration' &&
+      String(r.status || '').toLowerCase() === 'pending' &&
+      approvalStaffMatches(r, staffId) &&
+      approvalDateMatches(r, dateStr) &&
+      Number(r.payload?.amount || r.payload?.floatAmount || 0) > 0
+    );
+  }
 
 function syncApprovedFormFromApprovalRecord(approvalRecord) {
   const payload = approvalRecord?.payload || {};
@@ -3925,18 +3981,13 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     return (state.approvals || [])
       .filter(r => r.type === 'float_declaration'
         && String(r.status || '').toLowerCase() === 'approved'
-        && (r.payload?.staffId === staffId || r.payload?.staff_id === staffId)
-        && (r.payload?.date === dateStr || r.payload?.float_date === dateStr))
+        && approvalStaffMatches(r, staffId)
+        && approvalDateMatches(r, dateStr))
       .reduce((sum, r) => sum + Number(r.payload?.amount || r.payload?.floatAmount || 0), 0);
   }
 
   function hasBaseOpeningBalanceForDate(staffId, dateStr) {
-    const acc = ensureStaffAccount(staffId);
-    const localExists = acc.entries.some(e =>
-      (e.type === 'approved_form' || e.type === 'approved_float') &&
-      (e.formDate === dateStr || e.floatDate === dateStr)
-    );
-    return localExists || approvedFormTotalForDate(staffId, dateStr) > 0;
+    return openingBalanceOnlyForDate(staffId, dateStr) > 0;
   }
 
   function hasOpeningBalanceForDate(staffId, dateStr) {
@@ -3944,14 +3995,16 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function openingBalanceOnlyForDate(staffId, dateStr) {
+    const target = String(dateStr || '').slice(0,10);
     const acc = ensureStaffAccount(staffId);
-    const localTotal = acc.entries
+    const localTotal = (acc.entries || [])
       .filter(e =>
         (e.type === 'approved_form' || e.type === 'approved_float') &&
-        (e.formDate === dateStr || e.floatDate === dateStr)
+        (String(e.formDate || '').slice(0,10) === target || String(e.floatDate || '').slice(0,10) === target) &&
+        Number(e.amount || 0) > 0
       )
       .reduce((s, e) => s + Number(e.amount || 0), 0);
-    const approvedTotal = approvedFormTotalForDate(staffId, dateStr);
+    const approvedTotal = approvedFormTotalForDate(staffId, target);
     return Math.max(localTotal, approvedTotal);
   }
 
