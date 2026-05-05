@@ -112,7 +112,7 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .layout-grid.three { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:18px; }
 .form-card, .table-card, .record-card { padding: 18px; }
 .form-card h3, .table-card h3, .record-card h3 { margin:0 0 8px; font-size: 14px; }
-.form-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px; }
+.form-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:6px; }
 .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .form-grid.one { grid-template-columns: 1fr; }
 
@@ -159,10 +159,10 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .badge.approved { background:#e9f9f0; color: var(--success); }
 .badge.rejected { background:#fdecea; color: var(--danger); }
 .muted { color: var(--muted); }
-.stack { display:flex; flex-direction:column; gap:8px; }
+.stack { display:flex; flex-direction:column; gap:6px; }
 .note { font-size: 11px; color: var(--muted); line-height: 1.4; }
-.kpi-row { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:6px; margin-bottom: 8px; }
-.kpi { background: #f8fafc; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+.kpi-row { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:4px; margin-bottom: 6px; }
+.kpi { background: #f8fafc; border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
 .kpi .label { color: var(--muted); font-size: 10px; font-weight:700; text-transform: uppercase; }
 .kpi .number { font-size: 14px; font-weight:800; margin-top:2px; }
 .modal-back {
@@ -173,10 +173,10 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .modal {
   width: min(720px, 100%); max-height: 88vh; overflow:auto; background:white; border-radius: 12px; border:1px solid var(--line); box-shadow: var(--shadow);
 }
-.modal-head, .modal-actions { padding: 10px 14px; display:flex; align-items:center; justify-content:space-between; }
+.modal-head, .modal-actions { padding: 8px 12px; display:flex; align-items:center; justify-content:space-between; }
 .modal-head { border-bottom: 1px solid var(--line); }
 .modal-head h3 { margin:0; font-size:15px; }
-.modal-body { padding: 12px 14px; }
+.modal-body { padding: 10px 12px; }
 .icon-btn { background: transparent; color: var(--muted); border:1px solid var(--line); }
 .modal-actions { border-top:1px solid var(--line); gap:10px; justify-content:flex-end; }
 .toast {
@@ -4632,7 +4632,7 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   justify-content: flex-start;
   text-align: left;
   min-height: auto;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .workspace-tool-body {
@@ -6197,7 +6197,7 @@ body{background:#f4f7fa;}
 .workspace-switcher{grid-template-columns:160px 1fr !important;gap:8px !important;align-items:start;}
 .vertical-tool-tabs,.tool-columns{gap:0px !important;}
 .tool-column-title{font-size:8px;letter-spacing:.10em;margin-bottom:2px;}
-.tool-tab{background:transparent !important;border:none !important;padding:1px 0 !important;border-radius:0 !important;box-shadow:none !important;justify-content:flex-start;font-size:10px;font-weight:600;color:var(--text) !important;text-align:left;line-height:1.2;margin:0 !important;}
+.tool-tab{background:transparent !important;border:none !important;padding:2px 0 !important;border-radius:0 !important;box-shadow:none !important;justify-content:flex-start;font-size:12px;font-weight:600;color:var(--text) !important;text-align:left;line-height:1.2;margin:0 !important;}
 .tool-tab.active{color:var(--brand) !important;background:transparent !important;}
 .tellering-tool-tabs .tool-tab,.vertical-tool-tabs .tool-tab{width:100%;}
 
@@ -11291,4 +11291,4 @@ body #btnAudit{
   font-size: 10px;
 }
 
-.vertical-tool-tabs .tool-tab,.tellering-tool-tabs .tool-tab{margin:0 !important;padding:1px 0 !important;line-height:1.15 !important;font-size:10px !important;min-height:auto !important;height:auto !important;}
+.vertical-tool-tabs .tool-tab,.tellering-tool-tabs .tool-tab{margin:0 !important;padding:2px 0 !important;line-height:1.2 !important;font-size:12px !important;min-height:auto !important;height:auto !important;}

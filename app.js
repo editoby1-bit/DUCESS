@@ -2206,11 +2206,16 @@ function nextPaint() {
           <div class="form-grid one" style="margin-top:12px">
             <div class="field"><label>Search Customer</label><input id="customerDirectorySearch" class="entry-input" placeholder="Search by name, account number, phone or email" value="${escapeHtml(state.ui.customerDirectorySearch || '')}"></div>
           </div>
-          <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Customer Name</th><th>Account Number</th><th>Started</th><th>Balance</th><th>Total Credits</th><th>Total Debits</th></tr></thead><tbody>${filteredCustomers.map((c,i)=>{
+          <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Customer Name</th><th>Account Number</th><th>Started</th><th>Balance</th><th>Total Credits</th><th>Total Debits</th><th>Status</th><th>Action</th></tr></thead><tbody>${filteredCustomers.map((c,i)=>{
             const credits = (c.transactions || []).filter(tx => tx.type === 'credit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
             const debits = (c.transactions || []).filter(tx => tx.type === 'debit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-            return `<tr><td>${i+1}</td><td>${c.name}</td><td>${c.accountNumber || '—'}</td><td>${fmtDate(c.createdAt)}</td><td>${money(Number(c.balance || 0))}</td><td>${money(credits)}</td><td>${money(debits)}</td></tr>`;
-          }).join('') || '<tr><td colspan="7">No matching customers</td></tr>'}</tbody></table></div>
+            const frozen = isCustomerFrozen(c);
+            const inactive = c.active === false;
+            const statusLabel = inactive ? 'Removed' : frozen ? 'Frozen' : 'Active';
+            const statusColor = inactive ? '#fee2e2' : frozen ? '#fef9c3' : '#d1fae5';
+            const statusText = inactive ? '#991b1b' : frozen ? '#854d0e' : '#065f46';
+            return `<tr style="${inactive ? 'opacity:0.5' : ''}"><td>${i+1}</td><td>${escapeHtml(c.name)}</td><td>${c.accountNumber || '—'}</td><td>${fmtDate(c.createdAt)}</td><td>${money(Number(c.balance || 0))}</td><td>${money(credits)}</td><td>${money(debits)}</td><td><span style="padding:1px 6px;border-radius:8px;font-size:0.8em;background:${statusColor};color:${statusText}">${statusLabel}</span></td><td>${!inactive ? `<button class="secondary" style="font-size:10px;padding:3px 8px" data-remove-customer="${c.id}">Remove</button>` : '<span style="font-size:10px;color:var(--muted)">Removed</span>'}</td></tr>`;
+          }).join('') || '<tr><td colspan="9">No matching customers</td></tr>'}</tbody></table></div>
           <div class="action-row" style="margin-top:14px"><button id="customerDirectoryCloseBtn" class="secondary">Collapse Directory</button></div>
         </div>
       </div>`;
@@ -4675,6 +4680,29 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         renderWorkspace();
       };
     }
+
+    // Remove customer buttons
+    qq('[data-remove-customer]').forEach(btn => {
+      btn.onclick = () => {
+        const customerId = btn.dataset.removeCustomer;
+        const customer = state.customers.find(c => c.id === customerId);
+        if (!customer) return;
+        openModal('Remove Customer', `
+          <p>Remove <strong>${escapeHtml(customer.name)}</strong> (${escapeHtml(customer.accountNumber || '—')}) from the active customer list?</p>
+          <p style="font-size:0.85em;color:var(--text-muted)">All transaction history and audit records are preserved. This action can be reversed by Admin.</p>
+        `, [
+          { label: 'Cancel', className: 'secondary', onClick: closeModal },
+          { label: 'Remove Customer', onClick: () => {
+            customer.active = false;
+            customer.removedAt = new Date().toISOString();
+            save();
+            closeModal();
+            render();
+            showToast(`${customer.name} removed from active list`);
+          }}
+        ]);
+      };
+    });
   }
 
   // ===== LOGIN SCREEN =====
