@@ -11507,127 +11507,110 @@ body[data-theme] .modal .table th {
   font-size: 9px !important;
 }
 
+/* ===== 2026-05-06 SURGICAL PATCH: Compact Form + My Balance modals only ===== */
+@media (min-width: 901px){
+  /* Form: remove wide empty right space and keep only target modal compact */
+  #modalBack .modal[data-modal-title="Form"]{
+    width:min(560px, calc(100vw - 44px)) !important;
+    max-width:min(560px, calc(100vw - 44px)) !important;
+  }
+  #modalBack .modal[data-modal-title="Form"] .modal-body{
+    padding:14px 22px !important;
+  }
+  #modalBack .modal[data-modal-title="Form"] .compact-modal-grid{
+    display:grid !important;
+    grid-template-columns:130px 132px 140px !important;
+    gap:12px !important;
+    align-items:start !important;
+    justify-content:start !important;
+  }
+  #modalBack .modal[data-modal-title="Form"] .field label{
+    display:block !important;
+    width:100% !important;
+    font-size:10px !important;
+    line-height:1 !important;
+    margin:0 0 4px 0 !important;
+    text-align:left !important;
+  }
+  #modalBack .modal[data-modal-title="Form"] .display-field,
+  #modalBack .modal[data-modal-title="Form"] .entry-input{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    min-height:38px !important;
+    padding:7px 10px !important;
+    font-size:12px !important;
+  }
+  #modalBack .modal[data-modal-title="Form"] #floatAmount{
+    width:132px !important;
+    max-width:132px !important;
+  }
 
-/* Surgical polish: ONLY My Balance and Form modals */
-.modal:has(#walletFundAmount),
-.modal:has(#floatAmount) {
-  width: min(620px, 92vw) !important;
-  border-radius: 14px !important;
-}
-
-.modal:has(#walletFundAmount) .modal-head,
-.modal:has(#walletFundAmount) .modal-actions,
-.modal:has(#floatAmount) .modal-head,
-.modal:has(#floatAmount) .modal-actions {
-  padding: 7px 10px !important;
-}
-
-.modal:has(#walletFundAmount) .modal-head h3,
-.modal:has(#floatAmount) .modal-head h3 {
-  font-size: 13px !important;
-  line-height: 1.05 !important;
-}
-
-.modal:has(#walletFundAmount) .modal-body,
-.modal:has(#floatAmount) .modal-body {
-  padding: 9px 10px !important;
-}
-
-.modal:has(#walletFundAmount) .kpi-row {
-  gap: 5px !important;
-  margin-bottom: 6px !important;
-}
-
-.modal:has(#walletFundAmount) .kpi {
-  min-width: 74px !important;
-  max-width: 132px !important;
-  padding: 5px 8px !important;
-  border-radius: 10px !important;
-}
-
-.modal:has(#walletFundAmount) .kpi .label {
-  font-size: 7.5px !important;
-  line-height: 1 !important;
-  letter-spacing: .025em !important;
-}
-
-.modal:has(#walletFundAmount) .kpi .number {
-  font-size: 11px !important;
-  margin-top: 3px !important;
-  line-height: 1.05 !important;
-}
-
-.modal:has(#walletFundAmount) .form-grid,
-.modal:has(#floatAmount) .form-grid {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 6px 9px !important;
-  align-items: end !important;
-}
-
-.modal:has(#walletFundAmount) .field,
-.modal:has(#floatAmount) .field {
-  flex: 0 0 auto !important;
-}
-
-.modal:has(#walletFundAmount) .field label,
-.modal:has(#floatAmount) .field label {
-  font-size: 9px !important;
-  line-height: 1 !important;
-  margin-bottom: 2px !important;
-  letter-spacing: .01em !important;
-}
-
-.modal:has(#walletFundAmount) .entry-input,
-.modal:has(#floatAmount) .entry-input {
-  height: 22px !important;
-  min-height: 22px !important;
-  padding: 2px 7px !important;
-  font-size: 10px !important;
-  border-radius: 9px !important;
-}
-
-.modal:has(#walletFundAmount) textarea.entry-input {
-  height: 28px !important;
-  min-height: 28px !important;
-  width: 150px !important;
-}
-
-.modal:has(#walletFundAmount) #walletFundAmount,
-.modal:has(#walletFundAmount) #debtRepayAmount {
-  width: 70px !important;
-}
-
-.modal:has(#floatAmount) #floatAmount {
-  width: 105px !important;
-}
-
-.modal:has(#floatAmount) .display-field {
-  height: 22px !important;
-  min-height: 22px !important;
-  padding: 2px 7px !important;
-  font-size: 10px !important;
-  border-radius: 9px !important;
-}
-
-.modal:has(#floatAmount) .note {
-  font-size: 10px !important;
-  margin-top: 1px !important;
-  line-height: 1.2 !important;
-}
-
-.modal:has(#walletFundAmount) button,
-.modal:has(#floatAmount) button {
-  min-height: 22px !important;
-  padding: 3px 9px !important;
-  font-size: 10px !important;
-  border-radius: 9px !important;
-}
-
-.modal:has(#walletFundAmount) .icon-btn,
-.modal:has(#floatAmount) .icon-btn {
-  width: 26px !important;
-  height: 26px !important;
-  min-height: 26px !important;
-  padding: 2px 6px !important;
+  /* My Balance: shrink modal to content and align labels directly over fields */
+  #modalBack .modal[data-modal-title="My Balance"]{
+    width:min(690px, calc(100vw - 44px)) !important;
+    max-width:min(690px, calc(100vw - 44px)) !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .modal-body{
+    padding:14px 22px !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .my-balance-modal{
+    gap:12px !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .kpi-row{
+    display:grid !important;
+    grid-template-columns:150px 132px 78px 220px !important;
+    gap:10px !important;
+    justify-content:start !important;
+    align-items:start !important;
+    margin-bottom:10px !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .kpi{
+    padding:10px 14px !important;
+    border-radius:14px !important;
+    min-width:0 !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .kpi .label{
+    font-size:10px !important;
+    line-height:1.05 !important;
+    margin:0 !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .kpi .number{
+    font-size:16px !important;
+    margin-top:5px !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .form-grid.three{
+    display:grid !important;
+    grid-template-columns:150px 180px 230px !important;
+    gap:14px !important;
+    justify-content:start !important;
+    align-items:start !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] .field label{
+    display:block !important;
+    width:100% !important;
+    font-size:10px !important;
+    line-height:1 !important;
+    margin:0 0 4px 0 !important;
+    text-align:left !important;
+    white-space:nowrap !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] #walletFundAmt,
+  #modalBack .modal[data-modal-title="My Balance"] #walletRepayAmt{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    flex:0 1 auto !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] #walletNote{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+  }
+  #modalBack .modal[data-modal-title="My Balance"] input,
+  #modalBack .modal[data-modal-title="My Balance"] .display-field{
+    min-height:38px !important;
+    padding:7px 10px !important;
+    font-size:12px !important;
+  }
 }
