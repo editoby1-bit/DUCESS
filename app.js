@@ -3607,12 +3607,14 @@ function renderTellerBalances() {
     if (!requiresFloat) return showToast('Current staff does not need posting form');
 
     openModal('Form', `
-      <div class="form-grid three compact-modal-grid">
-        <div class="field"><label>Staff</label><div class="display-field">${st.name}</div></div>
-        <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
-        <div class="field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
+      <div class="ducess-compact-modal ducess-form-modal">
+        <div class="ducess-compact-fields">
+          <div class="ducess-compact-field"><label>Staff</label><div class="display-field">${st.name}</div></div>
+          <div class="ducess-compact-field"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
+          <div class="ducess-compact-field amount-field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
+        </div>
+        <div class="note compact-note">Posting cannot begin until this form is approved.</div>
       </div>
-      <div class="note">Posting cannot begin until this form is approved.</div>
     `, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       {
@@ -4042,38 +4044,17 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const st = currentStaff();
     const acc = ensureStaffAccount(st.id);
     openModal('My Balance', `
-      <div style="display:flex;flex-direction:column;gap:12px;">
-        <div style="display:flex;gap:8px;">
-          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
-            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Wallet</div>
-            <div style="font-size:15px;font-weight:700;">${money(acc.walletBalance||0)}</div>
-          </div>
-          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
-            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Debt</div>
-            <div style="font-size:15px;font-weight:700;${Number(acc.debtBalance||0)>0?'color:var(--danger)':''}">${money(acc.debtBalance||0)}</div>
-          </div>
-          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
-            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Form</div>
-            <div style="font-size:15px;font-weight:700;">${money(getOpeningBalanceForDate(st.id, businessDate()))}</div>
-          </div>
-          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
-            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Remaining</div>
-            <div style="font-size:15px;font-weight:700;">${money(currentFloatAvailable(st.id, businessDate()))}</div>
-          </div>
+      <div class="ducess-compact-modal ducess-my-balance-modal">
+        <div class="ducess-compact-kpis">
+          <div class="ducess-compact-kpi"><span>Wallet Balance</span><strong>${money(acc.walletBalance||0)}</strong></div>
+          <div class="ducess-compact-kpi"><span>Debt Balance</span><strong class="${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</strong></div>
+          <div class="ducess-compact-kpi compact-tiny"><span>Form</span><strong>${money(getOpeningBalanceForDate(st.id, businessDate()))}</strong></div>
+          <div class="ducess-compact-kpi compact-wide"><span>Remaining Balance Today</span><strong>${money(currentFloatAvailable(st.id, businessDate()))}</strong></div>
         </div>
-        <div style="display:flex;gap:8px;align-items:flex-end;">
-          <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
-            <label style="font-size:11px;font-weight:600;color:var(--muted);">Fund Amount</label>
-            <input id="walletFundAmt" type="number" class="entry-input" style="height:32px!important;min-height:32px!important;padding:0 8px!important;font-size:13px;">
-          </div>
-          <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
-            <label style="font-size:11px;font-weight:600;color:var(--muted);">Repay Debt</label>
-            <input id="walletRepayAmt" type="number" class="entry-input" style="height:32px!important;min-height:32px!important;padding:0 8px!important;font-size:13px;">
-          </div>
-          <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
-            <label style="font-size:11px;font-weight:600;color:var(--muted);">Note</label>
-            <input id="walletNote" type="text" class="entry-input" style="height:32px!important;min-height:32px!important;padding:0 8px!important;font-size:13px;">
-          </div>
+        <div class="ducess-compact-fields">
+          <div class="ducess-compact-field"><label>Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number"></div>
+          <div class="ducess-compact-field"><label>Debt Repayment Amount</label><input id="walletRepayAmt" class="entry-input my-balance-input" type="number"></div>
+          <div class="ducess-compact-field note-field"><label>Note</label><input id="walletNote" class="entry-input my-balance-input"></div>
         </div>
       </div>
     `,[
