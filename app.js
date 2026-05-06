@@ -4041,19 +4041,42 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function openMyBalanceModal() {
     const st = currentStaff();
     const acc = ensureStaffAccount(st.id);
-    openModal('My Balance', `<div class="my-balance-compact">
-      <div class="kpi-row-compact">
-        <div class="kpi-mini"><div class="kpi-mini-label">Wallet</div><div class="kpi-mini-val">${money(acc.walletBalance||0)}</div></div>
-        <div class="kpi-mini"><div class="kpi-mini-label">Debt</div><div class="kpi-mini-val ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</div></div>
-        <div class="kpi-mini"><div class="kpi-mini-label">Form</div><div class="kpi-mini-val">${money(getOpeningBalanceForDate(st.id, businessDate()))}</div></div>
-        <div class="kpi-mini"><div class="kpi-mini-label">Remaining</div><div class="kpi-mini-val">${money(currentFloatAvailable(st.id, businessDate()))}</div></div>
+    openModal('My Balance', `
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;gap:8px;">
+          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
+            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Wallet</div>
+            <div style="font-size:15px;font-weight:700;">${money(acc.walletBalance||0)}</div>
+          </div>
+          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
+            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Debt</div>
+            <div style="font-size:15px;font-weight:700;${Number(acc.debtBalance||0)>0?'color:var(--danger)':''}">${money(acc.debtBalance||0)}</div>
+          </div>
+          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
+            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Form</div>
+            <div style="font-size:15px;font-weight:700;">${money(getOpeningBalanceForDate(st.id, businessDate()))}</div>
+          </div>
+          <div style="flex:1;background:var(--accent);border-radius:8px;padding:8px 10px;text-align:center;">
+            <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Remaining</div>
+            <div style="font-size:15px;font-weight:700;">${money(currentFloatAvailable(st.id, businessDate()))}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;">
+          <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
+            <label style="font-size:11px;font-weight:600;color:var(--muted);">Fund Amount</label>
+            <input id="walletFundAmt" type="number" class="entry-input" style="height:32px!important;min-height:32px!important;padding:0 8px!important;font-size:13px;">
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
+            <label style="font-size:11px;font-weight:600;color:var(--muted);">Repay Debt</label>
+            <input id="walletRepayAmt" type="number" class="entry-input" style="height:32px!important;min-height:32px!important;padding:0 8px!important;font-size:13px;">
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
+            <label style="font-size:11px;font-weight:600;color:var(--muted);">Note</label>
+            <input id="walletNote" type="text" class="entry-input" style="height:32px!important;min-height:32px!important;padding:0 8px!important;font-size:13px;">
+          </div>
+        </div>
       </div>
-      <div class="mb-fields">
-        <div class="mb-field"><label class="mb-label">Fund Amount</label><input id="walletFundAmt" class="entry-input" type="number"></div>
-        <div class="mb-field"><label class="mb-label">Repay Debt</label><input id="walletRepayAmt" class="entry-input" type="number"></div>
-        <div class="mb-field"><label class="mb-label">Note</label><input id="walletNote" class="entry-input"></div>
-      </div>
-    </div>`,[
+    `,[
       {label:'Fund Wallet', onClick: ()=> {
         const amt = Number(byId('walletFundAmt').value||0); if(!(amt>0)) return showToast('Enter amount');
         createRequest('wallet_fund',{staffId:st.id,amount:amt,note:byId('walletNote').value.trim()}); closeModal(); render(); showToast('Wallet funding sent for approval');
