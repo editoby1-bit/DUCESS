@@ -11614,3 +11614,34 @@ body[data-theme] .modal .table th {
     font-size:12px !important;
   }
 }
+
+
+/* Surgical Staff Ledger fix: readable Details + DUCESS business-date display support */
+.modal:has(.staff-ledger-modal) {
+  width: min(880px, 96vw) !important;
+}
+
+.staff-ledger-modal .table-wrap {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  max-height: 52vh !important;
+}
+
+.staff-ledger-modal .table {
+  min-width: 980px !important;
+  table-layout: auto !important;
+}
+
+.staff-ledger-modal .table th:nth-child(6),
+.staff-ledger-modal .table td:nth-child(6) {
+  min-width: 340px !important;
+  max-width: 460px !important;
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+
+.staff-ledger-modal .table th,
+.staff-ledger-modal .table td {
+  white-space: normal !important;
+}

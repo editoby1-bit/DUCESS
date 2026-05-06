@@ -2614,7 +2614,7 @@ function staffLedgerEvents(staffId) {
     }
 
     function staffLedgerDisplayDate(row) {
-      return String(row.businessDate || row.business_date || row.floatDate || row.float_date || row.date || row.createdAt || row.created_at || businessDate()).slice(0,10);
+      return String(row.businessDate || row.business_date || row.floatDate || row.float_date || row.date || businessDate()).slice(0,10);
     }
 
     function buildRows(events) {
@@ -2668,7 +2668,7 @@ function staffLedgerEvents(staffId) {
             else { type = entryType.replace(/_/g,' ').replace(/\w/g,c=>c.toUpperCase()); }
             if (['form','credit','debit'].includes(runningType)) running += delta || (runningType === 'form' ? amount : -amount);
             return {
-              date: String(row.business_date || row.float_date || row.created_at || '').slice(0,10),
+              date: String(row.business_date || row.float_date || '').slice(0,10),
               businessDate: row.business_date || row.float_date || null,
               floatDate: row.float_date || null,
               createdAt: row.created_at || null,
