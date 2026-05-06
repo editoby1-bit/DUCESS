@@ -4049,9 +4049,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <div class="kpi-mini"><div class="kpi-mini-label">Remaining</div><div class="kpi-mini-val">${money(currentFloatAvailable(st.id, businessDate()))}</div></div>
       </div>
       <div class="mb-fields">
-        <div class="mb-field"><label class="mb-label">Fund Amount</label><input id="walletFundAmt" class="entry-input" type="number" style="width:100%"></div>
-        <div class="mb-field"><label class="mb-label">Repay Debt</label><input id="walletRepayAmt" class="entry-input" type="number" style="width:100%"></div>
-        <div class="mb-field"><label class="mb-label">Note</label><input id="walletNote" class="entry-input" style="width:100%"></div>
+        <div class="mb-field"><label class="mb-label">Fund Amount</label><input id="walletFundAmt" class="entry-input" type="number"></div>
+        <div class="mb-field"><label class="mb-label">Repay Debt</label><input id="walletRepayAmt" class="entry-input" type="number"></div>
+        <div class="mb-field"><label class="mb-label">Note</label><input id="walletNote" class="entry-input"></div>
       </div>
     </div>`,[
       {label:'Fund Wallet', onClick: ()=> {
