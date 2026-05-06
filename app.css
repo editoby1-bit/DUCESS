@@ -11506,3 +11506,123 @@ body .modal .table th,
 body[data-theme] .modal .table th {
   font-size: 9px !important;
 }
+
+
+/* MICRO POLISH — ONLY FORM + MY BALANCE MODALS */
+.modal:has(.wallet-balance),
+.modal:has(.form-declaration),
+.modal:has(.form-modal),
+.modal:has(.my-balance-modal),
+body .modal:has(.wallet-balance),
+body .modal:has(.form-declaration) {
+  width: min(620px, 92vw) !important;
+  border-radius: 14px !important;
+}
+
+.modal:has(.wallet-balance) .modal-head,
+.modal:has(.form-declaration) .modal-head,
+.modal:has(.form-modal) .modal-head,
+.modal:has(.my-balance-modal) .modal-head {
+  padding: 7px 10px !important;
+}
+
+.modal:has(.wallet-balance) .modal-body,
+.modal:has(.form-declaration) .modal-body,
+.modal:has(.form-modal) .modal-body,
+.modal:has(.my-balance-modal) .modal-body {
+  padding: 8px 10px !important;
+}
+
+.modal:has(.wallet-balance) h3,
+.modal:has(.form-declaration) h3,
+.modal:has(.form-modal) h3,
+.modal:has(.my-balance-modal) h3 {
+  font-size: 13px !important;
+  line-height: 1.05 !important;
+}
+
+.modal:has(.wallet-balance) .kpi,
+.modal:has(.form-declaration) .kpi,
+.modal:has(.form-modal) .kpi,
+.modal:has(.my-balance-modal) .kpi {
+  padding: 4px 7px !important;
+  border-radius: 10px !important;
+  min-width: 62px !important;
+}
+
+.modal:has(.wallet-balance) .kpi .label,
+.modal:has(.form-declaration) .kpi .label,
+.modal:has(.form-modal) .kpi .label,
+.modal:has(.my-balance-modal) .kpi .label {
+  font-size: 7px !important;
+  line-height: 1 !important;
+}
+
+.modal:has(.wallet-balance) .kpi .number,
+.modal:has(.form-declaration) .kpi .number,
+.modal:has(.form-modal) .kpi .number,
+.modal:has(.my-balance-modal) .kpi .number {
+  font-size: 11px !important;
+  margin-top: 2px !important;
+}
+
+.modal:has(.wallet-balance) label,
+.modal:has(.form-declaration) label,
+.modal:has(.form-modal) label,
+.modal:has(.my-balance-modal) label {
+  font-size: 9px !important;
+  margin-bottom: 2px !important;
+}
+
+.modal:has(.wallet-balance) input,
+.modal:has(.wallet-balance) textarea,
+.modal:has(.form-declaration) input,
+.modal:has(.form-declaration) textarea,
+.modal:has(.form-modal) input,
+.modal:has(.form-modal) textarea,
+.modal:has(.my-balance-modal) input,
+.modal:has(.my-balance-modal) textarea {
+  height: 22px !important;
+  min-height: 22px !important;
+  font-size: 10px !important;
+  border-radius: 9px !important;
+  padding: 2px 7px !important;
+}
+
+.modal:has(.wallet-balance) textarea,
+.modal:has(.form-declaration) textarea,
+.modal:has(.form-modal) textarea,
+.modal:has(.my-balance-modal) textarea {
+  min-height: 30px !important;
+}
+
+.modal:has(.wallet-balance) button,
+.modal:has(.form-declaration) button,
+.modal:has(.form-modal) button,
+.modal:has(.my-balance-modal) button {
+  min-height: 22px !important;
+  padding: 3px 9px !important;
+  font-size: 10px !important;
+  border-radius: 9px !important;
+}
+
+.modal:has(.wallet-balance) .icon-btn,
+.modal:has(.form-declaration) .icon-btn,
+.modal:has(.form-modal) .icon-btn,
+.modal:has(.my-balance-modal) .icon-btn {
+  width: 24px !important;
+  height: 24px !important;
+  min-height: 24px !important;
+}
+
+.modal:has(.wallet-balance) .stack,
+.modal:has(.form-declaration) .stack,
+.modal:has(.form-modal) .stack,
+.modal:has(.my-balance-modal) .stack,
+.modal:has(.wallet-balance) .form-grid,
+.modal:has(.form-declaration) .form-grid,
+.modal:has(.form-modal) .form-grid,
+.modal:has(.my-balance-modal) .form-grid {
+  gap: 4px !important;
+}
+
