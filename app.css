@@ -6182,7 +6182,7 @@ body{background:#f4f7fa;}
 .module-card.active .module-title{color:var(--brand);}
 .module-card.disabled{opacity:.5;}
 .module-card .module-icon{width:22px;height:22px;border-radius:7px;font-size:13px;background:#edf4fb;flex:0 0 auto;}
-.module-card .module-title{margin:0 !important;font-size:12px !important;font-weight:700;white-space:nowrap;}
+.module-card .module-title{margin:0 !important;font-size:10px !important;font-weight:700;white-space:nowrap;}
 .module-card .module-desc{display:none !important;}
 .module-card[data-module-key="customer_service"]{left:17%;top:18%;}
 .module-card[data-module-key="tellering"]{left:67%;top:18%;}
@@ -6248,7 +6248,7 @@ body{background:#f4f7fa;}
 /* ===== April 2026 follow-up polish patch ===== */
 .dashboard-title{
   display:block !important;
-  font-size:20px !important;
+  font-size:13px !important;
   font-weight:800;
   letter-spacing:.16em;
   color:var(--text);
@@ -11194,8 +11194,8 @@ body #btnAudit{
 
 /* ===== STAFF IDENTITY (replaces dropdown) ===== */
 .staff-identity { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
-.staff-name-display { font-size: 13px; font-weight: 700; color: var(--text); }
-.staff-role-display { font-size: 11px; color: var(--muted); }
+.staff-name-display { font-size: 11px; font-weight: 700; color: var(--text); }
+.staff-role-display { font-size: 9px; color: var(--muted); }
 .logout-link {
   background: none; border: none; padding: 4px 6px;
   font-size: 11px; color: var(--muted); cursor: pointer;
