@@ -11626,3 +11626,30 @@ body .modal:has(.form-declaration) {
   gap: 4px !important;
 }
 
+
+/* ===== MY BALANCE MODAL COMPACT ===== */
+.my-balance-compact { display: flex; flex-direction: column; gap: 14px; }
+.kpi-row-compact { display: flex; gap: 8px; flex-wrap: wrap; }
+.kpi-mini {
+  flex: 1; min-width: 90px;
+  background: var(--accent); border-radius: 8px;
+  padding: 8px 10px; text-align: center;
+}
+.kpi-mini-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.kpi-mini-val { font-size: 15px; font-weight: 700; color: var(--text); }
+.mb-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.mb-field { display: flex; flex-direction: column; gap: 4px; }
+.mb-label { font-size: 11px; font-weight: 600; color: var(--muted); }
+
+/* ===== FORM MODAL COMPACT ===== */
+.compact-modal-grid { gap: 10px !important; }
+.compact-date-display { font-size: 13px !important; padding: 6px 8px !important; }
+.field-date-compact .display-field { font-size: 13px; }
+
+/* Constrain modal width for small modals */
+#modalBack .modal:has(.my-balance-compact),
+#modalBack .modal:has(.compact-modal-grid) {
+  max-width: 480px !important;
+  width: fit-content !important;
+  min-width: 360px !important;
+}

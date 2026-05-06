@@ -4041,21 +4041,19 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function openMyBalanceModal() {
     const st = currentStaff();
     const acc = ensureStaffAccount(st.id);
-    openModal('My Balance', `<div class="modal-sheet my-balance-sheet"><div class="modal-sheet my-balance-sheet">
-      <div class="stack my-balance-modal">
-        <div class="kpi-row">
-          <div class="kpi"><div class="label">Wallet Balance</div><div class="number">${money(acc.walletBalance||0)}</div></div>
-          <div class="kpi"><div class="label">Debt Balance</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</div></div>
-          <div class="kpi"><div class="label">Form</div><div class="number">${money(getOpeningBalanceForDate(st.id, businessDate()))}</div></div>
-          <div class="kpi"><div class="label">Remaining Balance Today</div><div class="number">${money(currentFloatAvailable(st.id, businessDate()))}</div></div>
-        </div>
-        <div class="form-grid three">
-          <div class="field"><label>Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number"></div>
-          <div class="field"><label>Debt Repayment Amount</label><input id="walletRepayAmt" class="entry-input my-balance-input" type="number"></div>
-          <div class="field"><label>Note</label><input id="walletNote" class="entry-input my-balance-input"></div>
-        </div>
+    openModal('My Balance', `<div class="my-balance-compact">
+      <div class="kpi-row-compact">
+        <div class="kpi-mini"><div class="kpi-mini-label">Wallet</div><div class="kpi-mini-val">${money(acc.walletBalance||0)}</div></div>
+        <div class="kpi-mini"><div class="kpi-mini-label">Debt</div><div class="kpi-mini-val ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</div></div>
+        <div class="kpi-mini"><div class="kpi-mini-label">Form</div><div class="kpi-mini-val">${money(getOpeningBalanceForDate(st.id, businessDate()))}</div></div>
+        <div class="kpi-mini"><div class="kpi-mini-label">Remaining</div><div class="kpi-mini-val">${money(currentFloatAvailable(st.id, businessDate()))}</div></div>
       </div>
-    `,[
+      <div class="mb-fields">
+        <div class="mb-field"><label class="mb-label">Fund Amount</label><input id="walletFundAmt" class="entry-input" type="number" style="width:100%"></div>
+        <div class="mb-field"><label class="mb-label">Repay Debt</label><input id="walletRepayAmt" class="entry-input" type="number" style="width:100%"></div>
+        <div class="mb-field"><label class="mb-label">Note</label><input id="walletNote" class="entry-input" style="width:100%"></div>
+      </div>
+    </div>`,[
       {label:'Fund Wallet', onClick: ()=> {
         const amt = Number(byId('walletFundAmt').value||0); if(!(amt>0)) return showToast('Enter amount');
         createRequest('wallet_fund',{staffId:st.id,amount:amt,note:byId('walletNote').value.trim()}); closeModal(); render(); showToast('Wallet funding sent for approval');
