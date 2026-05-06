@@ -3607,14 +3607,12 @@ function renderTellerBalances() {
     if (!requiresFloat) return showToast('Current staff does not need posting form');
 
     openModal('Form', `
-      <div class="ducess-compact-modal ducess-form-modal">
-        <div class="ducess-compact-fields">
-          <div class="ducess-compact-field"><label>Staff</label><div class="display-field">${st.name}</div></div>
-          <div class="ducess-compact-field"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
-          <div class="ducess-compact-field amount-field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
-        </div>
-        <div class="note compact-note">Posting cannot begin until this form is approved.</div>
+      <div class="form-grid three compact-modal-grid">
+        <div class="field"><label>Staff</label><div class="display-field">${st.name}</div></div>
+        <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
+        <div class="field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
       </div>
+      <div class="note">Posting cannot begin until this form is approved.</div>
     `, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       {
@@ -4043,18 +4041,18 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function openMyBalanceModal() {
     const st = currentStaff();
     const acc = ensureStaffAccount(st.id);
-    openModal('My Balance', `
-      <div class="ducess-compact-modal ducess-my-balance-modal">
-        <div class="ducess-compact-kpis">
-          <div class="ducess-compact-kpi"><span>Wallet Balance</span><strong>${money(acc.walletBalance||0)}</strong></div>
-          <div class="ducess-compact-kpi"><span>Debt Balance</span><strong class="${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</strong></div>
-          <div class="ducess-compact-kpi compact-tiny"><span>Form</span><strong>${money(getOpeningBalanceForDate(st.id, businessDate()))}</strong></div>
-          <div class="ducess-compact-kpi compact-wide"><span>Remaining Balance Today</span><strong>${money(currentFloatAvailable(st.id, businessDate()))}</strong></div>
+    openModal('My Balance', `<div class="modal-sheet my-balance-sheet"><div class="modal-sheet my-balance-sheet">
+      <div class="stack my-balance-modal">
+        <div class="kpi-row">
+          <div class="kpi"><div class="label">Wallet Balance</div><div class="number">${money(acc.walletBalance||0)}</div></div>
+          <div class="kpi"><div class="label">Debt Balance</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</div></div>
+          <div class="kpi"><div class="label">Form</div><div class="number">${money(getOpeningBalanceForDate(st.id, businessDate()))}</div></div>
+          <div class="kpi"><div class="label">Remaining Balance Today</div><div class="number">${money(currentFloatAvailable(st.id, businessDate()))}</div></div>
         </div>
-        <div class="ducess-compact-fields">
-          <div class="ducess-compact-field"><label>Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number"></div>
-          <div class="ducess-compact-field"><label>Debt Repayment Amount</label><input id="walletRepayAmt" class="entry-input my-balance-input" type="number"></div>
-          <div class="ducess-compact-field note-field"><label>Note</label><input id="walletNote" class="entry-input my-balance-input"></div>
+        <div class="form-grid three">
+          <div class="field"><label>Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number"></div>
+          <div class="field"><label>Debt Repayment Amount</label><input id="walletRepayAmt" class="entry-input my-balance-input" type="number"></div>
+          <div class="field"><label>Note</label><input id="walletNote" class="entry-input my-balance-input"></div>
         </div>
       </div>
     `,[
