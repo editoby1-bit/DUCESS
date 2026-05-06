@@ -2604,8 +2604,24 @@ function staffLedgerEvents(staffId) {
     const staffRole = ROLE_LABELS[staff.role] || staff.role || '';
 
     // Show modal immediately with local data, then upgrade with Supabase data
+    function cleanStaffLedgerDetails(value) {
+      return String(value || '—')
+        .replace(/\s+posted from approval\s+[0-9a-f-]{12,}/ig, '')
+        .replace(/\s+from approval\s+[0-9a-f-]{12,}/ig, '')
+        .replace(/approval\s+[0-9a-f-]{12,}/ig, 'approval')
+        .replace(/\s{2,}/g, ' ')
+        .trim() || '—';
+    }
+
+    function staffLedgerDisplayDate(row) {
+      return String(row.businessDate || row.business_date || row.floatDate || row.float_date || row.date || row.createdAt || row.created_at || businessDate()).slice(0,10);
+    }
+
     function buildRows(events) {
-      return events.map((row, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${row.date}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(row.details || '—')}</td></tr>`).join('');
+      return events.map((row, i) => {
+        const displayDate = staffLedgerDisplayDate(row);
+        return `<tr><td>${i+1}</td><td>${fmtDate(`${displayDate}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(cleanStaffLedgerDetails(row.details || row.note || '—'))}</td></tr>`;
+      }).join('');
     }
 
     function buildModal(rows, loading) {
@@ -2651,8 +2667,17 @@ function staffLedgerEvents(staffId) {
             else if (['wallet_fund','wallet_funding'].includes(entryType)) { type = 'Wallet'; }
             else { type = entryType.replace(/_/g,' ').replace(/\w/g,c=>c.toUpperCase()); }
             if (['form','credit','debit'].includes(runningType)) running += delta || (runningType === 'form' ? amount : -amount);
-            return { date: String(row.float_date || row.created_at || '').slice(0,10), type, amount, runningBalance: running, details: row.note || '—' };
-          }).sort((a,b)=> new Date(`${b.date}T12:00:00Z`) - new Date(`${a.date}T12:00:00Z`));
+            return {
+              date: String(row.business_date || row.float_date || row.created_at || '').slice(0,10),
+              businessDate: row.business_date || row.float_date || null,
+              floatDate: row.float_date || null,
+              createdAt: row.created_at || null,
+              type,
+              amount,
+              runningBalance: running,
+              details: row.note || '—'
+            };
+          }).sort((a,b)=> new Date(`${staffLedgerDisplayDate(b)}T12:00:00Z`) - new Date(`${staffLedgerDisplayDate(a)}T12:00:00Z`));
 
           // Update modal content
           const modalBody = document.querySelector('.modal-body, .modal .stack')?.closest('.modal-body') || document.querySelector('.modal-body');
