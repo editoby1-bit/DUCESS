@@ -2668,22 +2668,96 @@ function staffLedgerEvents(staffId) {
     }
   }
 
-function renderTellerBalances() {
+function normalizeStaffLedgerEntryType(row) {
+    return String(row?.entry_type || row?.type || row?.entryType || '').toLowerCase();
+  }
+
+  function summarizeStaffLedgerRows(rows = []) {
+    const sorted = [...rows].sort((a,b)=>new Date(a.created_at || a.createdAt || a.float_date || a.floatDate || a.date || 0) - new Date(b.created_at || b.createdAt || b.float_date || b.floatDate || b.date || 0));
+    let balance = 0;
+    let totalCreditReceived = 0;
+    let totalDebitsPaid = 0;
+    sorted.forEach(row => {
+      const type = normalizeStaffLedgerEntryType(row);
+      const amount = Number(row.amount || 0);
+      const delta = Number(row.delta || 0);
+      if (Number.isFinite(delta) && delta !== 0) balance += delta;
+      else if (['approved_form','approved_float','approved_float_topup','wallet_fund','wallet_funding'].includes(type)) balance += amount;
+      else if (['customer_credit','customer_credit_journal','credit'].includes(type)) balance -= amount;
+      else if (['customer_debit','customer_debit_journal','debit'].includes(type)) balance -= amount;
+      if (['customer_credit','customer_credit_journal','credit'].includes(type)) totalCreditReceived += amount;
+      if (['customer_debit','customer_debit_journal','debit'].includes(type)) totalDebitsPaid += amount;
+    });
+    const debtBalance = balance < 0 ? balance : 0;
+    return { balance, debtBalance, totalCreditReceived, totalDebitsPaid };
+  }
+
+  function localTellerBalanceSummary(staffId) {
+    const acc = ensureStaffAccount(staffId);
+    const rows = (acc.entries || []).map(e => ({
+      type: e.type,
+      entry_type: e.type,
+      amount: e.amount,
+      delta: e.delta,
+      date: e.date || e.floatDate || e.formDate || e.createdAt
+    }));
+    const summary = summarizeStaffLedgerRows(rows);
+    return {
+      balance: Number(acc.balance || summary.balance || 0),
+      debtBalance: Number(acc.balance || 0) < 0 ? Number(acc.balance || 0) : Number(acc.debtBalance || 0) > 0 ? -Number(acc.debtBalance || 0) : summary.debtBalance,
+      totalCreditReceived: summary.totalCreditReceived,
+      totalDebitsPaid: summary.totalDebitsPaid
+    };
+  }
+
+  function getTellerBalanceSummary(staffId) {
+    state.ui ||= {};
+    state.ui.tellerLedgerSummaries ||= {};
+    return state.ui.tellerLedgerSummaries[staffId] || localTellerBalanceSummary(staffId);
+  }
+
+  async function refreshTellerBalanceLedgerSummaries() {
+    if (!isSupabaseApprovalMode() || !gateway.staff?.listStaffLedger) return;
+    state.ui ||= {};
+    if (state.ui.tellerLedgerLoading) return;
+    state.ui.tellerLedgerLoading = true;
+    try {
+      state.ui.tellerLedgerSummaries ||= {};
+      const visibleStaff = state.staff.slice(0, state.ui.tellerEntriesLimit || 20);
+      let changed = false;
+      for (const s of visibleStaff) {
+        const supabaseStaffId = s.uuid || s.auth_user_id || s.authUserId || s.id;
+        const result = await gateway.staff.listStaffLedger(supabaseStaffId);
+        if (result?.ok && Array.isArray(result.data)) {
+          state.ui.tellerLedgerSummaries[s.id] = summarizeStaffLedgerRows(result.data);
+          changed = true;
+        }
+      }
+      if (changed) {
+        save();
+        if (state.ui.tool === 'teller_balances') renderWorkspace();
+      }
+    } catch (err) {
+      console.warn('[DUCESS] Teller balance ledger summary refresh failed:', err);
+    } finally {
+      state.ui.tellerLedgerLoading = false;
+    }
+  }
+
+  function renderTellerBalances() {
     const rows = state.staff.slice(0, state.ui.tellerEntriesLimit || 20).map(s=>{
       const acc = ensureStaffAccount(s.id);
-      const debtBalance = Number(acc.balance || 0) < 0 ? Number(acc.balance || 0) : Number(acc.debtBalance || 0) > 0 ? -Number(acc.debtBalance || 0) : 0;
-      const totalCreditReceived = acc.entries
-        .filter(e => ['customer_credit','credit','approved_float','approved_float_topup','approved_form'].includes(String(e.type || '').toLowerCase()))
-        .reduce((sum,e)=>sum+Number(e.amount||0),0);
-      const totalDebitsPaid = acc.entries
-        .filter(e => ['customer_debit','debit'].includes(String(e.type || '').toLowerCase()))
-        .reduce((sum,e)=>sum+Number(e.amount||0),0);
-      return `<tr><td>${s.name}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${acc.accountNumber}</td><td>${money(acc.balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
+      const summary = getTellerBalanceSummary(s.id);
+      const debtBalance = Number(summary.debtBalance || 0);
+      const totalCreditReceived = Number(summary.totalCreditReceived || 0);
+      const totalDebitsPaid = Number(summary.totalDebitsPaid || 0);
+      const balance = Number(summary.balance ?? acc.balance ?? 0);
+      return `<tr><td>${s.name}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${acc.accountNumber}</td><td>${money(balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
     }).join('');
     return `<div class="table-card"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Teller and Posting Accounts</h3><div class="note" style="margin:0">Business Date: <strong>${businessDate()}</strong></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Account Number</th><th>Balance</th><th>Debt Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Ledger</th></tr></thead><tbody>${rows}</tbody></table></div><div class="action-row">${state.staff.length > (state.ui.tellerEntriesLimit || 20) ? `<button id="tellerMore" class="secondary">Show More</button>` : ''}${(state.ui.tellerEntriesLimit || 20) > 20 ? `<button id="tellerLess" class="secondary">Show Less</button>` : ''}</div></div>`;
   }
 
-  function allApprovedCustomerTx(kind) {
+  function allApprovedCustomerTx  function allApprovedCustomerTx(kind) {
     return flattenCustomerTx().filter(t => t.type === kind);
   }
   function flattenCustomerTx() {
@@ -2731,6 +2805,7 @@ function renderTellerBalances() {
     if (tellerLess) tellerLess.onclick = () => { state.ui.tellerEntriesLimit = Math.max(20, (state.ui.tellerEntriesLimit || 20) - 20); save(); renderWorkspace(); };
     qq('[data-assign-topup]').forEach(btn => btn.onclick = () => openFloatTopUpModal(btn.dataset.assignTopup));
     qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
+    refreshTellerBalanceLedgerSummaries();
   }
 
   function openFloatTopUpModal(staffId=null) {
