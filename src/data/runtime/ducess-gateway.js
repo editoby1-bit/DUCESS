@@ -674,6 +674,7 @@ async function submitDebtRepayment(_payload) {
       approvals: {
         listApprovalRequests: () => notYet('approvals.listApprovalRequests'),
         getApprovalRequestById: () => notYet('approvals.getApprovalRequestById'),
+        setReviewLock: () => notYet('approvals.setReviewLock'),
         submitApprovalRequest: () => notYet('approvals.submitApprovalRequest'),
         approveRequest: () => notYet('approvals.approveRequest'),
         rejectRequest: () => notYet('approvals.rejectRequest'),
@@ -1262,6 +1263,44 @@ if (inserted.error) {
       if (!canUseSupabase()) return local.approvals.getApprovalRequestById(requestId);
       const { data, error: queryError } = await client.from(approvalRequestsTable).select(approvalRequestsSelect).eq('id', requestId).maybeSingle();
       if (queryError) return defaultResult.err('APPROVAL_FETCH_FAILED', 'Could not load approval request from Supabase.', queryError);
+      return defaultResult.ok(normalizeApprovalRecord(data));
+    }
+
+    async function setReviewLock(payload = {}) {
+      if (!canUseSupabase()) return local.approvals.setReviewLock(payload);
+      const requestId = payload.requestId || payload.request_id || '';
+      if (!requestId) return defaultResult.err('APPROVAL_LOCK_INVALID', 'Approval request id is required.');
+      const staffId = payload.staffId || payload.staff_id || '';
+      const staffName = payload.staffName || payload.staff_name || 'Staff';
+      const ttlMs = Number(payload.ttlMs || 60000);
+      const nowIso = new Date().toISOString();
+      const nowMs = Date.now();
+      const rowResult = await fetchApprovalRequestRow(requestId, 'pending');
+      if (!rowResult.ok) return rowResult;
+      const row = rowResult.data;
+      const currentPayload = row.payload && typeof row.payload === 'object' ? clone(row.payload) : {};
+      const currentLock = currentPayload.__reviewLock || null;
+      const lockStarted = currentLock?.startedAt ? new Date(currentLock.startedAt).getTime() : 0;
+      const expired = !lockStarted || (nowMs - lockStarted) > ttlMs;
+      if (currentLock?.staffId && currentLock.staffId !== staffId && !expired) {
+        return defaultResult.err('APPROVAL_LOCKED', `${currentLock.staffName || 'Another staff'} is reviewing this request.`, currentLock);
+      }
+      const nextPayload = mergeApprovalPayload(currentPayload, {
+        __reviewLock: {
+          staffId,
+          staffName,
+          startedAt: nowIso,
+          expiresAt: new Date(nowMs + ttlMs).toISOString()
+        }
+      });
+      const { data, error: updateError } = await client
+        .from(approvalRequestsTable)
+        .update({ payload: nextPayload })
+        .eq('id', requestId)
+        .eq('status', 'pending')
+        .select(approvalRequestsSelect)
+        .maybeSingle();
+      if (updateError) return defaultResult.err('APPROVAL_LOCK_FAILED', 'Could not mark this request as being reviewed.', updateError);
       return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
@@ -2282,6 +2321,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       approvals: {
         listApprovalRequests,
         getApprovalRequestById,
+        setReviewLock,
         submitApprovalRequest,
         approveRequest,
         rejectRequest,
