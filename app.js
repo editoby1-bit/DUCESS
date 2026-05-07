@@ -3456,7 +3456,10 @@ function normalizeStaffLedgerEntryType(row) {
 
     if (byId('txApplyCharges')) byId('txApplyCharges').onchange = updateSingleCommissionPreview;
     if (byId('txAmount')) {
-      byId('txAmount').onfocus = () => restoreSingleCustomerDisplay();
+      // Surgical fix: do not run account restore on amount focus.
+      // The delayed account search/save can fire after the user clicks Amount,
+      // causing the amount input to lose focus before typing starts.
+      byId('txAmount').onfocus = null;
       byId('txAmount').oninput = debounce(updateSingleCommissionPreview, 150);
     }
     CHARGE_DEFS.forEach(def => {
@@ -4126,8 +4129,8 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   function freezeInactiveCustomer(c){ if(!c) return; if(c.active === false) c.frozen = true; }
 
   function openCustomerSearchModal(list) {
-    const renderRows = arr => arr.map(c=>`<tr><td>${escapeHtml(c.accountNumber || '')}</td><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.phone || '')}</td><td><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th>Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    const renderRows = arr => arr.map(c=>`<tr><td>${escapeHtml(c.accountNumber || '')}</td><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
+    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const bindPicks = () => qq('[data-pick]').forEach(el => el.onclick = () => { state.ui.selectedCustomerId = el.dataset.pick; save(); closeModal(); applySelectedCustomerToActiveTool(); });
     bindPicks();
     const search = byId('modalCustomerSearch');

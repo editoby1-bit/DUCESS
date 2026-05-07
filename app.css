@@ -11696,3 +11696,31 @@ input.approval-select-checkbox,
   font-size:11px !important;
   line-height:1 !important;
 }
+
+
+/* Surgical follow-up 2: force Customer Search Select column visible without affecting other tables. */
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table{
+  width:100% !important;
+  table-layout:auto !important;
+}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-action-head,
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-action-cell{
+  display:table-cell !important;
+  width:68px !important;
+  min-width:68px !important;
+  max-width:78px !important;
+  text-align:center !important;
+  white-space:nowrap !important;
+  visibility:visible !important;
+}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-pick-btn{
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  min-width:46px !important;
+  height:22px !important;
+  min-height:22px !important;
+  padding:2px 7px !important;
+  font-size:11px !important;
+  line-height:1 !important;
+}
