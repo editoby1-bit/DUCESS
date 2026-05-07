@@ -3292,11 +3292,8 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.generatedJournals[visibilityKey] = false;
       state.ui.collapsedJournals[visibilityKey] = false;
       save();
-      renderWorkspace();
-      requestAnimationFrame(() => {
-        if (byId('txName')) byId('txName').textContent = c.name;
-        if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
-      });
+      if (byId('txName')) byId('txName').textContent = c.name;
+      if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
     };
 
     const searchJournal = () => {
@@ -3323,7 +3320,6 @@ function normalizeStaffLedgerEntryType(row) {
           state.ui.generatedJournals[visibilityKey] = false;
           state.ui.collapsedJournals[visibilityKey] = false;
           save();
-          renderWorkspace();
           return;
         }
         if (/^\d{4}$/.test(v)) searchSingle();
@@ -3340,7 +3336,6 @@ function normalizeStaffLedgerEntryType(row) {
           state.ui.generatedJournals[visibilityKey] = false;
           state.ui.collapsedJournals[visibilityKey] = false;
           save();
-          renderWorkspace();
           return;
         }
         searchSingle();
