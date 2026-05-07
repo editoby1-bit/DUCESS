@@ -1119,7 +1119,14 @@ if (approvalRecord.type === 'float_topup') {
       });
     }
     if (!result?.ok) return result;
-    await syncApprovalsFromGateway();
+    if (result.data) {
+      const exists = (state.approvals || []).some(item => item.id === result.data.id);
+      if (!exists) state.approvals.unshift(result.data);
+      save();
+    }
+    // Do not block the teller on a full approvals refresh after submit.
+    // The request has already been inserted by Supabase; refresh the queue quietly in the background.
+    syncApprovalsFromGateway().catch(error => console.warn('Background approvals refresh failed after submit', error));
     pushAudit('request_created', `${type} by ${staff?.name || 'System'}</div>`);
     return result;
   }
@@ -3436,12 +3443,6 @@ function normalizeStaffLedgerEntryType(row) {
 
     const searchJournal = (opts = {}) => {
       const activeBefore = document.activeElement;
-      const amountBefore = byId('journalAmount')?.value || telleringDraft.journalAmount || '';
-      const chargeValuesBefore = {};
-      CHARGE_DEFS.forEach(def => {
-        const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
-        chargeValuesBefore[def.key] = input?.value ?? telleringDraft.journalCharges.values[def.key] ?? '';
-      });
       const value = (byId('journalAcc')?.value || '').trim();
       const c = getCustomerByAccountNo(value);
       if (!c) { if (!opts.quiet) showToast('Customer not found'); return null; }
@@ -3449,13 +3450,8 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.selectedJournalCustomerId = c.id;
       save();
       if (byId('journalName')) byId('journalName').textContent = c.name;
-      if (byId('journalAmount')) byId('journalAmount').value = amountBefore;
-      telleringDraft.journalAmount = amountBefore;
-      CHARGE_DEFS.forEach(def => {
-        const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
-        if (input) input.value = chargeValuesBefore[def.key] || '';
-        telleringDraft.journalCharges.values[def.key] = chargeValuesBefore[def.key] || '';
-      });
+      // Important: journal lookup must never rewrite amount or charge inputs.
+      // Those fields are actively edited after account lookup and rewriting them causes the first typed value to disappear.
       if (activeBefore && activeBefore.id && byId(activeBefore.id)) {
         requestAnimationFrame(() => byId(activeBefore.id)?.focus({ preventScroll: true }));
       }
@@ -3572,9 +3568,12 @@ function normalizeStaffLedgerEntryType(row) {
         // Run journal lookup immediately, not delayed, so it cannot fire after the user starts typing Amount/Charges.
         if (/^\d{4}$/.test(v)) searchJournal({ quiet: true });
       };
-      byId('journalAcc').onchange = () => {
+      byId('journalAcc').onchange = (event) => {
         const v = (byId('journalAcc').value || '').trim();
         if (!v) { clearJournalCustomer(); return; }
+        const nextId = event?.relatedTarget?.id || '';
+        const nextScope = event?.relatedTarget?.dataset?.chargeScope || '';
+        if (nextId === 'journalAmount' || nextId === 'journalCounterparty' || nextId === 'journalDetails' || nextScope === 'journal') return;
         searchJournal();
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
