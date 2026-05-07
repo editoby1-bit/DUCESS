@@ -1614,6 +1614,7 @@ function hideProcessing() {
         state.ui.tool = nextTool;
         if (nextTool === 'credit' || nextTool === 'debit') {
           state.ui.txAccDraft = '';
+          state.ui.txAmountDraft = '';
           state.ui.selectedCustomerId = null;
           state.ui.selectedJournalCustomerId = null;
           state.ui.generatedJournals ||= {};
@@ -1846,7 +1847,7 @@ function hideProcessing() {
 
             <div class="posting-row posting-row-amount">
               <label class="sheet-label amount-primary-label" for="txAmount">Amount</label>
-              <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" />
+              <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}" />
               <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
               ${journalVisible ? '' : `<button id="txJournalAdd" class="sheet-btn secondary tiny-btn ultra-compact-btn">Generate Journal</button>`}
             </div>
@@ -3323,6 +3324,7 @@ function normalizeStaffLedgerEntryType(row) {
     const resetFields = () => {
       ['txAcc','txAmount','txDetails','txCounterparty'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
       state.ui.txAccDraft = '';
+      state.ui.txAmountDraft = '';
       if (byId('txApplyCharges')) byId('txApplyCharges').checked = false;
       CHARGE_DEFS.forEach(def => {
         const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
@@ -3463,9 +3465,13 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('txAmount')) {
       const amountInput = byId('txAmount');
       amountInput.onfocus = null;
-      amountInput.onmousedown = () => { requestAnimationFrame(() => amountInput.focus({ preventScroll: true })); };
-      amountInput.ontouchstart = () => { requestAnimationFrame(() => amountInput.focus({ preventScroll: true })); };
-      amountInput.oninput = debounce(updateSingleCommissionPreview, 150);
+      amountInput.onmousedown = null;
+      amountInput.ontouchstart = null;
+      amountInput.oninput = () => {
+        state.ui.txAmountDraft = amountInput.value || '';
+        updateSingleCommissionPreview();
+      };
+      amountInput.onchange = () => { state.ui.txAmountDraft = amountInput.value || ''; };
     }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
