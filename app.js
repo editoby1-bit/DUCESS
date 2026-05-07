@@ -3704,10 +3704,10 @@ function normalizeStaffLedgerEntryType(row) {
       });
       save();
       recalcPreview();
-      restoreJournalEntrySnapshot(journalEntrySnapshot);
-      requestAnimationFrame(() => restoreJournalEntrySnapshot(journalEntrySnapshot));
-      // Root fix: Add to Journal must only add a row and refresh the journal table.
-      // It must not clear or rewrite the active journal entry controls.
+      // Clear fields after adding to journal so staff can enter next entry cleanly
+      resetJournalEntryFields();
+      state.ui.selectedJournalCustomerId = null;
+      if (byId('journalName')) byId('journalName').textContent = '—';
     };
 
     const fieldNoteInput = byId('journalFieldNoteInput');

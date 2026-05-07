@@ -4663,21 +4663,22 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 
 .tx-mode-toggle {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
-  min-height: 47px;
+  min-height: auto;
   align-items: center;
 }
 
 .tx-toggle-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 5px;
+  padding: 4px 8px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 6px;
   background: var(--soft);
   font-weight: 600;
+  font-size: 11px;
 }
 
 .tx-toggle-pill input {
@@ -10574,16 +10575,16 @@ body.home-lock-scroll .shell{
 .commission-toggle-chip{
   display:inline-flex;
   align-items:center;
-  gap:6px;
-  font-size:12px;
+  gap:4px;
+  font-size:10px;
   color:#475569;
 }
 .subtle-commission-row{
   display:flex;
-  gap:12px;
+  gap:6px;
   align-items:flex-end;
   flex-wrap:wrap;
-  padding-top:4px;
+  padding-top:2px;
 }
 .commission-mini-field{
   display:flex;
@@ -10595,8 +10596,9 @@ body.home-lock-scroll .shell{
   min-width:92px;
 }
 .commission-display{
-  min-width:120px;
-  padding:8px 10px;
+  min-width:90px;
+  padding:4px 7px;
+  font-size:11px;
 }
 .commission-journal-row{
   align-items:flex-end;
@@ -11769,3 +11771,14 @@ input.approval-select-checkbox,
   text-align:center !important;
 }
 #txAmount{pointer-events:auto !important; user-select:text !important;}
+
+/* Posting area compact overrides */
+.tx-mode-toggle { min-height: auto !important; }
+.tx-toggle-pill { padding: 3px 7px !important; font-size: 10px !important; border-radius: 5px !important; }
+.journal-cell-label { font-size: 9px !important; margin-top: 2px !important; }
+.posting-label-account, .posting-label-name, .amount-primary-label { font-size: 9px !important; }
+.charge-toggle-chip { font-size: 10px !important; }
+.commission-toggle-chip-mini { font-size: 9px !important; }
+.commission-input { width: 72px !important; min-width: 72px !important; }
+.subtle-commission-row { gap: 5px !important; padding-top: 2px !important; }
+.commission-mini-field { gap: 2px !important; }
