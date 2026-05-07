@@ -173,6 +173,7 @@
   let realtimeUnsub = null;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
+  let realtimePollingTimer = null;
   const state = bootstrapState();
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
@@ -333,6 +334,11 @@
     // Never jump over skipped business days because DUCESS dates are sequential.
     // Only advance when the active date itself has been closed.
     if (current === latest.date) {
+      state.businessDate = expectedOpenDate;
+      return true;
+    }
+    // If a previous real-calendar sync jumped far ahead, repair back to the next sequential DUCESS date.
+    if (current > expectedOpenDate) {
       state.businessDate = expectedOpenDate;
       return true;
     }
@@ -955,6 +961,11 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) refreshRealtimeState('visibility-return').catch(err => console.warn('[DUCESS realtime sync failed]', err));
     });
+    if (!realtimePollingTimer) {
+      realtimePollingTimer = setInterval(() => {
+        if (!document.hidden) refreshRealtimeState('polling-fallback').catch(err => console.warn('[DUCESS realtime polling failed]', err));
+      }, 8000);
+    }
     realtimeBound = true;
   }
 
@@ -1900,7 +1911,7 @@ function hideProcessing() {
       const remaining = Number(c.remainingBalance ?? c.runningFloat ?? currentFloatAvailable(c.staffId, c.date));
       const variance = Number(c.variance ?? Math.max(0, -remaining));
       const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
-      return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${c.id}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
+      const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || ''; return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
     const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const formAmount = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getOpeningBalanceForDate(rec.staffId, rec.date)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? currentFloatAvailable(rec.staffId, rec.date)) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(formAmount):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
@@ -3613,7 +3624,12 @@ function normalizeStaffLedgerEntryType(row) {
         }
       });
     });
-    qq('[data-cod-resolve]').forEach(btn => btn.onclick = () => openCODResolutionModal(btn.dataset.codResolve));
+    qq('[data-cod-resolve]').forEach(btn => btn.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const codId = btn.dataset.codResolve || btn.getAttribute('data-cod-resolve') || '';
+      openCODResolutionModal(codId);
+    });
     const more = byId('approvalsMore');
     if (more) more.onclick = () => { state.ui.approvalsLimit = (state.ui.approvalsLimit || 20) + 20; save(); renderWorkspace(); };
     const less = byId('approvalsLess');
@@ -4238,6 +4254,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       note: note || '',
       kind: adjustment > 0 ? 'credit' : 'debit',
       type: 'cod_adjustment',
+      sourceType: 'cod_adjustment',
       delta: adjustment,
       amount: Math.abs(adjustment),
       balanceAfter: 0,
@@ -4248,8 +4265,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function openCODResolutionModal(codId) {
-    const cod = state.cod.find(c => c.id === codId);
-    if (!cod) return;
+    const cod = state.cod.find(c =>
+      String(c.id || '') === String(codId || '') ||
+      String(c.codSubmissionId || '') === String(codId || '') ||
+      String(c.cod_submission_id || '') === String(codId || '')
+    );
+    if (!cod) return showToast('COD record not found. Please refresh and try again.');
     const formAmount = Number(cod.formAmount ?? cod.openingBalance ?? getOpeningBalanceForDate(cod.staffId, cod.date));
     const totalCreditCash = Number(cod.totalCreditCash ?? approvedCreditTotalForDateByMode(cod.staffId, cod.date, 'cash'));
     const totalCreditTransfer = Number(cod.totalCreditTransfer ?? approvedCreditTotalForDateByMode(cod.staffId, cod.date, 'transfer'));
@@ -4407,8 +4428,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       accountName: e.accountName || e.customerName || e.accountNumber || 'STAFF',
       details: cleanOperationalNote(e.details || e.note) || '',
       note: cleanOperationalNote(e.note || e.details) || '',
-      type: e.type || e.kind || (Number(e.delta || 0) >= 0 ? 'credit' : 'debit'),
-      kind: e.kind || e.type || (Number(e.delta || 0) >= 0 ? 'credit' : 'debit'),
+      type: e.type === 'cod_adjustment' ? (e.kind || (Number(e.delta || 0) >= 0 ? 'credit' : 'debit')) : (e.type || e.kind || (Number(e.delta || 0) >= 0 ? 'credit' : 'debit')),
+      kind: e.kind || (e.type === 'cod_adjustment' ? (Number(e.delta || 0) >= 0 ? 'credit' : 'debit') : e.type) || (Number(e.delta || 0) >= 0 ? 'credit' : 'debit'),
       delta: Number(e.delta || ((e.type || e.kind) === 'debit' ? -Number(e.amount || 0) : Number(e.amount || 0))),
       amount: Number(e.amount || 0),
       balanceAfter: Number(e.balanceAfter || 0),
@@ -4934,7 +4955,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           }
           hideLoginScreen();
           render();
-          syncApprovalsFromGateway().then((r) => { if (r?.ok) render(); });
+          setupRealtimeSubscriptions();
+          refreshRealtimeState('session-restore').catch(() => syncApprovalsFromGateway().then((r) => { if (r?.ok) render(); }));
         } else {
           // No session — show login
           showLoginScreen();
