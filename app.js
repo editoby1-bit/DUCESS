@@ -3561,6 +3561,7 @@ function normalizeStaffLedgerEntryType(row) {
         save();
       };
       byId('journalAcc').oninput = () => {
+        if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
         if (!v) { clearJournalCustomer(); return; }
@@ -3569,6 +3570,7 @@ function normalizeStaffLedgerEntryType(row) {
         if (/^\d{4}$/.test(v)) searchJournal({ quiet: true });
       };
       byId('journalAcc').onchange = (event) => {
+        if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
         if (!v) { clearJournalCustomer(); return; }
         const nextId = event?.relatedTarget?.id || '';
@@ -3590,6 +3592,7 @@ function normalizeStaffLedgerEntryType(row) {
       journalAmountInput.onmousedown = null;
       journalAmountInput.ontouchstart = null;
       journalAmountInput.oninput = () => {
+        if (journalAmountInput.dataset?.restoring === '1') return;
         telleringDraft.journalAmount = journalAmountInput.value || '';
         save();
         updateJournalCommissionPreview();
@@ -3628,10 +3631,19 @@ function normalizeStaffLedgerEntryType(row) {
 
     const restoreJournalEntrySnapshot = (snapshot) => {
       if (!snapshot) return;
-      if (byId('journalAcc')) byId('journalAcc').value = snapshot.acc;
-      if (byId('journalAmount')) byId('journalAmount').value = snapshot.amount;
-      if (byId('journalCounterparty')) byId('journalCounterparty').value = snapshot.counterparty;
-      if (byId('journalDetails')) byId('journalDetails').value = snapshot.details;
+      // Use a flag to suppress oninput/onchange handlers during restore
+      const _restore = true;
+      const setVal = (id, val) => {
+        const el = byId(id);
+        if (!el) return;
+        el.dataset.restoring = '1';
+        el.value = val;
+        delete el.dataset.restoring;
+      };
+      setVal('journalAcc', snapshot.acc);
+      setVal('journalAmount', snapshot.amount);
+      setVal('journalCounterparty', snapshot.counterparty);
+      setVal('journalDetails', snapshot.details);
       if (byId('journalName')) byId('journalName').textContent = snapshot.name || '—';
       state.ui.selectedJournalCustomerId = snapshot.selectedJournalCustomerId || state.ui.selectedJournalCustomerId || null;
       telleringDraft.journalAmount = snapshot.amount;
@@ -3646,8 +3658,10 @@ function normalizeStaffLedgerEntryType(row) {
         const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
         if (check) check.checked = !!telleringDraft.journalCharges.checked[def.key];
         if (input) {
+          input.dataset.restoring = '1';
           input.value = telleringDraft.journalCharges.values[def.key] || '';
           input.classList.toggle('hidden', !telleringDraft.journalCharges.checked[def.key]);
+          delete input.dataset.restoring;
         }
       });
       updateJournalCommissionPreview();
@@ -3786,7 +3800,10 @@ function normalizeStaffLedgerEntryType(row) {
       if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
       if (!journal.length) return showToast('Generate journal first');
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
+      if (byId('journalSubmit')?.dataset?.submitting === '1') return;
       confirmAction(`Submit ${kind} journal for approval?`, async () => {
+        const submitBtn = byId('journalSubmit');
+        if (submitBtn) { submitBtn.dataset.submitting = '1'; submitBtn.disabled = true; }
         showProcessing('Sending journal...');
         await nextPaint();
         try {
@@ -3824,6 +3841,8 @@ function normalizeStaffLedgerEntryType(row) {
           renderWorkspace();
         } finally {
           hideProcessing();
+          const submitBtn = byId('journalSubmit');
+          if (submitBtn) { delete submitBtn.dataset.submitting; submitBtn.disabled = false; }
         }
       });
     };
