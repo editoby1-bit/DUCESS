@@ -1894,14 +1894,103 @@ function hideProcessing() {
       </div>`;
   }
 
+  const APPROVAL_REVIEW_LOCK_MS = 60 * 1000;
+
+  function normalizeApprovalLock(lock) {
+    if (!lock) return null;
+    const startedAt = typeof lock.startedAt === 'number' ? lock.startedAt : new Date(lock.startedAt || 0).getTime();
+    if (!startedAt || Date.now() - startedAt > APPROVAL_REVIEW_LOCK_MS) return null;
+    return {
+      staffId: lock.staffId || lock.staff_id || '',
+      staffName: lock.staffName || lock.staff_name || 'Staff',
+      startedAt
+    };
+  }
+
+  function cleanupApprovalReviewLocks() {
+    state.ui ||= {};
+    state.ui.approvalReviewLocks ||= {};
+    Object.keys(state.ui.approvalReviewLocks).forEach(id => {
+      if (!normalizeApprovalLock(state.ui.approvalReviewLocks[id])) delete state.ui.approvalReviewLocks[id];
+    });
+  }
+
+  function getApprovalReviewLock(id) {
+    cleanupApprovalReviewLocks();
+    const approval = (state.approvals || []).find(a => a.id === id);
+    return normalizeApprovalLock(approval?.payload?.__reviewLock) || normalizeApprovalLock(state.ui.approvalReviewLocks?.[id]);
+  }
+
+  function setApprovalReviewLock(id) {
+    if (!id) return;
+    cleanupApprovalReviewLocks();
+    const staff = currentStaff();
+    state.ui.approvalReviewLocks[id] = {
+      staffId: staff?.id || '',
+      staffName: staff?.name || 'Staff',
+      startedAt: Date.now()
+    };
+    save();
+    if (isSupabaseApprovalMode() && gateway.approvals?.setReviewLock) {
+      gateway.approvals.setReviewLock({
+        requestId: id,
+        staffId: getStaffBackendId(staff),
+        staffName: staff?.name || 'Staff',
+        ttlMs: APPROVAL_REVIEW_LOCK_MS
+      }).then(async (result) => {
+        if (result?.ok) {
+          await syncApprovalsFromGateway();
+          renderWorkspace();
+        } else if (result?.error?.code === 'APPROVAL_LOCKED') {
+          delete state.ui.approvalReviewLocks[id];
+          save();
+          showToast(result.error.message || 'This request is being reviewed by another staff');
+          await syncApprovalsFromGateway();
+          renderWorkspace();
+        }
+      }).catch(() => {});
+    }
+  }
+
+  function isApprovalLockedByOther(id) {
+    const lock = getApprovalReviewLock(id);
+    const staff = currentStaff();
+    const staffIds = [staff?.id, getStaffBackendId(staff)].filter(Boolean).map(String);
+    return !!(lock && lock.staffId && !staffIds.includes(String(lock.staffId)));
+  }
+
+  function approvalReviewIndicator(approval) {
+    if (!approval || approval.status !== 'pending') return '—';
+    const lock = getApprovalReviewLock(approval.id);
+    if (!lock) return '<span class="muted">Available</span>';
+    const staff = currentStaff();
+    const staffIds = [staff?.id, getStaffBackendId(staff)].filter(Boolean).map(String);
+    const self = staffIds.includes(String(lock.staffId));
+    const remaining = Math.max(0, Math.ceil((APPROVAL_REVIEW_LOCK_MS - (Date.now() - Number(lock.startedAt || 0))) / 1000));
+    return `<span class="badge ${self ? 'pending' : 'warning'}">${self ? 'You are reviewing' : `${escapeHtml(lock.staffName || 'Another staff')} reviewing`} • ${remaining}s</span>`;
+  }
+
   function renderApprovals() {
     state.ui.codAdminDate ||= businessDate();
+    state.ui.selectedApprovalIds ||= [];
+    cleanupApprovalReviewLocks();
     const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','float_declaration'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
     const currentSection = state.ui.approvalsSection || 'tellering';
     const allRows = state.approvals.filter(a => categories[currentSection].includes(a.type));
     const limit = state.ui.approvalsLimit || 20;
     const approvals = allRows.slice(0, limit);
-    const rows = approvals.map((a, i) => `<tr><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success">Approve</button><button type="button" data-reject="${a.id}" class="danger">Reject</button></div>`:''}</div>`:''}${['account_opening','account_maintenance','account_reactivation'].includes(a.type) ? `<button type="button" data-inspect-request="${a.id}" class="secondary">View</button> `:''}${!a.type.includes('_journal') ? (a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success">Approve</button><button type="button" data-reject="${a.id}" class="danger">Reject</button></div>` : a.approvedBy || '—') : ''}</td></tr>`).join('');
+    const rows = approvals.map((a, i) => {
+      const lockedByOther = isApprovalLockedByOther(a.id);
+      const canSelect = a.status === 'pending' && !lockedByOther;
+      const checked = state.ui.selectedApprovalIds.includes(a.id) ? 'checked' : '';
+      const disabledAttr = canSelect ? '' : 'disabled';
+      const actionDisabled = lockedByOther ? 'disabled' : '';
+      const pendingActions = a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success" ${actionDisabled}>Approve</button><button type="button" data-reject="${a.id}" class="danger" ${actionDisabled}>Reject</button></div>` : '';
+      const journalActions = a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${pendingActions}</div>` : '';
+      const csActions = ['account_opening','account_maintenance','account_reactivation'].includes(a.type) ? `<button type="button" data-inspect-request="${a.id}" class="secondary">View</button> ` : '';
+      const normalActions = !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
+      return `<tr><td><input type="checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${csActions}${normalActions}</td></tr>`;
+    }).join('');
     const codRows=(state.cod||[]).filter(c=>c.status==='flagged').map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
@@ -1916,7 +2005,7 @@ function hideProcessing() {
     const selected = state.ui.codAdminDate;
     const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const formAmount = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getOpeningBalanceForDate(rec.staffId, rec.date)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? currentFloatAvailable(rec.staffId, rec.date)) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(formAmount):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div></div>`:''}<div class="approvals-top-controls"><div class="action-row approvals-central-cod-row">${hasPermission('central_close_day')?'<button id="approvalsCentralCloseDayBtn">Central Close of Day</button>':''}</div><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div></div>`:''}<div class="approvals-top-controls"><div class="action-row approvals-central-cod-row">${hasPermission('central_close_day')?'<button id="approvalsCentralCloseDayBtn">Central Close of Day</button>':''}</div><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
   }
 
   function approvalSubmittedBy(a) {
@@ -2068,6 +2157,11 @@ function hideProcessing() {
         await nextPaint();
 
         try {
+          if (isApprovalLockedByOther(req.id)) {
+            hideProcessing();
+            showToast('This request is being reviewed by another staff');
+            return;
+          }
           const result = await rejectRequestRemote(req.id);
 
           if (result?.ok === false) {
@@ -2097,6 +2191,11 @@ function hideProcessing() {
         await nextPaint();
 
         try {
+          if (isApprovalLockedByOther(req.id)) {
+            hideProcessing();
+            showToast('This request is being reviewed by another staff');
+            return;
+          }
           const result = await approveRequestRemote(req.id, req.payload);
 
           if (result?.ok === false) {
@@ -3296,15 +3395,16 @@ function normalizeStaffLedgerEntryType(row) {
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
     };
 
-    const restoreSelectedCustomerDisplay = () => {
-      const selected = state.ui.selectedCustomerId
-        ? state.customers.find(c => c.id === state.ui.selectedCustomerId)
-        : null;
-      const accValue = String(byId('txAcc')?.value || '').trim();
-      if (selected && String(selected.accountNumber || '') === accValue) {
-        if (byId('txName')) byId('txName').textContent = selected.name;
-        if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(selected.balance);
-      }
+    const restoreSingleCustomerDisplay = () => {
+      const value = String(byId('txAcc')?.value || state.ui.txAccDraft || '').trim();
+      const selected = state.ui.selectedCustomerId ? state.customers.find(c => c.id === state.ui.selectedCustomerId) : null;
+      const customer = selected && String(selected.accountNumber || '') === value ? selected : getCustomerByAccountNo(value);
+      if (!customer) return;
+      state.ui.selectedCustomerId = customer.id;
+      state.ui.txAccDraft = customer.accountNumber || value;
+      if (byId('txAcc') && String(byId('txAcc').value || '').trim() !== String(customer.accountNumber || '')) byId('txAcc').value = customer.accountNumber || value;
+      if (byId('txName')) byId('txName').textContent = customer.name || '—';
+      if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(customer.balance);
     };
 
     const searchJournal = () => {
@@ -3355,15 +3455,12 @@ function normalizeStaffLedgerEntryType(row) {
     }
 
     if (byId('txApplyCharges')) byId('txApplyCharges').onchange = updateSingleCommissionPreview;
-    if (byId('txAmount')) byId('txAmount').oninput = debounce(() => {
-      updateSingleCommissionPreview();
-      restoreSelectedCustomerDisplay();
-    }, 150);
+    if (byId('txAmount')) byId('txAmount').oninput = debounce(() => { restoreSingleCustomerDisplay(); updateSingleCommissionPreview(); }, 150);
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="single"]`);
-      if (check) check.onchange = () => { updateSingleCommissionPreview(); restoreSelectedCustomerDisplay(); };
-      if (input) input.oninput = () => { updateSingleCommissionPreview(); restoreSelectedCustomerDisplay(); };
+      if (check) check.onchange = updateSingleCommissionPreview;
+      if (input) input.oninput = updateSingleCommissionPreview;
     });
 
     const jumpToJournalPane = () => {
@@ -3601,14 +3698,61 @@ function normalizeStaffLedgerEntryType(row) {
       });
     };
 
+    restoreSingleCustomerDisplay();
     updateSingleCommissionPreview();
     updateJournalCommissionPreview();
     recalcPreview();
   }
 
   function bindApprovals() {
+    cleanupApprovalReviewLocks();
+    state.ui.selectedApprovalIds ||= [];
+    const refreshApprovalSelection = () => {
+      state.ui.selectedApprovalIds = state.ui.selectedApprovalIds.filter(id => (state.approvals || []).some(a => a.id === id && a.status === 'pending') && !isApprovalLockedByOther(id));
+      save();
+    };
+    refreshApprovalSelection();
+    qq('[data-approval-select]').forEach(box => box.onchange = () => {
+      const id = box.dataset.approvalSelect;
+      if (box.checked) {
+        if (!state.ui.selectedApprovalIds.includes(id)) state.ui.selectedApprovalIds.push(id);
+      } else {
+        state.ui.selectedApprovalIds = state.ui.selectedApprovalIds.filter(x => x !== id);
+      }
+      save();
+    });
+    const visibleSelectable = () => qq('[data-approval-select]').filter(box => !box.disabled).map(box => box.dataset.approvalSelect);
+    const selectAll = byId('approvalSelectAll');
+    if (selectAll) selectAll.onclick = () => { state.ui.selectedApprovalIds = Array.from(new Set([...state.ui.selectedApprovalIds, ...visibleSelectable()])); save(); renderWorkspace(); };
+    const clearSel = byId('approvalClearSelection');
+    if (clearSel) clearSel.onclick = () => { state.ui.selectedApprovalIds = []; save(); renderWorkspace(); };
+    const runBulk = (mode) => {
+      if (!hasPermission('approval_queue')) return showToast('No approval rights');
+      const ids = (state.ui.selectedApprovalIds || []).filter(id => !isApprovalLockedByOther(id));
+      if (!ids.length) return showToast('Select pending requests first');
+      confirmAction(`${mode === 'approve' ? 'Approve' : 'Reject'} ${ids.length} selected request${ids.length === 1 ? '' : 's'}?`, async () => {
+        showProcessing(mode === 'approve' ? 'Approving selected requests...' : 'Rejecting selected requests...');
+        await nextPaint();
+        try {
+          for (const id of ids) {
+            const result = mode === 'approve' ? await approveRequestRemote(id) : await rejectRequestRemote(id);
+            if (result?.ok === false) showToast(result?.error?.message || `Unable to ${mode} one selected request`);
+          }
+          state.ui.selectedApprovalIds = [];
+          save();
+          renderWorkspace();
+        } finally {
+          hideProcessing();
+        }
+      });
+    };
+    const bulkApprove = byId('approvalBulkApprove');
+    if (bulkApprove) bulkApprove.onclick = () => runBulk('approve');
+    const bulkReject = byId('approvalBulkReject');
+    if (bulkReject) bulkReject.onclick = () => runBulk('reject');
     qq('[data-approve]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
+      if (isApprovalLockedByOther(btn.dataset.approve)) return showToast('This request is being reviewed by another staff');
       confirmAction('Approve this request?', async () => {
         showProcessing('Approving request...');
         await nextPaint();
@@ -3622,6 +3766,7 @@ function normalizeStaffLedgerEntryType(row) {
     });
     qq('[data-reject]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
+      if (isApprovalLockedByOther(btn.dataset.reject)) return showToast('This request is being reviewed by another staff');
       confirmAction('Reject this request?', async () => {
         showProcessing('Rejecting request...');
         await nextPaint();
@@ -3656,10 +3801,10 @@ function normalizeStaffLedgerEntryType(row) {
       btn.style.zIndex = '10';
       btn.addEventListener('click', function(e) {
         e.stopPropagation();
-        openRequestDetailModal(this.dataset.inspectJournal);
+        setApprovalReviewLock(this.dataset.inspectJournal); renderWorkspace(); openRequestDetailModal(this.dataset.inspectJournal);
       }, true);
     });
-    qq('[data-inspect-request]').forEach(btn => btn.onclick = ()=> openRequestDetailModal(btn.dataset.inspectRequest));
+    qq('[data-inspect-request]').forEach(btn => btn.onclick = ()=> { setApprovalReviewLock(btn.dataset.inspectRequest); renderWorkspace(); openRequestDetailModal(btn.dataset.inspectRequest); });
   }
 
   function bindPermissions() {
@@ -3978,7 +4123,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   function freezeInactiveCustomer(c){ if(!c) return; if(c.active === false) c.frozen = true; }
 
   function openCustomerSearchModal(list) {
-    const renderRows = arr => arr.map(c=>`<tr><td>${c.accountNumber}</td><td>${c.name}</td><td>${c.phone}</td><td><span class="linklike" data-pick="${c.id}">Select</span></td></tr>`).join('');
+    const renderRows = arr => arr.map(c=>`<tr><td>${escapeHtml(c.accountNumber || '')}</td><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.phone || '')}</td><td><button type="button" class="sheet-btn tiny-btn ultra-compact-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
     openModal('Customer Search', `<div class="stack"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th></th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const bindPicks = () => qq('[data-pick]').forEach(el => el.onclick = () => { state.ui.selectedCustomerId = el.dataset.pick; save(); closeModal(); applySelectedCustomerToActiveTool(); });
     bindPicks();
