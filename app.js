@@ -326,7 +326,13 @@
     if (!latest?.date) return false;
     const expectedOpenDate = latest.nextBusinessDate || nextDate(latest.date);
     const current = String(state.businessDate || '').slice(0,10);
-    if (!current || current <= latest.date) {
+    if (!current) {
+      state.businessDate = expectedOpenDate;
+      return true;
+    }
+    // Never jump over skipped business days because DUCESS dates are sequential.
+    // Only advance when the active date itself has been closed.
+    if (current === latest.date) {
       state.businessDate = expectedOpenDate;
       return true;
     }
@@ -3775,6 +3781,9 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       return `<tr><td>${st.name}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${running<0?'balance-negative':''}">${money(running)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
     openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Form is the approved opening money collected from the field. Remaining Balance reduces as staff use the form. Net Balance is Total Credits minus Total Debits. Variance and Overdraw are derived from how the form is used.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
+      showProcessing('Closing business day...');
+      await nextPaint();
+      try {
       if (isSupabaseApprovalMode() && gateway.cod?.submitCod) {
         for (const st of postingStaff) {
           const formAmount = getOpeningBalanceForDate(st.id,businessDate());
@@ -3839,7 +3848,11 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
         showToast(`Business date ${closingDate} is already closed`);
         return;
       }
-      save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`); }}]);
+      save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`);
+      } finally {
+        hideProcessing();
+      }
+    }}]);
   }
 
   async function openAuditModal() {
@@ -4205,6 +4218,35 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     if (picker) picker.onchange = () => { state.ui.myCodDate = picker.value || businessDate(); save(); openMyCODModal(state.ui.myCodDate); };
   }
 
+
+  function removeCodBusinessAdjustment(codId) {
+    state.businessExtras ||= [];
+    state.businessExtras = state.businessExtras.filter(e => !(e.type === 'cod_adjustment' && e.codId === codId));
+  }
+
+  function applyCodBusinessAdjustment(cod, adjustment, resolutionType, note) {
+    state.businessExtras ||= [];
+    removeCodBusinessAdjustment(cod.id);
+    if (resolutionType === 'reversal_needed' || !adjustment) return;
+    state.businessExtras.unshift({
+      id: uid('bizcod'),
+      date: cod.date || cod.businessDate || businessDate(),
+      businessDate: cod.date || cod.businessDate || businessDate(),
+      accountNumber: 'COD',
+      accountName: cod.staffName || staffName(cod.staffId) || 'Staff',
+      details: `COD final agreed adjustment for ${cod.staffName || staffName(cod.staffId) || 'staff'} (${cod.date || cod.businessDate || businessDate()})`,
+      note: note || '',
+      kind: adjustment > 0 ? 'credit' : 'debit',
+      type: 'cod_adjustment',
+      delta: adjustment,
+      amount: Math.abs(adjustment),
+      balanceAfter: 0,
+      receivedOrPaidBy: cod.staffName || staffName(cod.staffId) || '',
+      postedBy: currentStaff()?.name || 'System',
+      codId: cod.id
+    });
+  }
+
   function openCODResolutionModal(codId) {
     const cod = state.cod.find(c => c.id === codId);
     if (!cod) return;
@@ -4264,11 +4306,15 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         const acceptedPosition = isAdminOfficer ? Number(byId('codAcceptedPosition').value || 0) : savedAcceptedPosition;
         const adjustment = isAdminOfficer ? (acceptedPosition - currentNetBookBalance) : savedAdjustment;
         const debtAmt = createDebt ? Math.max(0, Number(byId('codDebtAmount').value || 0)) : 0;
+        showProcessing('Resolving COD...');
+        await nextPaint();
+        try {
         if (isSupabaseApprovalMode() && gateway.cod?.resolveCod) {
           const result = await gateway.cod.resolveCod({ codSubmissionId: cod.id, finalAgreedAmount: acceptedPosition, debtAmount: debtAmt, resolutionNote: note, resolvedByStaffId: currentStaff()?.id || '' });
           if (result?.ok === false) return showToast(result.error?.message || 'Unable to resolve COD');
           if (result?.ok && result.data) {
-            Object.assign(cod, result.data, { status: 'resolved', resolutionType, reversalNeeded: resolutionType === 'reversal_needed', createDebt, staffName: cod.staffName, formAmount, totalCreditCash, totalCreditTransfer, totalDebitCash, totalDebitTransfer, totalCredits, totalDebits, netBookBalance: currentNetBookBalance, remainingBalance: currentRemainingBalance, variance: currentVariance, overdraw: currentOverdraw });
+            Object.assign(cod, result.data, { status: 'resolved', resolutionType, reversalNeeded: resolutionType === 'reversal_needed', createDebt, staffName: cod.staffName, formAmount, totalCreditCash, totalCreditTransfer, totalDebitCash, totalDebitTransfer, totalCredits, totalDebits, netBookBalance: currentNetBookBalance, remainingBalance: currentRemainingBalance, variance: currentVariance, overdraw: currentOverdraw, acceptedPosition, adjustment: resolutionType === 'reversal_needed' ? 0 : adjustment });
+            applyCodBusinessAdjustment(cod, resolutionType === 'reversal_needed' ? 0 : adjustment, resolutionType, note);
             await syncCodFromGateway({ staffId: cod.staffId, businessDate: cod.date });
             await syncDebtBalancesFromGateway(cod.staffId);
           }
@@ -4295,11 +4341,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           cod.remainingBalance = currentRemainingBalance;
           cod.variance = currentVariance;
           cod.overdraw = currentOverdraw;
-          state.businessExtras ||= [];
-          state.businessExtras = state.businessExtras.filter(e => !(e.type === 'cod_adjustment' && e.codId === cod.id));
-          if (shouldPostAdjustment) {
-            state.businessExtras.unshift({ date:new Date().toISOString(), accountNumber:'COD', details:`COD adjustment for ${cod.staffName} (${cod.date})`, kind:adjustment > 0 ? 'credit' : 'debit', amount:Math.abs(adjustment), balanceAfter:0, receivedOrPaidBy:cod.staffName, postedBy:currentStaff()?.name || 'System', type:'cod_adjustment', codId: cod.id });
-          }
+          applyCodBusinessAdjustment(cod, shouldPostAdjustment ? adjustment : 0, resolutionType, note);
           const acc = ensureStaffAccount(cod.staffId);
           const existingDebtEntries = (acc.entries||[]).filter(e => e.type === 'cod_resolution_debt' && e.codId === cod.id);
           if (existingDebtEntries.length) {
@@ -4314,6 +4356,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           }
         }
         save(); closeModal(); render(); showToast(resolutionType === 'reversal_needed' ? 'COD flagged for reversal/correction' : 'COD resolved');
+        } finally {
+          hideProcessing();
+        }
       }}
     ]);
     const acceptedInput = byId('codAcceptedPosition');

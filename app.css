@@ -11645,3 +11645,29 @@ body[data-theme] .modal .table th {
 .staff-ledger-modal .table td {
   white-space: normal !important;
 }
+
+
+/* Surgical Staff Ledger scrollbar stability */
+.modal:has(.staff-ledger-modal) {
+  overflow: visible !important;
+}
+.modal:has(.staff-ledger-modal) .modal-body {
+  overflow: visible !important;
+}
+.staff-ledger-modal .table-wrap {
+  overflow-x: scroll !important;
+  overflow-y: auto !important;
+  scrollbar-gutter: stable both-edges !important;
+  padding-bottom: 10px !important;
+}
+.staff-ledger-modal .table-wrap::-webkit-scrollbar {
+  height: 12px !important;
+}
+.staff-ledger-modal .table-wrap::-webkit-scrollbar-thumb {
+  background: #94a3b8 !important;
+  border-radius: 999px !important;
+}
+.staff-ledger-modal .table-wrap::-webkit-scrollbar-track {
+  background: #e5e7eb !important;
+  border-radius: 999px !important;
+}
