@@ -3646,7 +3646,10 @@ function normalizeStaffLedgerEntryType(row) {
       });
       save();
       recalcPreview();
-      resetJournalEntryFields();
+      // Surgical fix: do NOT call resetJournalEntryFields() here.
+      // Root cause: Add to Journal was successfully adding the row, then immediately clearing
+      // journalAcc, journalAmount, journal charges, customer name, counterparty, and details.
+      // Leaving the entry fields intact prevents the first-click disappearing-value behaviour.
     };
 
     const fieldNoteInput = byId('journalFieldNoteInput');
