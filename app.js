@@ -1989,7 +1989,7 @@ function hideProcessing() {
       const journalActions = a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${pendingActions}</div>` : '';
       const csActions = ['account_opening','account_maintenance','account_reactivation'].includes(a.type) ? `<button type="button" data-inspect-request="${a.id}" class="secondary">View</button> ` : '';
       const normalActions = !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
-      return `<tr><td><input type="checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${csActions}${normalActions}</td></tr>`;
+      return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${csActions}${normalActions}</td></tr>`;
     }).join('');
     const codRows=(state.cod||[]).filter(c=>c.status==='flagged').map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
@@ -3455,7 +3455,10 @@ function normalizeStaffLedgerEntryType(row) {
     }
 
     if (byId('txApplyCharges')) byId('txApplyCharges').onchange = updateSingleCommissionPreview;
-    if (byId('txAmount')) byId('txAmount').oninput = debounce(() => { restoreSingleCustomerDisplay(); updateSingleCommissionPreview(); }, 150);
+    if (byId('txAmount')) {
+      byId('txAmount').onfocus = () => restoreSingleCustomerDisplay();
+      byId('txAmount').oninput = debounce(updateSingleCommissionPreview, 150);
+    }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="single"]`);
@@ -4123,8 +4126,8 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   function freezeInactiveCustomer(c){ if(!c) return; if(c.active === false) c.frozen = true; }
 
   function openCustomerSearchModal(list) {
-    const renderRows = arr => arr.map(c=>`<tr><td>${escapeHtml(c.accountNumber || '')}</td><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.phone || '')}</td><td><button type="button" class="sheet-btn tiny-btn ultra-compact-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th></th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    const renderRows = arr => arr.map(c=>`<tr><td>${escapeHtml(c.accountNumber || '')}</td><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.phone || '')}</td><td><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
+    openModal('Customer Search', `<div class="stack"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th>Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const bindPicks = () => qq('[data-pick]').forEach(el => el.onclick = () => { state.ui.selectedCustomerId = el.dataset.pick; save(); closeModal(); applySelectedCustomerToActiveTool(); });
     bindPicks();
     const search = byId('modalCustomerSearch');
@@ -4768,8 +4771,6 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       if (byId('txAcc')) byId('txAcc').value = c.accountNumber;
       if (byId('txName')) byId('txName').textContent = c.name;
       if (byId('txBalance')) byId('txBalance').textContent = money(c.balance);
-      if (byId('journalAcc')) byId('journalAcc').value = c.accountNumber;
-      if (byId('journalName')) byId('journalName').textContent = c.name;
       return;
     }
     if (state.ui.tool === 'account_statement') {
