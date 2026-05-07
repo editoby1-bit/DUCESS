@@ -3434,14 +3434,32 @@ function normalizeStaffLedgerEntryType(row) {
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(customer.balance);
     };
 
-    const searchJournal = () => {
+    const searchJournal = (opts = {}) => {
+      const activeBefore = document.activeElement;
+      const amountBefore = byId('journalAmount')?.value || telleringDraft.journalAmount || '';
+      const chargeValuesBefore = {};
+      CHARGE_DEFS.forEach(def => {
+        const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
+        chargeValuesBefore[def.key] = input?.value ?? telleringDraft.journalCharges.values[def.key] ?? '';
+      });
       const value = (byId('journalAcc')?.value || '').trim();
       const c = getCustomerByAccountNo(value);
-      if (!c) return showToast('Customer not found');
-      if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); return showToast('Account is frozen'); }
+      if (!c) { if (!opts.quiet) showToast('Customer not found'); return null; }
+      if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); if (!opts.quiet) showToast('Account is frozen'); return null; }
       state.ui.selectedJournalCustomerId = c.id;
       save();
       if (byId('journalName')) byId('journalName').textContent = c.name;
+      if (byId('journalAmount')) byId('journalAmount').value = amountBefore;
+      telleringDraft.journalAmount = amountBefore;
+      CHARGE_DEFS.forEach(def => {
+        const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
+        if (input) input.value = chargeValuesBefore[def.key] || '';
+        telleringDraft.journalCharges.values[def.key] = chargeValuesBefore[def.key] || '';
+      });
+      if (activeBefore && activeBefore.id && byId(activeBefore.id)) {
+        requestAnimationFrame(() => byId(activeBefore.id)?.focus({ preventScroll: true }));
+      }
+      return c;
     };
 
     if (byId('txSearch')) byId('txSearch').onclick = () => openCustomerSearchModal(state.customers);
@@ -3541,30 +3559,22 @@ function normalizeStaffLedgerEntryType(row) {
 
     if (byId('journalSearchBtn')) byId('journalSearchBtn').onclick = () => openJournalCustomerSearchModal(state.customers);
     if (byId('journalAcc')) {
-      byId('journalAcc').oninput = debounce(() => {
+      const clearJournalCustomer = () => {
+        if (byId('journalName')) byId('journalName').textContent = '—';
+        state.ui.selectedJournalCustomerId = null;
+        save();
+      };
+      byId('journalAcc').oninput = () => {
         const v = (byId('journalAcc').value || '').trim();
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
-        if (!v) {
-          if (byId('journalName')) byId('journalName').textContent = '—';
-          state.ui.selectedJournalCustomerId = null;
-          save();
-          return;
-        }
-        if (selected && String(selected.accountNumber || '') !== v) {
-          if (byId('journalName')) byId('journalName').textContent = '—';
-          state.ui.selectedJournalCustomerId = null;
-          save();
-        }
-        if (/^\d{4}$/.test(v)) searchJournal();
-      }, 200);
+        if (!v) { clearJournalCustomer(); return; }
+        if (selected && String(selected.accountNumber || '') !== v) clearJournalCustomer();
+        // Run journal lookup immediately, not delayed, so it cannot fire after the user starts typing Amount/Charges.
+        if (/^\d{4}$/.test(v)) searchJournal({ quiet: true });
+      };
       byId('journalAcc').onchange = () => {
         const v = (byId('journalAcc').value || '').trim();
-        if (!v) {
-          if (byId('journalName')) byId('journalName').textContent = '—';
-          state.ui.selectedJournalCustomerId = null;
-          save();
-          return;
-        }
+        if (!v) { clearJournalCustomer(); return; }
         searchJournal();
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
@@ -3575,11 +3585,18 @@ function normalizeStaffLedgerEntryType(row) {
       save();
       updateJournalCommissionPreview();
     };
-    if (byId('journalAmount')) byId('journalAmount').oninput = () => {
-      telleringDraft.journalAmount = byId('journalAmount')?.value || '';
-      save();
-      updateJournalCommissionPreview();
-    };
+    if (byId('journalAmount')) {
+      const journalAmountInput = byId('journalAmount');
+      journalAmountInput.onfocus = null;
+      journalAmountInput.onmousedown = null;
+      journalAmountInput.ontouchstart = null;
+      journalAmountInput.oninput = () => {
+        telleringDraft.journalAmount = journalAmountInput.value || '';
+        save();
+        updateJournalCommissionPreview();
+      };
+      journalAmountInput.onchange = () => { telleringDraft.journalAmount = journalAmountInput.value || ''; save(); };
+    }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
@@ -4208,17 +4225,21 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
 
 
   function openJournalCustomerSearchModal(list) {
-    const renderRows = arr => arr.map(c=>`<tr><td>${c.accountNumber}</td><td>${c.name}</td><td>${c.phone}</td><td><span class="linklike" data-pick-journal="${c.id}">Select</span></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack"><input id="modalJournalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th></th></tr></thead><tbody id="modalJournalCustomerRows">${renderRows(list)}</tbody></table></div></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
-    const bindPicks = () => qq('[data-pick-journal]').forEach(el => el.onclick = () => {
-      const c = state.customers.find(x => x.id === el.dataset.pickJournal);
+    const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-journal-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick-journal="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick-journal="${c.id}">Select</button></td></tr>`).join('');
+    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalJournalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalJournalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    const pickJournalCustomer = (id) => {
+      const c = state.customers.find(x => x.id === id);
       if (!c) return showToast('Customer not found');
       state.ui.selectedJournalCustomerId = c.id;
       save();
       closeModal();
       if (byId('journalAcc')) byId('journalAcc').value = c.accountNumber || '';
       if (byId('journalName')) byId('journalName').textContent = c.name || '—';
-    });
+    };
+    const bindPicks = () => {
+      qq('[data-pick-journal]').forEach(el => el.onclick = (event) => { event.stopPropagation(); pickJournalCustomer(el.dataset.pickJournal); });
+      qq('[data-pick-journal-row]').forEach(row => row.onclick = () => pickJournalCustomer(row.dataset.pickJournalRow));
+    };
     bindPicks();
     const search = byId('modalJournalCustomerSearch');
     if (search) search.oninput = () => {
