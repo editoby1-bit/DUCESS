@@ -1815,6 +1815,14 @@ function hideProcessing() {
     const journalKey = `${st?.id || 'staff'}:${businessDate()}:${kind}`;
     const journalVisible = !!state.ui.generatedJournals[journalKey];
     const journalCollapsed = !!state.ui.collapsedJournals[journalKey];
+    state.ui.telleringDrafts ||= {};
+    const telleringDraft = state.ui.telleringDrafts[journalKey] ||= { singleCharges: { apply: false, checked: {}, values: {} }, journalCharges: { apply: false, checked: {}, values: {} } };
+    telleringDraft.singleCharges ||= { apply: false, checked: {}, values: {} };
+    telleringDraft.singleCharges.checked ||= {};
+    telleringDraft.singleCharges.values ||= {};
+    telleringDraft.journalCharges ||= { apply: false, checked: {}, values: {} };
+    telleringDraft.journalCharges.checked ||= {};
+    telleringDraft.journalCharges.values ||= {};
     return `
       <div class="tellering-stack">
         <div class="tellering-sheet journal-sheet standalone-posting-sheet">
@@ -1851,7 +1859,7 @@ function hideProcessing() {
               <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
               ${journalVisible ? '' : `<button id="txJournalAdd" class="sheet-btn secondary tiny-btn ultra-compact-btn">Generate Journal</button>`}
             </div>
-            ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox"> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row hidden" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single"> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input hidden" type="number" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
+            ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
           </div>
         </div>
         <div class="tellering-inline-meta form-card compact-left tellering-entry-card">
@@ -1877,7 +1885,7 @@ function hideProcessing() {
                 <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" style="width:76px;min-width:76px;margin:0;">
                 <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
                 <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
-                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="number"><div class="journal-cell-label">Amount</div></div>
+                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="number" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount</div></div>
               </div>
               <div class="journal-entry-top row-two">
                 <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid To'}</div></div>
@@ -1885,7 +1893,7 @@ function hideProcessing() {
                 <div class="journal-cell action"><button id="journalAddRow" class="sheet-btn">Add to Journal</button></div>
                 <div class="journal-cell action"><button id="journalCollapseBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
               </div>
-              ${kind === 'credit' ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox"> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row hidden" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal"> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input hidden" type="number"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
+              ${kind === 'credit' ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
             </div>
             <div class="action-row journal-submit-row"><button id="journalSubmit">Submit Journal</button><button class="secondary" id="journalClear">Clear Journal</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note</label><input id="journalFieldNoteInput" type="file" accept="image/*,.pdf,application/pdf" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
           </div>
@@ -3261,6 +3269,14 @@ function normalizeStaffLedgerEntryType(row) {
     state.ui.generatedJournals ||= {};
     const visibilityKey = `${staff.id}:${businessDate()}:${kind}`;
     state.ui.collapsedJournals ||= {};
+    state.ui.telleringDrafts ||= {};
+    const telleringDraft = state.ui.telleringDrafts[visibilityKey] ||= { singleCharges: { apply: false, checked: {}, values: {} }, journalCharges: { apply: false, checked: {}, values: {} } };
+    telleringDraft.singleCharges ||= { apply: false, checked: {}, values: {} };
+    telleringDraft.singleCharges.checked ||= {};
+    telleringDraft.singleCharges.values ||= {};
+    telleringDraft.journalCharges ||= { apply: false, checked: {}, values: {} };
+    telleringDraft.journalCharges.checked ||= {};
+    telleringDraft.journalCharges.values ||= {};
     const journal = state.ui.staffJournals[visibilityKey] ||= [];
     const attachmentState = state.ui.staffJournalAttachments[visibilityKey] ||= { fieldNote: null, loading: false };
 
@@ -3325,6 +3341,7 @@ function normalizeStaffLedgerEntryType(row) {
       ['txAcc','txAmount','txDetails','txCounterparty'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
       state.ui.txAccDraft = '';
       state.ui.txAmountDraft = '';
+      telleringDraft.singleCharges = { apply: false, checked: {}, values: {} };
       if (byId('txApplyCharges')) byId('txApplyCharges').checked = false;
       CHARGE_DEFS.forEach(def => {
         const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
@@ -3339,6 +3356,8 @@ function normalizeStaffLedgerEntryType(row) {
     };
     const resetJournalEntryFields = () => {
       ['journalAcc','journalAmount','journalCounterparty','journalDetails'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
+      telleringDraft.journalAmount = '';
+      telleringDraft.journalCharges = { apply: false, checked: {}, values: {} };
       if (byId('journalApplyCharges')) byId('journalApplyCharges').checked = false;
       CHARGE_DEFS.forEach(def => {
         const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
@@ -3461,7 +3480,11 @@ function normalizeStaffLedgerEntryType(row) {
       byId('txAcc').onkeyup = e => { if(e.key==='Enter') searchSingle(); };
     }
 
-    if (byId('txApplyCharges')) byId('txApplyCharges').onchange = updateSingleCommissionPreview;
+    if (byId('txApplyCharges')) byId('txApplyCharges').onchange = () => {
+      telleringDraft.singleCharges.apply = !!byId('txApplyCharges')?.checked;
+      save();
+      updateSingleCommissionPreview();
+    };
     if (byId('txAmount')) {
       const amountInput = byId('txAmount');
       amountInput.onfocus = null;
@@ -3469,15 +3492,25 @@ function normalizeStaffLedgerEntryType(row) {
       amountInput.ontouchstart = null;
       amountInput.oninput = () => {
         state.ui.txAmountDraft = amountInput.value || '';
+        save();
         updateSingleCommissionPreview();
       };
-      amountInput.onchange = () => { state.ui.txAmountDraft = amountInput.value || ''; };
+      amountInput.onchange = () => { state.ui.txAmountDraft = amountInput.value || ''; save(); };
     }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="single"]`);
-      if (check) check.onchange = updateSingleCommissionPreview;
-      if (input) input.oninput = updateSingleCommissionPreview;
+      if (check) check.onchange = () => {
+        telleringDraft.singleCharges.checked[def.key] = !!check.checked;
+        if (!check.checked) telleringDraft.singleCharges.values[def.key] = '';
+        save();
+        updateSingleCommissionPreview();
+      };
+      if (input) input.oninput = () => {
+        telleringDraft.singleCharges.values[def.key] = input.value || '';
+        save();
+        updateSingleCommissionPreview();
+      };
     });
 
     const jumpToJournalPane = () => {
@@ -3537,13 +3570,30 @@ function normalizeStaffLedgerEntryType(row) {
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
     }
 
-    if (byId('journalApplyCharges')) byId('journalApplyCharges').onchange = updateJournalCommissionPreview;
-    if (byId('journalAmount')) byId('journalAmount').oninput = debounce(updateJournalCommissionPreview, 150);
+    if (byId('journalApplyCharges')) byId('journalApplyCharges').onchange = () => {
+      telleringDraft.journalCharges.apply = !!byId('journalApplyCharges')?.checked;
+      save();
+      updateJournalCommissionPreview();
+    };
+    if (byId('journalAmount')) byId('journalAmount').oninput = () => {
+      telleringDraft.journalAmount = byId('journalAmount')?.value || '';
+      save();
+      updateJournalCommissionPreview();
+    };
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
-      if (check) check.onchange = updateJournalCommissionPreview;
-      if (input) input.oninput = updateJournalCommissionPreview;
+      if (check) check.onchange = () => {
+        telleringDraft.journalCharges.checked[def.key] = !!check.checked;
+        if (!check.checked) telleringDraft.journalCharges.values[def.key] = '';
+        save();
+        updateJournalCommissionPreview();
+      };
+      if (input) input.oninput = () => {
+        telleringDraft.journalCharges.values[def.key] = input.value || '';
+        save();
+        updateJournalCommissionPreview();
+      };
     });
 
     if (byId('journalAddRow')) byId('journalAddRow').onclick = () => {
