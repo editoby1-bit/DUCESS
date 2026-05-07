@@ -3296,6 +3296,17 @@ function normalizeStaffLedgerEntryType(row) {
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
     };
 
+    const restoreSelectedCustomerDisplay = () => {
+      const selected = state.ui.selectedCustomerId
+        ? state.customers.find(c => c.id === state.ui.selectedCustomerId)
+        : null;
+      const accValue = String(byId('txAcc')?.value || '').trim();
+      if (selected && String(selected.accountNumber || '') === accValue) {
+        if (byId('txName')) byId('txName').textContent = selected.name;
+        if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(selected.balance);
+      }
+    };
+
     const searchJournal = () => {
       const value = (byId('journalAcc')?.value || '').trim();
       const c = getCustomerByAccountNo(value);
@@ -3344,12 +3355,15 @@ function normalizeStaffLedgerEntryType(row) {
     }
 
     if (byId('txApplyCharges')) byId('txApplyCharges').onchange = updateSingleCommissionPreview;
-    if (byId('txAmount')) byId('txAmount').oninput = debounce(updateSingleCommissionPreview, 150);
+    if (byId('txAmount')) byId('txAmount').oninput = debounce(() => {
+      updateSingleCommissionPreview();
+      restoreSelectedCustomerDisplay();
+    }, 150);
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="single"]`);
-      if (check) check.onchange = updateSingleCommissionPreview;
-      if (input) input.oninput = updateSingleCommissionPreview;
+      if (check) check.onchange = () => { updateSingleCommissionPreview(); restoreSelectedCustomerDisplay(); };
+      if (input) input.oninput = () => { updateSingleCommissionPreview(); restoreSelectedCustomerDisplay(); };
     });
 
     const jumpToJournalPane = () => {
