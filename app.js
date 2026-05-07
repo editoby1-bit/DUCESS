@@ -1897,7 +1897,7 @@ function hideProcessing() {
               <div class="journal-entry-top row-two">
                 <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid To'}</div></div>
                 <div class="journal-cell grow"><input id="journalDetails" class="entry-input"><div class="journal-cell-label">Details</div></div>
-                <div class="journal-cell action"><button id="journalAddRow" class="sheet-btn">Add to Journal</button></div>
+                <div class="journal-cell action"><button id="journalAddRow" type="button" class="sheet-btn">Add to Journal</button></div>
                 <div class="journal-cell action"><button id="journalCollapseBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
               </div>
               ${kind === 'credit' ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
@@ -3612,7 +3612,51 @@ function normalizeStaffLedgerEntryType(row) {
       };
     });
 
-    if (byId('journalAddRow')) byId('journalAddRow').onclick = () => {
+    const readJournalEntrySnapshot = () => ({
+      acc: String(byId('journalAcc')?.value || ''),
+      amount: String(byId('journalAmount')?.value || ''),
+      counterparty: String(byId('journalCounterparty')?.value || ''),
+      details: String(byId('journalDetails')?.value || ''),
+      name: String(byId('journalName')?.textContent || '—'),
+      selectedJournalCustomerId: state.ui.selectedJournalCustomerId || '',
+      charges: {
+        apply: !!telleringDraft.journalCharges?.apply,
+        checked: { ...(telleringDraft.journalCharges?.checked || {}) },
+        values: { ...(telleringDraft.journalCharges?.values || {}) }
+      }
+    });
+
+    const restoreJournalEntrySnapshot = (snapshot) => {
+      if (!snapshot) return;
+      if (byId('journalAcc')) byId('journalAcc').value = snapshot.acc;
+      if (byId('journalAmount')) byId('journalAmount').value = snapshot.amount;
+      if (byId('journalCounterparty')) byId('journalCounterparty').value = snapshot.counterparty;
+      if (byId('journalDetails')) byId('journalDetails').value = snapshot.details;
+      if (byId('journalName')) byId('journalName').textContent = snapshot.name || '—';
+      state.ui.selectedJournalCustomerId = snapshot.selectedJournalCustomerId || state.ui.selectedJournalCustomerId || null;
+      telleringDraft.journalAmount = snapshot.amount;
+      telleringDraft.journalCharges = {
+        apply: !!snapshot.charges?.apply,
+        checked: { ...(snapshot.charges?.checked || {}) },
+        values: { ...(snapshot.charges?.values || {}) }
+      };
+      if (byId('journalApplyCharges')) byId('journalApplyCharges').checked = !!telleringDraft.journalCharges.apply;
+      CHARGE_DEFS.forEach(def => {
+        const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
+        const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
+        if (check) check.checked = !!telleringDraft.journalCharges.checked[def.key];
+        if (input) {
+          input.value = telleringDraft.journalCharges.values[def.key] || '';
+          input.classList.toggle('hidden', !telleringDraft.journalCharges.checked[def.key]);
+        }
+      });
+      updateJournalCommissionPreview();
+    };
+
+    if (byId('journalAddRow')) byId('journalAddRow').onclick = (event) => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const journalEntrySnapshot = readJournalEntrySnapshot();
       const journalAccValue = String(byId('journalAcc')?.value || '').trim();
       const selectedJournalCustomer = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
       const customer = (selectedJournalCustomer && String(selectedJournalCustomer.accountNumber || '') === journalAccValue)
@@ -3646,10 +3690,10 @@ function normalizeStaffLedgerEntryType(row) {
       });
       save();
       recalcPreview();
-      // Surgical fix: do NOT call resetJournalEntryFields() here.
-      // Root cause: Add to Journal was successfully adding the row, then immediately clearing
-      // journalAcc, journalAmount, journal charges, customer name, counterparty, and details.
-      // Leaving the entry fields intact prevents the first-click disappearing-value behaviour.
+      restoreJournalEntrySnapshot(journalEntrySnapshot);
+      requestAnimationFrame(() => restoreJournalEntrySnapshot(journalEntrySnapshot));
+      // Root fix: Add to Journal must only add a row and refresh the journal table.
+      // It must not clear or rewrite the active journal entry controls.
     };
 
     const fieldNoteInput = byId('journalFieldNoteInput');
