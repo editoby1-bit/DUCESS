@@ -11724,3 +11724,48 @@ input.approval-select-checkbox,
   font-size:11px !important;
   line-height:1 !important;
 }
+
+/* Surgical follow-up 3: Customer Search selection fallback and tellering amount stability. */
+.customer-search-row{cursor:pointer;}
+.customer-search-row:hover{background:rgba(15,23,42,.04);}
+.customer-name-pick{
+  appearance:none !important;
+  border:0 !important;
+  background:transparent !important;
+  padding:0 !important;
+  margin:0 !important;
+  color:inherit !important;
+  font:inherit !important;
+  font-weight:600 !important;
+  cursor:pointer !important;
+  text-align:left !important;
+  width:100% !important;
+}
+.customer-name-pick:hover{text-decoration:underline;}
+#modalBack .modal[data-modal-title="Customer Search"]{
+  width:min(1120px,96vw) !important;
+  max-width:96vw !important;
+}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table-wrap{
+  overflow-x:auto !important;
+}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table{
+  min-width:720px !important;
+  width:100% !important;
+  table-layout:fixed !important;
+}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table th:nth-child(1),
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table td:nth-child(1){width:26% !important;}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table th:nth-child(2),
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table td:nth-child(2){width:34% !important;}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table th:nth-child(3),
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table td:nth-child(3){width:24% !important;}
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table th:nth-child(4),
+#modalBack .modal[data-modal-title="Customer Search"] .customer-search-table td:nth-child(4){
+  display:table-cell !important;
+  visibility:visible !important;
+  width:16% !important;
+  min-width:82px !important;
+  text-align:center !important;
+}
+#txAmount{pointer-events:auto !important; user-select:text !important;}

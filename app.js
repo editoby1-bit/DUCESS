@@ -3379,12 +3379,13 @@ function normalizeStaffLedgerEntryType(row) {
       });
     };
 
-    const searchSingle = () => {
+    const searchSingle = (opts = {}) => {
+      const activeBefore = document.activeElement;
       const value = (byId('txAcc')?.value || '').trim();
       state.ui.txAccDraft = value;
       const c = getCustomerByAccountNo(value);
-      if (!c) return showToast('Customer not found');
-      if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); return showToast('Account is frozen'); }
+      if (!c) { if (!opts.quiet) showToast('Customer not found'); return null; }
+      if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); if (!opts.quiet) showToast('Account is frozen'); return null; }
       state.ui.selectedCustomerId = c.id;
       state.ui.generatedJournals ||= {};
       state.ui.collapsedJournals ||= {};
@@ -3393,6 +3394,11 @@ function normalizeStaffLedgerEntryType(row) {
       save();
       if (byId('txName')) byId('txName').textContent = c.name;
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
+      // Keep the Amount field stable if account lookup completes while the user is moving into it.
+      if (activeBefore && activeBefore.id === 'txAmount' && byId('txAmount')) {
+        requestAnimationFrame(() => byId('txAmount')?.focus({ preventScroll: true }));
+      }
+      return c;
     };
 
     const restoreSingleCustomerDisplay = () => {
@@ -3419,36 +3425,35 @@ function normalizeStaffLedgerEntryType(row) {
 
     if (byId('txSearch')) byId('txSearch').onclick = () => openCustomerSearchModal(state.customers);
     if (byId('txAcc')) {
-      byId('txAcc').oninput = debounce(() => {
+      const clearSingleCustomer = () => {
+        if (byId('txName')) byId('txName').textContent = '—';
+        if (byId('txBalance')) byId('txBalance').innerHTML = '—';
+        state.ui.selectedCustomerId = null;
+        state.ui.generatedJournals ||= {};
+        state.ui.collapsedJournals ||= {};
+        state.ui.generatedJournals[visibilityKey] = false;
+        state.ui.collapsedJournals[visibilityKey] = false;
+        save();
+      };
+      byId('txAcc').oninput = () => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
-        if (!v) {
+        if (!v) { clearSingleCustomer(); return; }
+        if (!/^\d{4}$/.test(v)) {
           if (byId('txName')) byId('txName').textContent = '—';
           if (byId('txBalance')) byId('txBalance').innerHTML = '—';
           state.ui.selectedCustomerId = null;
-          state.ui.generatedJournals ||= {};
-          state.ui.collapsedJournals ||= {};
-          state.ui.generatedJournals[visibilityKey] = false;
-          state.ui.collapsedJournals[visibilityKey] = false;
           save();
           return;
         }
-        if (/^\d{4}$/.test(v)) searchSingle();
-      }, 200);
-      byId('txAcc').onchange = () => {
+        // Run lookup immediately instead of delayed debounce, so it cannot fire after the user clicks Amount.
+        searchSingle({ quiet: true });
+      };
+      byId('txAcc').onchange = (event) => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
-        if (!v) {
-          if (byId('txName')) byId('txName').textContent = '—';
-          if (byId('txBalance')) byId('txBalance').innerHTML = '—';
-          state.ui.selectedCustomerId = null;
-          state.ui.generatedJournals ||= {};
-          state.ui.collapsedJournals ||= {};
-          state.ui.generatedJournals[visibilityKey] = false;
-          state.ui.collapsedJournals[visibilityKey] = false;
-          save();
-          return;
-        }
+        if (!v) { clearSingleCustomer(); return; }
+        if (event?.relatedTarget?.id === 'txAmount') return;
         searchSingle();
       };
       byId('txAcc').onkeyup = e => { if(e.key==='Enter') searchSingle(); };
@@ -3456,11 +3461,11 @@ function normalizeStaffLedgerEntryType(row) {
 
     if (byId('txApplyCharges')) byId('txApplyCharges').onchange = updateSingleCommissionPreview;
     if (byId('txAmount')) {
-      // Surgical fix: do not run account restore on amount focus.
-      // The delayed account search/save can fire after the user clicks Amount,
-      // causing the amount input to lose focus before typing starts.
-      byId('txAmount').onfocus = null;
-      byId('txAmount').oninput = debounce(updateSingleCommissionPreview, 150);
+      const amountInput = byId('txAmount');
+      amountInput.onfocus = null;
+      amountInput.onmousedown = () => { requestAnimationFrame(() => amountInput.focus({ preventScroll: true })); };
+      amountInput.ontouchstart = () => { requestAnimationFrame(() => amountInput.focus({ preventScroll: true })); };
+      amountInput.oninput = debounce(updateSingleCommissionPreview, 150);
     }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
@@ -4129,9 +4134,13 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
   function freezeInactiveCustomer(c){ if(!c) return; if(c.active === false) c.frozen = true; }
 
   function openCustomerSearchModal(list) {
-    const renderRows = arr => arr.map(c=>`<tr><td>${escapeHtml(c.accountNumber || '')}</td><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
-    const bindPicks = () => qq('[data-pick]').forEach(el => el.onclick = () => { state.ui.selectedCustomerId = el.dataset.pick; save(); closeModal(); applySelectedCustomerToActiveTool(); });
+    const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
+    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    const pickCustomer = (id) => { state.ui.selectedCustomerId = id; save(); closeModal(); applySelectedCustomerToActiveTool(); };
+    const bindPicks = () => {
+      qq('[data-pick]').forEach(el => el.onclick = (event) => { event.stopPropagation(); pickCustomer(el.dataset.pick); });
+      qq('[data-pick-row]').forEach(row => row.onclick = () => pickCustomer(row.dataset.pickRow));
+    };
     bindPicks();
     const search = byId('modalCustomerSearch');
     if (search) search.oninput = () => {
