@@ -3505,7 +3505,15 @@ function normalizeStaffLedgerEntryType(row) {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
         if (!v) { clearSingleCustomer(); return; }
-        if (event?.relatedTarget?.id === 'txAmount') return;
+        // Do not re-run lookup when blur/change is caused by moving into Amount.
+        // Some browsers do not reliably populate relatedTarget here, so also guard
+        // by checking whether the current selected customer already matches this account.
+        const already = state.ui.selectedCustomerId ? state.customers.find(c => c.id === state.ui.selectedCustomerId) : null;
+        if (event?.relatedTarget?.id === 'txAmount' || (already && String(already.accountNumber || '') === v)) {
+          if (byId('txName')) byId('txName').textContent = already?.name || byId('txName')?.textContent || '—';
+          if (already && byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(already.balance);
+          return;
+        }
         searchSingle();
       };
       byId('txAcc').onkeyup = e => { if(e.key==='Enter') searchSingle(); };
@@ -3518,9 +3526,21 @@ function normalizeStaffLedgerEntryType(row) {
     };
     if (byId('txAmount')) {
       const amountInput = byId('txAmount');
-      amountInput.onfocus = null;
-      amountInput.onmousedown = null;
-      amountInput.ontouchstart = null;
+      const keepAmountFocus = () => {
+        // Account lookup/change handlers can repaint just as the user clicks Amount.
+        // Refocus the same Amount input on the next frames so the first click stays active.
+        const id = amountInput.id;
+        const restore = () => {
+          const fresh = byId(id);
+          if (fresh && document.activeElement !== fresh) fresh.focus({ preventScroll: true });
+        };
+        requestAnimationFrame(restore);
+        setTimeout(restore, 0);
+      };
+      amountInput.onfocus = keepAmountFocus;
+      amountInput.onmousedown = keepAmountFocus;
+      amountInput.ontouchstart = keepAmountFocus;
+      amountInput.onpointerdown = keepAmountFocus;
       amountInput.oninput = () => {
         state.ui.txAmountDraft = amountInput.value || '';
         save();
@@ -3636,9 +3656,20 @@ function normalizeStaffLedgerEntryType(row) {
           accountInput.value = state.ui.journalAccDraft;
         }
       };
-      journalAmountInput.onfocus = protectJournalAccountDraft;
-      journalAmountInput.onmousedown = protectJournalAccountDraft;
-      journalAmountInput.ontouchstart = protectJournalAccountDraft;
+      const keepJournalAmountFocus = () => {
+        protectJournalAccountDraft();
+        const id = journalAmountInput.id;
+        const restore = () => {
+          const fresh = byId(id);
+          if (fresh && document.activeElement !== fresh) fresh.focus({ preventScroll: true });
+        };
+        requestAnimationFrame(restore);
+        setTimeout(restore, 0);
+      };
+      journalAmountInput.onfocus = keepJournalAmountFocus;
+      journalAmountInput.onmousedown = keepJournalAmountFocus;
+      journalAmountInput.ontouchstart = keepJournalAmountFocus;
+      journalAmountInput.onpointerdown = keepJournalAmountFocus;
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
         protectJournalAccountDraft();
