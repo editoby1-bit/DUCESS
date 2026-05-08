@@ -3509,8 +3509,13 @@ function normalizeStaffLedgerEntryType(row) {
           save();
           return;
         }
-        // Run lookup immediately instead of delayed debounce, so it cannot fire after the user clicks Amount.
-        searchSingle({ quiet: true });
+        // Avoid repaint/save races while typing/selecting. Only perform the
+        // quiet lookup once the full 4-digit account number is present and the
+        // selection is not already active for this account.
+        const existing = state.ui.selectedCustomerId ? state.customers.find(c => c.id === state.ui.selectedCustomerId) : null;
+        if (!existing || String(existing.accountNumber || '') !== v) {
+          searchSingle({ quiet: true });
+        }
       };
       byId('txAcc').onchange = (event) => {
         const v = (byId('txAcc').value || '').trim();
