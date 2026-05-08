@@ -3575,26 +3575,47 @@ function normalizeStaffLedgerEntryType(row) {
       const clearJournalCustomer = () => {
         if (byId('journalName')) byId('journalName').textContent = '—';
         state.ui.selectedJournalCustomerId = null;
-        save();
+        // Do NOT call save() here — it can trigger re-renders that wipe the account field
       };
       byId('journalAcc').oninput = () => {
         if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
+        // CRITICAL: set journalAccDraft immediately so any re-render restores this value
         state.ui.journalAccDraft = v;
+        if (!v) {
+          state.ui.selectedJournalCustomerId = null;
+          if (byId('journalName')) byId('journalName').textContent = '—';
+          save();
+          return;
+        }
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
-        if (!v) { clearJournalCustomer(); return; }
-        if (selected && String(selected.accountNumber || '') !== v) clearJournalCustomer();
-        // Run journal lookup immediately, not delayed, so it cannot fire after the user starts typing Amount/Charges.
-        if (/^\d{4}$/.test(v)) searchJournal({ quiet: true });
+        if (selected && String(selected.accountNumber || '') !== v) {
+          state.ui.selectedJournalCustomerId = null;
+          if (byId('journalName')) byId('journalName').textContent = '—';
+        }
+        // Auto-lookup on exactly 4 digits — only update DOM, save AFTER
+        if (/^\d{4}$/.test(v)) {
+          const found = getCustomerByAccountNo(v);
+          if (found && !isCustomerFrozen(found) && found.active !== false) {
+            state.ui.selectedJournalCustomerId = found.id;
+            if (byId('journalName')) byId('journalName').textContent = found.name;
+          }
+        }
+        // Save at end — journalAccDraft already set so re-render will restore correctly
+        save();
       };
       byId('journalAcc').onchange = (event) => {
         if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
         if (!v) { clearJournalCustomer(); return; }
+        // If already resolved for this account number, don't re-search
+        const already = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
+        if (already && String(already.accountNumber || '') === v) return;
+        // Don't trigger lookup when moving to journal fields
         const nextId = event?.relatedTarget?.id || '';
         const nextScope = event?.relatedTarget?.dataset?.chargeScope || '';
         if (nextId === 'journalAmount' || nextId === 'journalCounterparty' || nextId === 'journalDetails' || nextScope === 'journal') return;
-        searchJournal();
+        searchJournal({ quiet: true });
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
     }
