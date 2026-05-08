@@ -553,9 +553,81 @@ async function submitDebtRepayment(_payload) {
     }
 
     async function getAccountSummary(accountId) {
-      const customerResult = await getCustomerById(accountId);
-      if (!customerResult.ok) return customerResult;
-      return defaultResult.ok(customerResult.data ? customerToAccountSummary(customerResult.data) : null);
+      if (!canUseSupabase()) return local.accounts.getAccountSummary(accountId);
+      const key = String(accountId || '').trim();
+      if (!key) return defaultResult.ok(null);
+
+      // Resolve staff accounts first when the payload is clearly a staff code
+      // (for example ST4/st4). This prevents a UUID-only customers.id lookup
+      // from throwing "Could not fetch customers from Supabase".
+      if (!isUuidLike(key) && /^st/i.test(key)) {
+        const staffSummary = await fetchStaffAccountByKey(key);
+        if (!staffSummary.ok) return staffSummary;
+        if (staffSummary.data) {
+          const staffBalance = await fetchBalancesByAccountIds([staffSummary.data.accountId]);
+          if (staffBalance.ok && staffBalance.data[0] && staffBalance.data[0].book_balance != null) {
+            staffSummary.data.bookBalance = Number(staffBalance.data[0].book_balance || 0);
+          }
+          return defaultResult.ok(staffSummary.data);
+        }
+      }
+
+      // Migration bridge: approval payloads often pass the customer id as accountId.
+      // Only query customers.id when the value is UUID-like; staff codes such as ST4
+      // are not valid UUID values and must not be sent to the customers.id filter.
+      let customer = null;
+      if (isUuidLike(key)) {
+        const directCustomerResult = await getCustomerById(key);
+        if (!directCustomerResult.ok) return directCustomerResult;
+        customer = directCustomerResult.data;
+      }
+
+      let accountRow = null;
+      if (!customer && isUuidLike(key)) {
+        const accountResult = await fetchAccountBySelector({ id: key });
+        if (!accountResult.ok) return accountResult;
+        accountRow = accountResult.data;
+        if (accountRow?.customer_id) {
+          const customerResult = await getCustomerById(accountRow.customer_id);
+          if (!customerResult.ok) return customerResult;
+          customer = customerResult.data;
+        }
+      }
+
+      if (!customer && accountRow?.account_number) {
+        const customerResult = await getCustomerByAccountNumber(accountRow.account_number);
+        if (!customerResult.ok) return customerResult;
+        customer = customerResult.data;
+      }
+
+      if (!customer) {
+        const byAccountNumber = await getCustomerByAccountNumber(key);
+        if (!byAccountNumber.ok) return byAccountNumber;
+        customer = byAccountNumber.data;
+      }
+
+      if (!customer) {
+        const staffSummary = await fetchStaffAccountByKey(key);
+        if (!staffSummary.ok) return staffSummary;
+        if (staffSummary.data) {
+          const staffBalance = await fetchBalancesByAccountIds([staffSummary.data.accountId]);
+          if (staffBalance.ok && staffBalance.data[0] && staffBalance.data[0].book_balance != null) {
+            staffSummary.data.bookBalance = Number(staffBalance.data[0].book_balance || 0);
+          }
+          return defaultResult.ok(staffSummary.data);
+        }
+      }
+
+      if (!customer) return defaultResult.ok(null);
+      const summary = customerToAccountSummary(customer);
+      if (summary && accountRow?.id) summary.accountId = accountRow.id;
+      if (summary && accountRow?.status) summary.status = accountRow.status;
+      if (summary) summary.accountType = summary.accountType || 'customer';
+      const balanceResult = await fetchBalancesByAccountIds([summary?.accountId]);
+      if (summary && balanceResult.ok && balanceResult.data[0] && balanceResult.data[0].book_balance != null) {
+        summary.bookBalance = Number(balanceResult.data[0].book_balance || 0);
+      }
+      return defaultResult.ok(summary);
     }
 
     async function getAccountStatement(payload = {}) {
@@ -984,7 +1056,7 @@ function subscribeRealtime() {
   const detailPieces = [entry?.details || '', chargeText, customerGetsText].filter(Boolean);
 
   const insertRow = {
-    customer_id: entry?.customerId || accountSummary.customerId || null,
+    customer_id: accountSummary.accountType === 'staff' ? null : (accountSummary.customerId || entry?.customerId || null),
     account_id: accountSummary.accountId,
     tx_type: txType,
     amount,
@@ -1678,6 +1750,47 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(data);
     }
 
+
+    function isUuidLike(value) {
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+    }
+
+    function staffToAccountSummary(rawStaff) {
+      const staff = normalizeStaffSummary(rawStaff);
+      if (!staff) return null;
+      return {
+        accountId: staff.id || staff.uuid || staff.staffId,
+        accountNumber: staff.staffId || rawStaff?.staff_code || '',
+        customerId: null,
+        customerName: staff.fullName || rawStaff?.full_name || staff.staffId || '',
+        status: staff.isActive === false ? 'inactive' : 'active',
+        bookBalance: 0,
+        accountType: 'staff',
+        staffId: staff.staffId || rawStaff?.staff_code || '',
+        staffUuid: staff.id || staff.uuid || ''
+      };
+    }
+
+    async function fetchStaffAccountByKey(value) {
+      if (!canUseSupabase()) return defaultResult.ok(null);
+      const key = String(value || '').trim();
+      if (!key) return defaultResult.ok(null);
+
+      if (isUuidLike(key)) {
+        const byId = await getStaffProfileBySelector({ id: key });
+        if (byId.ok && byId.data) return defaultResult.ok(staffToAccountSummary(byId.data));
+        if (!byId.ok && byId.error?.code !== 'STAFF_PROFILE_NOT_FOUND') return byId;
+      }
+
+      const attempts = Array.from(new Set([key, key.toUpperCase(), key.toLowerCase()].filter(Boolean)));
+      for (const staffCode of attempts) {
+        const byCode = await getStaffProfileBySelector({ staff_code: staffCode });
+        if (byCode.ok && byCode.data) return defaultResult.ok(staffToAccountSummary(byCode.data));
+        if (!byCode.ok && byCode.error?.code !== 'STAFF_PROFILE_NOT_FOUND') return byCode;
+      }
+      return defaultResult.ok(null);
+    }
+
     async function fetchRolePermissions(roleCode) {
       if (!canUseSupabase() || !roleCode) return defaultResult.ok([]);
       const { data, error: queryError } = await client
@@ -2085,28 +2198,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         customer = byAccountNumber.data;
       }
 
-      if (!customer) {
-        const staffKey = String(key || '').trim();
-        let staffResult = null;
-        if (staffKey) {
-          staffResult = await getStaffProfileBySelector({ staff_code: staffKey.toLowerCase() });
-          if (!staffResult.ok) staffResult = await getStaffProfileBySelector({ staff_code: staffKey.toUpperCase() });
-          if (!staffResult.ok) staffResult = await getStaffProfileBySelector({ id: staffKey });
-        }
-        if (staffResult?.ok && staffResult.data) {
-          const staff = staffResult.data;
-          return defaultResult.ok({
-            accountId: staff.id,
-            accountNumber: staff.staff_code || staff.staffId || staff.id,
-            customerId: staff.id,
-            customerName: staff.full_name || staff.name || staff.staff_code || 'Staff Account',
-            status: 'active',
-            bookBalance: 0,
-            accountType: 'staff'
-          });
-        }
-        return defaultResult.ok(null);
-      }
+      if (!customer) return defaultResult.ok(null);
       const summary = customerToAccountSummary(customer);
       if (summary && accountRow?.id) summary.accountId = accountRow.id;
       if (summary && accountRow?.status) summary.status = accountRow.status;
