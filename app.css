@@ -11795,3 +11795,13 @@ label.tx-toggle-pill span { font-size: 10px !important; }
 .tellering-lower .field label { font-size: 9px !important; text-transform: uppercase !important; letter-spacing: .04em !important; }
 /* Journal cell labels */
 .journal-cell-label { font-size: 9px !important; text-transform: uppercase !important; letter-spacing: .04em !important; margin-top: 1px !important; }
+
+
+/* Surgical journal/mid-section label alignment patch */
+.tellering-inline-meta .field label {
+  font-size: 9px !important;
+  line-height: 1.1 !important;
+  margin-bottom: 2px !important;
+  text-transform: uppercase !important;
+  letter-spacing: .04em !important;
+}

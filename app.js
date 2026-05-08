@@ -3634,7 +3634,6 @@ function normalizeStaffLedgerEntryType(row) {
         if (journalAmountInput.dataset?.restoring === '1') return;
         telleringDraft.journalAmount = journalAmountInput.value || '';
         save();
-        save();
         updateJournalCommissionPreview();
       };
       journalAmountInput.onchange = () => { telleringDraft.journalAmount = journalAmountInput.value || ''; save(); };
@@ -3750,14 +3749,16 @@ function normalizeStaffLedgerEntryType(row) {
         paymentMode: mode,
         date: businessDate()
       });
-      save();
-      recalcPreview();
-      // Clear ALL fields including account after adding to journal
+      // Clear the journal draft state before saving so the next render cannot restore old entry values.
       resetJournalEntryFields(true);
       state.ui.journalAccDraft = '';
       state.ui.selectedJournalCustomerId = null;
+      telleringDraft.journalAmount = '';
+      telleringDraft.journalCharges = { apply: false, checked: {}, values: {} };
       if (byId('journalAcc')) byId('journalAcc').value = '';
       if (byId('journalName')) byId('journalName').textContent = '—';
+      recalcPreview();
+      save();
       // Re-focus account for next entry
       requestAnimationFrame(() => byId('journalAcc')?.focus({ preventScroll: true }));
     };
