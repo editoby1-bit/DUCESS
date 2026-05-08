@@ -180,21 +180,6 @@ const ROLE_DEFAULT_TOOLS = {
       customerName: normalized.name,
       status: normalized.active ? 'active' : 'inactive',
       bookBalance: Number(normalized.balance || 0),
-      accountType: normalized.accountType || 'customer',
-    };
-  }
-
-  function accountRowToAccountSummary(accountRow, customer) {
-    if (!accountRow) return null;
-    const customerSummary = customer ? customerToAccountSummary(customer) : null;
-    return {
-      accountId: accountRow.id || customerSummary?.accountId || '',
-      accountNumber: String(accountRow.account_number || customerSummary?.accountNumber || ''),
-      customerId: accountRow.customer_id || customerSummary?.customerId || null,
-      customerName: customerSummary?.customerName || (String(accountRow.account_type || '').toLowerCase() === 'staff' ? 'Staff Account' : 'Account'),
-      status: accountRow.status || customerSummary?.status || 'active',
-      bookBalance: Number(customerSummary?.bookBalance || 0),
-      accountType: accountRow.account_type || customerSummary?.accountType || 'customer',
     };
   }
 
@@ -562,87 +547,15 @@ async function submitDebtRepayment(_payload) {
     }
 
     async function getAccountByNumber(accountNumber) {
-      if (!canUseSupabase()) return local.accounts.getAccountByNumber(accountNumber);
-      const key = String(accountNumber || '').trim();
-      if (!key) return defaultResult.ok(null);
-
-      const customerResult = await getCustomerByAccountNumber(key);
-      if (customerResult.ok && customerResult.data) return defaultResult.ok(customerToAccountSummary(customerResult.data));
-      if (!customerResult.ok && !isMissingColumnOrRelationError(customerResult.error?.details || customerResult.error)) return customerResult;
-
-      const accountResult = await fetchAccountBySelector({ account_number: key });
-      if (!accountResult.ok) return accountResult;
-      const accountRow = accountResult.data;
-      if (!accountRow) return defaultResult.ok(null);
-
-      let customer = null;
-      if (accountRow.customer_id) {
-        const linkedCustomerResult = await getCustomerById(accountRow.customer_id);
-        if (!linkedCustomerResult.ok && !isMissingColumnOrRelationError(linkedCustomerResult.error?.details || linkedCustomerResult.error)) return linkedCustomerResult;
-        customer = linkedCustomerResult.data || null;
-      }
-      const summary = accountRowToAccountSummary(accountRow, customer);
-      const balanceResult = await fetchBalancesByAccountIds([summary?.accountId]);
-      if (summary && balanceResult.ok && balanceResult.data[0] && balanceResult.data[0].book_balance != null) {
-        summary.bookBalance = Number(balanceResult.data[0].book_balance || 0);
-      }
-      return defaultResult.ok(summary);
+      const customerResult = await getCustomerByAccountNumber(accountNumber);
+      if (!customerResult.ok) return customerResult;
+      return defaultResult.ok(customerResult.data ? customerToAccountSummary(customerResult.data) : null);
     }
 
     async function getAccountSummary(accountId) {
-      if (!canUseSupabase()) return local.accounts.getAccountSummary(accountId);
-      const key = String(accountId || '').trim();
-      if (!key) return defaultResult.ok(null);
-
-      // Approval payloads may pass a customer id, an account id, or a visible account number.
-      // Staff accounts can exist only in customer_accounts, so do not force every posting
-      // through the customers table.
-      let customer = null;
-      let accountRow = null;
-
-      const directCustomerResult = await getCustomerById(key);
-      if (directCustomerResult.ok) customer = directCustomerResult.data;
-      else if (!isMissingColumnOrRelationError(directCustomerResult.error?.details || directCustomerResult.error)) return directCustomerResult;
-
-      if (!customer) {
-        const accountByIdResult = await fetchAccountBySelector({ id: key });
-        if (!accountByIdResult.ok) return accountByIdResult;
-        accountRow = accountByIdResult.data;
-      }
-
-      if (!accountRow && !customer) {
-        const accountByNumberResult = await fetchAccountBySelector({ account_number: key });
-        if (!accountByNumberResult.ok) return accountByNumberResult;
-        accountRow = accountByNumberResult.data;
-      }
-
-      if (accountRow?.customer_id && !customer) {
-        const linkedCustomerResult = await getCustomerById(accountRow.customer_id);
-        if (!linkedCustomerResult.ok && !isMissingColumnOrRelationError(linkedCustomerResult.error?.details || linkedCustomerResult.error)) return linkedCustomerResult;
-        customer = linkedCustomerResult.data || null;
-      }
-
-      if (!customer && accountRow?.account_number) {
-        const customerByAccountResult = await getCustomerByAccountNumber(accountRow.account_number);
-        if (customerByAccountResult.ok) customer = customerByAccountResult.data;
-        else if (!isMissingColumnOrRelationError(customerByAccountResult.error?.details || customerByAccountResult.error)) return customerByAccountResult;
-      }
-
-      if (!customer && !accountRow) {
-        const byAccountNumber = await getCustomerByAccountNumber(key);
-        if (byAccountNumber.ok) customer = byAccountNumber.data;
-        else if (!isMissingColumnOrRelationError(byAccountNumber.error?.details || byAccountNumber.error)) return byAccountNumber;
-      }
-
-      if (!customer && !accountRow) return defaultResult.ok(null);
-      const summary = accountRow ? accountRowToAccountSummary(accountRow, customer) : customerToAccountSummary(customer);
-      if (summary && accountRow?.id) summary.accountId = accountRow.id;
-      if (summary && accountRow?.status) summary.status = accountRow.status;
-      const balanceResult = await fetchBalancesByAccountIds([summary?.accountId]);
-      if (summary && balanceResult.ok && balanceResult.data[0] && balanceResult.data[0].book_balance != null) {
-        summary.bookBalance = Number(balanceResult.data[0].book_balance || 0);
-      }
-      return defaultResult.ok(summary);
+      const customerResult = await getCustomerById(accountId);
+      if (!customerResult.ok) return customerResult;
+      return defaultResult.ok(customerResult.data ? customerToAccountSummary(customerResult.data) : null);
     }
 
     async function getAccountStatement(payload = {}) {
@@ -761,7 +674,6 @@ async function submitDebtRepayment(_payload) {
       approvals: {
         listApprovalRequests: () => notYet('approvals.listApprovalRequests'),
         getApprovalRequestById: () => notYet('approvals.getApprovalRequestById'),
-        setReviewLock: () => notYet('approvals.setReviewLock'),
         submitApprovalRequest: () => notYet('approvals.submitApprovalRequest'),
         approveRequest: () => notYet('approvals.approveRequest'),
         rejectRequest: () => notYet('approvals.rejectRequest'),
@@ -1043,7 +955,7 @@ function subscribeRealtime() {
 
    async function postSingleCustomerTransaction(requestRow, entry, txType, approver, options = {}) {
   const approvalRequestId = requestRow?.id;
-  const accountLookupId = entry?.accountId || entry?.customerId || entry?.accountNumber || requestRow?.entity_id || requestRow?.entityId;
+  const accountLookupId = entry?.accountId || entry?.customerId || requestRow?.entity_id || requestRow?.entityId;
 
   const accountSummaryResult = await getAccountSummary(accountLookupId);
   if (!accountSummaryResult.ok) return accountSummaryResult;
@@ -1350,44 +1262,6 @@ if (inserted.error) {
       if (!canUseSupabase()) return local.approvals.getApprovalRequestById(requestId);
       const { data, error: queryError } = await client.from(approvalRequestsTable).select(approvalRequestsSelect).eq('id', requestId).maybeSingle();
       if (queryError) return defaultResult.err('APPROVAL_FETCH_FAILED', 'Could not load approval request from Supabase.', queryError);
-      return defaultResult.ok(normalizeApprovalRecord(data));
-    }
-
-    async function setReviewLock(payload = {}) {
-      if (!canUseSupabase()) return local.approvals.setReviewLock(payload);
-      const requestId = payload.requestId || payload.request_id || '';
-      if (!requestId) return defaultResult.err('APPROVAL_LOCK_INVALID', 'Approval request id is required.');
-      const staffId = payload.staffId || payload.staff_id || '';
-      const staffName = payload.staffName || payload.staff_name || 'Staff';
-      const ttlMs = Number(payload.ttlMs || 60000);
-      const nowIso = new Date().toISOString();
-      const nowMs = Date.now();
-      const rowResult = await fetchApprovalRequestRow(requestId, 'pending');
-      if (!rowResult.ok) return rowResult;
-      const row = rowResult.data;
-      const currentPayload = row.payload && typeof row.payload === 'object' ? clone(row.payload) : {};
-      const currentLock = currentPayload.__reviewLock || null;
-      const lockStarted = currentLock?.startedAt ? new Date(currentLock.startedAt).getTime() : 0;
-      const expired = !lockStarted || (nowMs - lockStarted) > ttlMs;
-      if (currentLock?.staffId && currentLock.staffId !== staffId && !expired) {
-        return defaultResult.err('APPROVAL_LOCKED', `${currentLock.staffName || 'Another staff'} is reviewing this request.`, currentLock);
-      }
-      const nextPayload = mergeApprovalPayload(currentPayload, {
-        __reviewLock: {
-          staffId,
-          staffName,
-          startedAt: nowIso,
-          expiresAt: new Date(nowMs + ttlMs).toISOString()
-        }
-      });
-      const { data, error: updateError } = await client
-        .from(approvalRequestsTable)
-        .update({ payload: nextPayload })
-        .eq('id', requestId)
-        .eq('status', 'pending')
-        .select(approvalRequestsSelect)
-        .maybeSingle();
-      if (updateError) return defaultResult.err('APPROVAL_LOCK_FAILED', 'Could not mark this request as being reviewed.', updateError);
       return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
@@ -2408,7 +2282,6 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       approvals: {
         listApprovalRequests,
         getApprovalRequestById,
-        setReviewLock,
         submitApprovalRequest,
         approveRequest,
         rejectRequest,
