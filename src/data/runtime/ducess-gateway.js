@@ -2085,7 +2085,28 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         customer = byAccountNumber.data;
       }
 
-      if (!customer) return defaultResult.ok(null);
+      if (!customer) {
+        const staffKey = String(key || '').trim();
+        let staffResult = null;
+        if (staffKey) {
+          staffResult = await getStaffProfileBySelector({ staff_code: staffKey.toLowerCase() });
+          if (!staffResult.ok) staffResult = await getStaffProfileBySelector({ staff_code: staffKey.toUpperCase() });
+          if (!staffResult.ok) staffResult = await getStaffProfileBySelector({ id: staffKey });
+        }
+        if (staffResult?.ok && staffResult.data) {
+          const staff = staffResult.data;
+          return defaultResult.ok({
+            accountId: staff.id,
+            accountNumber: staff.staff_code || staff.staffId || staff.id,
+            customerId: staff.id,
+            customerName: staff.full_name || staff.name || staff.staff_code || 'Staff Account',
+            status: 'active',
+            bookBalance: 0,
+            accountType: 'staff'
+          });
+        }
+        return defaultResult.ok(null);
+      }
       const summary = customerToAccountSummary(customer);
       if (summary && accountRow?.id) summary.accountId = accountRow.id;
       if (summary && accountRow?.status) summary.status = accountRow.status;
