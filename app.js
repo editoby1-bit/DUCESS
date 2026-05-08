@@ -3424,24 +3424,27 @@ function normalizeStaffLedgerEntryType(row) {
     };
 
     const searchSingle = (opts = {}) => {
-      const activeBefore = document.activeElement;
       const value = (byId('txAcc')?.value || '').trim();
       state.ui.txAccDraft = value;
       const c = getCustomerByAccountNo(value);
       if (!c) { if (!opts.quiet) showToast('Customer not found'); return null; }
-      if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); if (!opts.quiet) showToast('Account is frozen'); return null; }
+      if (isCustomerFrozen(c) || c.active === false) {
+        freezeInactiveCustomer(c);
+        if (!opts.quiet) save();
+        if (!opts.quiet) showToast('Account is frozen');
+        return null;
+      }
       state.ui.selectedCustomerId = c.id;
       state.ui.generatedJournals ||= {};
       state.ui.collapsedJournals ||= {};
       state.ui.generatedJournals[visibilityKey] = false;
       state.ui.collapsedJournals[visibilityKey] = false;
-      save();
       if (byId('txName')) byId('txName').textContent = c.name;
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
-      // Keep the Amount field stable if account lookup completes while the user is moving into it.
-      if (activeBefore && activeBefore.id === 'txAmount' && byId('txAmount')) {
-        requestAnimationFrame(() => byId('txAmount')?.focus({ preventScroll: true }));
-      }
+      // Quiet auto-lookup must not save/repaint while the user is moving from
+      // Account Number into Amount. Journal was fixed the same way: keep the
+      // in-memory selection and DOM update now; persist later on post/journal actions.
+      if (!opts.quiet) save();
       return c;
     };
 
@@ -3524,21 +3527,6 @@ function normalizeStaffLedgerEntryType(row) {
     };
     if (byId('txAmount')) {
       const amountInput = byId('txAmount');
-      const keepAmountFocus = () => {
-        // Account lookup/change handlers can repaint just as the user clicks Amount.
-        // Refocus the same Amount input on the next frames so the first click stays active.
-        const id = amountInput.id;
-        const restore = () => {
-          const fresh = byId(id);
-          if (fresh && document.activeElement !== fresh) fresh.focus({ preventScroll: true });
-        };
-        requestAnimationFrame(restore);
-        setTimeout(restore, 0);
-      };
-      amountInput.onfocus = keepAmountFocus;
-      amountInput.onmousedown = keepAmountFocus;
-      amountInput.ontouchstart = keepAmountFocus;
-      amountInput.onpointerdown = keepAmountFocus;
       amountInput.oninput = () => {
         state.ui.txAmountDraft = amountInput.value || '';
         save();
