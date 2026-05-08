@@ -3659,7 +3659,7 @@ function normalizeStaffLedgerEntryType(row) {
           accountInput.value = state.ui.journalAccDraft;
         }
       };
-      const keepJournalAmountFocus = () => {
+      const keepJournalAmountFocus = (event) => {
         protectJournalAccountDraft();
         state.ui.journalAmountFocusPending = true;
         const id = journalAmountInput.id;
@@ -3667,19 +3667,23 @@ function normalizeStaffLedgerEntryType(row) {
           const fresh = byId(id);
           if (fresh && document.activeElement !== fresh) fresh.focus({ preventScroll: true });
         };
+        // The first pointer down happens before journalAcc blur/change. Mark it and
+        // focus manually so the account lookup/change path cannot steal the click.
+        if (event?.type === 'pointerdown' || event?.type === 'mousedown' || event?.type === 'touchstart') {
+          if (document.activeElement !== journalAmountInput && event?.cancelable) event.preventDefault();
+          restore();
+        }
         requestAnimationFrame(restore);
         setTimeout(restore, 0);
-        setTimeout(restore, 35);
         setTimeout(() => {
           restore();
           state.ui.journalAmountFocusPending = false;
-        }, 120);
+        }, 250);
       };
-      journalAmountInput.onfocus = keepJournalAmountFocus;
+      journalAmountInput.onpointerdown = keepJournalAmountFocus;
       journalAmountInput.onmousedown = keepJournalAmountFocus;
       journalAmountInput.ontouchstart = keepJournalAmountFocus;
-      journalAmountInput.onpointerdown = keepJournalAmountFocus;
-      journalAmountInput.addEventListener('click', keepJournalAmountFocus, true);
+      journalAmountInput.onfocus = keepJournalAmountFocus;
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
         protectJournalAccountDraft();
