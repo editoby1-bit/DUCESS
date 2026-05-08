@@ -3621,8 +3621,7 @@ function normalizeStaffLedgerEntryType(row) {
             if (byId('journalName')) byId('journalName').textContent = found.name;
           }
         }
-        // Save at end — journalAccDraft already set so re-render will restore correctly
-        save();
+        // Do not save while typing; saving through the gateway can repaint the journal row and steal focus.
       };
       byId('journalAcc').onchange = () => {
         if (byId('journalAcc')?.dataset?.restoring === '1') return;
@@ -3636,9 +3635,6 @@ function normalizeStaffLedgerEntryType(row) {
         const already = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
         if (already && String(already.accountNumber || '') === v) {
           if (byId('journalName')) byId('journalName').textContent = already.name || '—';
-        }
-        if (state.ui.journalAmountFocusPending) {
-          requestAnimationFrame(() => byId('journalAmount')?.focus({ preventScroll: true }));
         }
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
@@ -3659,39 +3655,19 @@ function normalizeStaffLedgerEntryType(row) {
           accountInput.value = state.ui.journalAccDraft;
         }
       };
-      const keepJournalAmountFocus = (event) => {
+      const keepJournalAmountFocus = () => {
+        // Keep the journal account draft only. Do not force focus or prevent default here;
+        // those aggressive focus calls made the Account Number field lose focus.
         protectJournalAccountDraft();
-        state.ui.journalAmountFocusPending = true;
-        const id = journalAmountInput.id;
-        const restore = () => {
-          const fresh = byId(id);
-          if (fresh && document.activeElement !== fresh) fresh.focus({ preventScroll: true });
-        };
-        // The first pointer down happens before journalAcc blur/change. Mark it and
-        // focus manually so the account lookup/change path cannot steal the click.
-        if (event?.type === 'pointerdown' || event?.type === 'mousedown' || event?.type === 'touchstart') {
-          if (document.activeElement !== journalAmountInput && event?.cancelable) event.preventDefault();
-          restore();
-        }
-        requestAnimationFrame(restore);
-        setTimeout(restore, 0);
-        setTimeout(() => {
-          restore();
-          state.ui.journalAmountFocusPending = false;
-        }, 250);
       };
-      journalAmountInput.onpointerdown = keepJournalAmountFocus;
-      journalAmountInput.onmousedown = keepJournalAmountFocus;
-      journalAmountInput.ontouchstart = keepJournalAmountFocus;
       journalAmountInput.onfocus = keepJournalAmountFocus;
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
         protectJournalAccountDraft();
         telleringDraft.journalAmount = journalAmountInput.value || '';
-        save();
         updateJournalCommissionPreview();
       };
-      journalAmountInput.onchange = () => { protectJournalAccountDraft(); telleringDraft.journalAmount = journalAmountInput.value || ''; save(); };
+      journalAmountInput.onchange = () => { protectJournalAccountDraft(); telleringDraft.journalAmount = journalAmountInput.value || ''; };
     }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
