@@ -3604,18 +3604,19 @@ function normalizeStaffLedgerEntryType(row) {
         // Save at end — journalAccDraft already set so re-render will restore correctly
         save();
       };
-      byId('journalAcc').onchange = (event) => {
+      byId('journalAcc').onchange = () => {
         if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
+        state.ui.journalAccDraft = v;
         if (!v) { clearJournalCustomer(); return; }
-        // If already resolved for this account number, don't re-search
+        // Do not run a lookup from blur/change. On some browsers, clicking Amount fires
+        // change before focus settles and the lookup/save path can repaint the journal row,
+        // making the account number appear to vanish. Auto-lookup already happens oninput
+        // for 4 digits; explicit lookup remains on Search button/Enter/Add to Journal.
         const already = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
-        if (already && String(already.accountNumber || '') === v) return;
-        // Don't trigger lookup when moving to journal fields
-        const nextId = event?.relatedTarget?.id || '';
-        const nextScope = event?.relatedTarget?.dataset?.chargeScope || '';
-        if (nextId === 'journalAmount' || nextId === 'journalCounterparty' || nextId === 'journalDetails' || nextScope === 'journal') return;
-        searchJournal({ quiet: true });
+        if (already && String(already.accountNumber || '') === v) {
+          if (byId('journalName')) byId('journalName').textContent = already.name || '—';
+        }
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
     }
@@ -3627,16 +3628,25 @@ function normalizeStaffLedgerEntryType(row) {
     };
     if (byId('journalAmount')) {
       const journalAmountInput = byId('journalAmount');
-      journalAmountInput.onfocus = null;
-      journalAmountInput.onmousedown = null;
-      journalAmountInput.ontouchstart = null;
+      const protectJournalAccountDraft = () => {
+        const accountInput = byId('journalAcc');
+        const currentValue = String(accountInput?.value || state.ui.journalAccDraft || '').trim();
+        if (currentValue) state.ui.journalAccDraft = currentValue;
+        if (accountInput && !String(accountInput.value || '').trim() && state.ui.journalAccDraft) {
+          accountInput.value = state.ui.journalAccDraft;
+        }
+      };
+      journalAmountInput.onfocus = protectJournalAccountDraft;
+      journalAmountInput.onmousedown = protectJournalAccountDraft;
+      journalAmountInput.ontouchstart = protectJournalAccountDraft;
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
+        protectJournalAccountDraft();
         telleringDraft.journalAmount = journalAmountInput.value || '';
         save();
         updateJournalCommissionPreview();
       };
-      journalAmountInput.onchange = () => { telleringDraft.journalAmount = journalAmountInput.value || ''; save(); };
+      journalAmountInput.onchange = () => { protectJournalAccountDraft(); telleringDraft.journalAmount = journalAmountInput.value || ''; save(); };
     }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
