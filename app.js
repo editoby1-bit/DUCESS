@@ -3637,6 +3637,9 @@ function normalizeStaffLedgerEntryType(row) {
         if (already && String(already.accountNumber || '') === v) {
           if (byId('journalName')) byId('journalName').textContent = already.name || '—';
         }
+        if (state.ui.journalAmountFocusPending) {
+          requestAnimationFrame(() => byId('journalAmount')?.focus({ preventScroll: true }));
+        }
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
     }
@@ -3658,6 +3661,7 @@ function normalizeStaffLedgerEntryType(row) {
       };
       const keepJournalAmountFocus = () => {
         protectJournalAccountDraft();
+        state.ui.journalAmountFocusPending = true;
         const id = journalAmountInput.id;
         const restore = () => {
           const fresh = byId(id);
@@ -3665,11 +3669,17 @@ function normalizeStaffLedgerEntryType(row) {
         };
         requestAnimationFrame(restore);
         setTimeout(restore, 0);
+        setTimeout(restore, 35);
+        setTimeout(() => {
+          restore();
+          state.ui.journalAmountFocusPending = false;
+        }, 120);
       };
       journalAmountInput.onfocus = keepJournalAmountFocus;
       journalAmountInput.onmousedown = keepJournalAmountFocus;
       journalAmountInput.ontouchstart = keepJournalAmountFocus;
       journalAmountInput.onpointerdown = keepJournalAmountFocus;
+      journalAmountInput.addEventListener('click', keepJournalAmountFocus, true);
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
         protectJournalAccountDraft();
