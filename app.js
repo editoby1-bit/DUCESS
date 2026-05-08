@@ -3362,7 +3362,8 @@ function normalizeStaffLedgerEntryType(row) {
       updateSingleCommissionPreview();
     };
     const resetJournalEntryFields = () => {
-      ['journalAcc','journalAmount','journalCounterparty','journalDetails'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
+      // Only clear amount/details - preserve account number and customer name so staff can post next entry for same customer
+      ['journalAmount','journalCounterparty','journalDetails'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
       telleringDraft.journalAmount = '';
       telleringDraft.journalCharges = { apply: false, checked: {}, values: {} };
       if (byId('journalApplyCharges')) byId('journalApplyCharges').checked = false;
@@ -3594,6 +3595,7 @@ function normalizeStaffLedgerEntryType(row) {
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
         telleringDraft.journalAmount = journalAmountInput.value || '';
+        save();
         save();
         updateJournalCommissionPreview();
       };
