@@ -180,6 +180,21 @@ const ROLE_DEFAULT_TOOLS = {
       customerName: normalized.name,
       status: normalized.active ? 'active' : 'inactive',
       bookBalance: Number(normalized.balance || 0),
+      accountType: normalized.accountType || 'customer',
+    };
+  }
+
+  function accountRowToAccountSummary(accountRow, customer) {
+    if (!accountRow) return null;
+    const customerSummary = customer ? customerToAccountSummary(customer) : null;
+    return {
+      accountId: accountRow.id || customerSummary?.accountId || '',
+      accountNumber: String(accountRow.account_number || customerSummary?.accountNumber || ''),
+      customerId: accountRow.customer_id || customerSummary?.customerId || null,
+      customerName: customerSummary?.customerName || (String(accountRow.account_type || '').toLowerCase() === 'staff' ? 'Staff Account' : 'Account'),
+      status: accountRow.status || customerSummary?.status || 'active',
+      bookBalance: Number(customerSummary?.bookBalance || 0),
+      accountType: accountRow.account_type || customerSummary?.accountType || 'customer',
     };
   }
 
@@ -547,15 +562,87 @@ async function submitDebtRepayment(_payload) {
     }
 
     async function getAccountByNumber(accountNumber) {
-      const customerResult = await getCustomerByAccountNumber(accountNumber);
-      if (!customerResult.ok) return customerResult;
-      return defaultResult.ok(customerResult.data ? customerToAccountSummary(customerResult.data) : null);
+      if (!canUseSupabase()) return local.accounts.getAccountByNumber(accountNumber);
+      const key = String(accountNumber || '').trim();
+      if (!key) return defaultResult.ok(null);
+
+      const customerResult = await getCustomerByAccountNumber(key);
+      if (customerResult.ok && customerResult.data) return defaultResult.ok(customerToAccountSummary(customerResult.data));
+      if (!customerResult.ok && !isMissingColumnOrRelationError(customerResult.error?.details || customerResult.error)) return customerResult;
+
+      const accountResult = await fetchAccountBySelector({ account_number: key });
+      if (!accountResult.ok) return accountResult;
+      const accountRow = accountResult.data;
+      if (!accountRow) return defaultResult.ok(null);
+
+      let customer = null;
+      if (accountRow.customer_id) {
+        const linkedCustomerResult = await getCustomerById(accountRow.customer_id);
+        if (!linkedCustomerResult.ok && !isMissingColumnOrRelationError(linkedCustomerResult.error?.details || linkedCustomerResult.error)) return linkedCustomerResult;
+        customer = linkedCustomerResult.data || null;
+      }
+      const summary = accountRowToAccountSummary(accountRow, customer);
+      const balanceResult = await fetchBalancesByAccountIds([summary?.accountId]);
+      if (summary && balanceResult.ok && balanceResult.data[0] && balanceResult.data[0].book_balance != null) {
+        summary.bookBalance = Number(balanceResult.data[0].book_balance || 0);
+      }
+      return defaultResult.ok(summary);
     }
 
     async function getAccountSummary(accountId) {
-      const customerResult = await getCustomerById(accountId);
-      if (!customerResult.ok) return customerResult;
-      return defaultResult.ok(customerResult.data ? customerToAccountSummary(customerResult.data) : null);
+      if (!canUseSupabase()) return local.accounts.getAccountSummary(accountId);
+      const key = String(accountId || '').trim();
+      if (!key) return defaultResult.ok(null);
+
+      // Approval payloads may pass a customer id, an account id, or a visible account number.
+      // Staff accounts can exist only in customer_accounts, so do not force every posting
+      // through the customers table.
+      let customer = null;
+      let accountRow = null;
+
+      const directCustomerResult = await getCustomerById(key);
+      if (directCustomerResult.ok) customer = directCustomerResult.data;
+      else if (!isMissingColumnOrRelationError(directCustomerResult.error?.details || directCustomerResult.error)) return directCustomerResult;
+
+      if (!customer) {
+        const accountByIdResult = await fetchAccountBySelector({ id: key });
+        if (!accountByIdResult.ok) return accountByIdResult;
+        accountRow = accountByIdResult.data;
+      }
+
+      if (!accountRow && !customer) {
+        const accountByNumberResult = await fetchAccountBySelector({ account_number: key });
+        if (!accountByNumberResult.ok) return accountByNumberResult;
+        accountRow = accountByNumberResult.data;
+      }
+
+      if (accountRow?.customer_id && !customer) {
+        const linkedCustomerResult = await getCustomerById(accountRow.customer_id);
+        if (!linkedCustomerResult.ok && !isMissingColumnOrRelationError(linkedCustomerResult.error?.details || linkedCustomerResult.error)) return linkedCustomerResult;
+        customer = linkedCustomerResult.data || null;
+      }
+
+      if (!customer && accountRow?.account_number) {
+        const customerByAccountResult = await getCustomerByAccountNumber(accountRow.account_number);
+        if (customerByAccountResult.ok) customer = customerByAccountResult.data;
+        else if (!isMissingColumnOrRelationError(customerByAccountResult.error?.details || customerByAccountResult.error)) return customerByAccountResult;
+      }
+
+      if (!customer && !accountRow) {
+        const byAccountNumber = await getCustomerByAccountNumber(key);
+        if (byAccountNumber.ok) customer = byAccountNumber.data;
+        else if (!isMissingColumnOrRelationError(byAccountNumber.error?.details || byAccountNumber.error)) return byAccountNumber;
+      }
+
+      if (!customer && !accountRow) return defaultResult.ok(null);
+      const summary = accountRow ? accountRowToAccountSummary(accountRow, customer) : customerToAccountSummary(customer);
+      if (summary && accountRow?.id) summary.accountId = accountRow.id;
+      if (summary && accountRow?.status) summary.status = accountRow.status;
+      const balanceResult = await fetchBalancesByAccountIds([summary?.accountId]);
+      if (summary && balanceResult.ok && balanceResult.data[0] && balanceResult.data[0].book_balance != null) {
+        summary.bookBalance = Number(balanceResult.data[0].book_balance || 0);
+      }
+      return defaultResult.ok(summary);
     }
 
     async function getAccountStatement(payload = {}) {
@@ -956,7 +1043,7 @@ function subscribeRealtime() {
 
    async function postSingleCustomerTransaction(requestRow, entry, txType, approver, options = {}) {
   const approvalRequestId = requestRow?.id;
-  const accountLookupId = entry?.accountId || entry?.customerId || requestRow?.entity_id || requestRow?.entityId;
+  const accountLookupId = entry?.accountId || entry?.customerId || entry?.accountNumber || requestRow?.entity_id || requestRow?.entityId;
 
   const accountSummaryResult = await getAccountSummary(accountLookupId);
   if (!accountSummaryResult.ok) return accountSummaryResult;
