@@ -1622,6 +1622,7 @@ function hideProcessing() {
         if (nextTool === 'credit' || nextTool === 'debit') {
           state.ui.txAccDraft = '';
           state.ui.txAmountDraft = '';
+          state.ui.journalAccDraft = '';
           state.ui.selectedCustomerId = null;
           state.ui.selectedJournalCustomerId = null;
           state.ui.generatedJournals ||= {};
@@ -1889,7 +1890,7 @@ function hideProcessing() {
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 190px;column-gap:6px;align-items:end;justify-content:start;">
                 <label class="sheet-label posting-label-account" for="journalAcc" style="margin:0;white-space:nowrap;align-self:center;">Account Number</label>
-                <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" style="width:76px;min-width:76px;margin:0;">
+                <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" style="width:76px;min-width:76px;margin:0;" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}">
                 <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
                 <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
                 <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="number" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount</div></div>
@@ -3277,6 +3278,15 @@ function normalizeStaffLedgerEntryType(row) {
     const visibilityKey = `${staff.id}:${businessDate()}:${kind}`;
     state.ui.collapsedJournals ||= {};
     state.ui.telleringDrafts ||= {};
+    // Restore journalName display if customer was previously selected
+    requestAnimationFrame(() => {
+      if (byId('journalName') && state.ui.selectedJournalCustomerId) {
+        const restoredCustomer = state.customers.find(c => c.id === state.ui.selectedJournalCustomerId);
+        if (restoredCustomer && byId('journalName').textContent === '—') {
+          byId('journalName').textContent = restoredCustomer.name;
+        }
+      }
+    });
     const telleringDraft = state.ui.telleringDrafts[visibilityKey] ||= { singleCharges: { apply: false, checked: {}, values: {} }, journalCharges: { apply: false, checked: {}, values: {} } };
     telleringDraft.singleCharges ||= { apply: false, checked: {}, values: {} };
     telleringDraft.singleCharges.checked ||= {};
@@ -3361,8 +3371,8 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.selectedCustomerId=null;
       updateSingleCommissionPreview();
     };
-    const resetJournalEntryFields = () => {
-      // Only clear amount/details - preserve account number and customer name so staff can post next entry for same customer
+    const resetJournalEntryFields = (clearAccount = false) => {
+      // Always clear amount/details after each entry
       ['journalAmount','journalCounterparty','journalDetails'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
       telleringDraft.journalAmount = '';
       telleringDraft.journalCharges = { apply: false, checked: {}, values: {} };
@@ -3373,8 +3383,13 @@ function normalizeStaffLedgerEntryType(row) {
         if (check) check.checked = false;
         if (input) input.value = '';
       });
-      if (byId('journalName')) byId('journalName').textContent='—';
-      state.ui.selectedJournalCustomerId = null;
+      // Only clear account/name when explicitly requested (e.g. journal cleared/submitted)
+      if (clearAccount) {
+        if (byId('journalAcc')) byId('journalAcc').value = '';
+        if (byId('journalName')) byId('journalName').textContent = '—';
+        state.ui.journalAccDraft = '';
+        state.ui.selectedJournalCustomerId = null;
+      }
       updateJournalCommissionPreview();
     };
 
@@ -3449,6 +3464,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (!c) { if (!opts.quiet) showToast('Customer not found'); return null; }
       if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); if (!opts.quiet) showToast('Account is frozen'); return null; }
       state.ui.selectedJournalCustomerId = c.id;
+      state.ui.journalAccDraft = value;
       save();
       if (byId('journalName')) byId('journalName').textContent = c.name;
       // Important: journal lookup must never rewrite amount or charge inputs.
@@ -3564,6 +3580,7 @@ function normalizeStaffLedgerEntryType(row) {
       byId('journalAcc').oninput = () => {
         if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
+        state.ui.journalAccDraft = v;
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
         if (!v) { clearJournalCustomer(); return; }
         if (selected && String(selected.accountNumber || '') !== v) clearJournalCustomer();
@@ -3706,10 +3723,10 @@ function normalizeStaffLedgerEntryType(row) {
       });
       save();
       recalcPreview();
-      // Clear fields after adding to journal so staff can enter next entry cleanly
-      resetJournalEntryFields();
-      state.ui.selectedJournalCustomerId = null;
-      if (byId('journalName')) byId('journalName').textContent = '—';
+      // Clear amount/details only - keep account so staff can post next entry for same customer
+      resetJournalEntryFields(false);
+      // Re-focus amount for fast multi-entry
+      requestAnimationFrame(() => byId('journalAmount')?.focus({ preventScroll: true }));
     };
 
     const fieldNoteInput = byId('journalFieldNoteInput');
@@ -3744,6 +3761,9 @@ function normalizeStaffLedgerEntryType(row) {
       attachmentState.fieldNote = null;
       attachmentState.loading = false;
       state.ui.generatedJournals[visibilityKey] = false;
+      state.ui.journalAccDraft = '';
+      state.ui.selectedJournalCustomerId = null;
+      telleringDraft.journalAmount = '';
       const input = byId('journalFieldNoteInput');
       if (input) input.value = '';
       save();
