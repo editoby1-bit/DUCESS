@@ -3458,20 +3458,18 @@ function normalizeStaffLedgerEntryType(row) {
     };
 
     const searchJournal = (opts = {}) => {
-      const activeBefore = document.activeElement;
-      const value = (byId('journalAcc')?.value || '').trim();
+      const value = (byId('journalAcc')?.value || state.ui.journalAccDraft || '').trim();
       const c = getCustomerByAccountNo(value);
       if (!c) { if (!opts.quiet) showToast('Customer not found'); return null; }
       if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); if (!opts.quiet) showToast('Account is frozen'); return null; }
       state.ui.selectedJournalCustomerId = c.id;
       state.ui.journalAccDraft = value;
-      save();
-      if (byId('journalName')) byId('journalName').textContent = c.name;
-      // Important: journal lookup must never rewrite amount or charge inputs.
-      // Those fields are actively edited after account lookup and rewriting them causes the first typed value to disappear.
-      if (activeBefore && activeBefore.id && byId(activeBefore.id)) {
-        requestAnimationFrame(() => byId(activeBefore.id)?.focus({ preventScroll: true }));
-      }
+      if (byId('journalAcc') && String(byId('journalAcc').value || '').trim() !== value) byId('journalAcc').value = value;
+      if (byId('journalName')) byId('journalName').textContent = c.name || '—';
+      // Journal lookup is deliberately DOM-only during entry. Saving here can cause
+      // the journal entry row to repaint while the user is moving between Account
+      // Number and Amount, which steals the first click/focus. The actual journal
+      // state is persisted when adding/submitting/clearing the journal.
       return c;
     };
 
@@ -3605,7 +3603,7 @@ function normalizeStaffLedgerEntryType(row) {
         if (!v) {
           state.ui.selectedJournalCustomerId = null;
           if (byId('journalName')) byId('journalName').textContent = '—';
-          save();
+          // Do not save while editing the journal account field; saving can repaint and steal focus.
           return;
         }
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
@@ -3651,16 +3649,8 @@ function normalizeStaffLedgerEntryType(row) {
         const accountInput = byId('journalAcc');
         const currentValue = String(accountInput?.value || state.ui.journalAccDraft || '').trim();
         if (currentValue) state.ui.journalAccDraft = currentValue;
-        if (accountInput && !String(accountInput.value || '').trim() && state.ui.journalAccDraft) {
-          accountInput.value = state.ui.journalAccDraft;
-        }
       };
-      const keepJournalAmountFocus = () => {
-        // Keep the journal account draft only. Do not force focus or prevent default here;
-        // those aggressive focus calls made the Account Number field lose focus.
-        protectJournalAccountDraft();
-      };
-      journalAmountInput.onfocus = keepJournalAmountFocus;
+      journalAmountInput.onfocus = protectJournalAccountDraft;
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
         protectJournalAccountDraft();
@@ -4383,7 +4373,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       const c = state.customers.find(x => x.id === id);
       if (!c) return showToast('Customer not found');
       state.ui.selectedJournalCustomerId = c.id;
-      save();
+      state.ui.journalAccDraft = c.accountNumber || '';
       closeModal();
       if (byId('journalAcc')) byId('journalAcc').value = c.accountNumber || '';
       if (byId('journalName')) byId('journalName').textContent = c.name || '—';
