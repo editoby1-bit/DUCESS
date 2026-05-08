@@ -1939,7 +1939,7 @@ function hideProcessing() {
   }
 
   function setApprovalReviewLock(id) {
-    if (!id) return;
+    if (!id) return Promise.resolve(defaultResultErr('APPROVAL_LOCK_INVALID', 'Approval request id is required'));
     cleanupApprovalReviewLocks();
     const staff = currentStaff();
     state.ui.approvalReviewLocks[id] = {
@@ -1949,7 +1949,7 @@ function hideProcessing() {
     };
     save();
     if (isSupabaseApprovalMode() && gateway.approvals?.setReviewLock) {
-      gateway.approvals.setReviewLock({
+      return gateway.approvals.setReviewLock({
         requestId: id,
         staffId: getStaffBackendId(staff),
         staffName: staff?.name || 'Staff',
@@ -1957,16 +1957,26 @@ function hideProcessing() {
       }).then(async (result) => {
         if (result?.ok) {
           await syncApprovalsFromGateway();
-          renderWorkspace();
-        } else if (result?.error?.code === 'APPROVAL_LOCKED') {
+          return result;
+        }
+        if (result?.error?.code === 'APPROVAL_LOCKED') {
           delete state.ui.approvalReviewLocks[id];
+          state.ui.selectedApprovalIds = (state.ui.selectedApprovalIds || []).filter(x => x !== id);
           save();
           showToast(result.error.message || 'This request is being reviewed by another staff');
           await syncApprovalsFromGateway();
           renderWorkspace();
+          return result;
         }
-      }).catch(() => {});
+        return result;
+      }).catch((error) => {
+        delete state.ui.approvalReviewLocks[id];
+        state.ui.selectedApprovalIds = (state.ui.selectedApprovalIds || []).filter(x => x !== id);
+        save();
+        return defaultResultErr('APPROVAL_LOCK_FAILED', 'Could not mark this request as being reviewed.', error);
+      });
     }
+    return Promise.resolve(defaultResultOk(state.ui.approvalReviewLocks[id]));
   }
 
   function isApprovalLockedByOther(id) {
@@ -3926,18 +3936,38 @@ function normalizeStaffLedgerEntryType(row) {
       save();
     };
     refreshApprovalSelection();
-    qq('[data-approval-select]').forEach(box => box.onchange = () => {
+    qq('[data-approval-select]').forEach(box => box.onchange = async () => {
       const id = box.dataset.approvalSelect;
       if (box.checked) {
-        if (!state.ui.selectedApprovalIds.includes(id)) state.ui.selectedApprovalIds.push(id);
+        box.disabled = true;
+        const lockResult = await setApprovalReviewLock(id);
+        if (lockResult?.ok === false || isApprovalLockedByOther(id)) {
+          box.checked = false;
+          state.ui.selectedApprovalIds = state.ui.selectedApprovalIds.filter(x => x !== id);
+        } else if (!state.ui.selectedApprovalIds.includes(id)) {
+          state.ui.selectedApprovalIds.push(id);
+        }
+        box.disabled = false;
       } else {
         state.ui.selectedApprovalIds = state.ui.selectedApprovalIds.filter(x => x !== id);
       }
       save();
+      renderWorkspace();
     });
     const visibleSelectable = () => qq('[data-approval-select]').filter(box => !box.disabled).map(box => box.dataset.approvalSelect);
     const selectAll = byId('approvalSelectAll');
-    if (selectAll) selectAll.onclick = () => { state.ui.selectedApprovalIds = Array.from(new Set([...state.ui.selectedApprovalIds, ...visibleSelectable()])); save(); renderWorkspace(); };
+    if (selectAll) selectAll.onclick = async () => {
+      const ids = visibleSelectable();
+      for (const id of ids) {
+        if (isApprovalLockedByOther(id)) continue;
+        const lockResult = await setApprovalReviewLock(id);
+        if (lockResult?.ok !== false && !isApprovalLockedByOther(id) && !state.ui.selectedApprovalIds.includes(id)) {
+          state.ui.selectedApprovalIds.push(id);
+        }
+      }
+      save();
+      renderWorkspace();
+    };
     const clearSel = byId('approvalClearSelection');
     if (clearSel) clearSel.onclick = () => { state.ui.selectedApprovalIds = []; save(); renderWorkspace(); };
     const runBulk = (mode) => {
