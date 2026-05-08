@@ -11782,3 +11782,16 @@ input.approval-select-checkbox,
 .commission-input { width: 72px !important; min-width: 72px !important; }
 .subtle-commission-row { gap: 5px !important; padding-top: 2px !important; }
 .commission-mini-field { gap: 2px !important; }
+
+/* === POSTING AREA LABEL OVERRIDES (Final) === */
+label.tx-toggle-pill { padding: 3px 7px !important; font-size: 10px !important; border-radius: 5px !important; line-height: 1.3 !important; cursor: pointer; }
+label.tx-toggle-pill span { font-size: 10px !important; }
+.tx-mode-toggle { min-height: auto !important; gap: 4px !important; }
+.tx-mode-toggle label { font-size: 10px !important; }
+.inline-mode-toggle { gap: 4px !important; }
+/* Reduce "Received By", "Mode", "Paid To", "Payout Source" field labels */
+.compact-posting-grid .field label,
+.compact-layout .field label,
+.tellering-lower .field label { font-size: 9px !important; text-transform: uppercase !important; letter-spacing: .04em !important; }
+/* Journal cell labels */
+.journal-cell-label { font-size: 9px !important; text-transform: uppercase !important; letter-spacing: .04em !important; margin-top: 1px !important; }

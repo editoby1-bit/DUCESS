@@ -3690,13 +3690,21 @@ function normalizeStaffLedgerEntryType(row) {
       event?.preventDefault?.();
       event?.stopPropagation?.();
       const journalEntrySnapshot = readJournalEntrySnapshot();
-      const journalAccValue = String(byId('journalAcc')?.value || '').trim();
+      const journalAccValue = String(byId('journalAcc')?.value || state.ui.journalAccDraft || '').trim();
       const selectedJournalCustomer = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
+      // Try to find customer: first by selected ID, then by account number lookup
       const customer = (selectedJournalCustomer && String(selectedJournalCustomer.accountNumber || '') === journalAccValue)
         ? selectedJournalCustomer
         : getCustomerByAccountNo(journalAccValue);
-      if (!journalAccValue || !customer) return showToast('Search for customer first');
-      if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast('Frozen account cannot accept transactions'); }
+      // If still not found by account number alone, try matching against all customers
+      const resolvedCustomer = customer || state.customers.find(c => String(c.accountNumber || '') === journalAccValue && c.active !== false);
+      if (resolvedCustomer && !state.ui.selectedJournalCustomerId) {
+        // Auto-resolve the customer if we found them by account number
+        state.ui.selectedJournalCustomerId = resolvedCustomer.id;
+        if (byId('journalName')) byId('journalName').textContent = resolvedCustomer.name || '—';
+      }
+      if (!journalAccValue || !resolvedCustomer) return showToast('Enter a valid account number');
+      if (isCustomerFrozen(resolvedCustomer) || resolvedCustomer.active === false) { freezeInactiveCustomer(resolvedCustomer); save(); return showToast('Frozen account cannot accept transactions'); }
       const amount = Number(byId('journalAmount')?.value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
       const mode = selectedMode();
@@ -3705,9 +3713,9 @@ function normalizeStaffLedgerEntryType(row) {
       const customerCreditAmount = kind === 'credit' ? Math.max(0, amount - totalChargeAmount) : amount;
       journal.unshift({
         id: uid('jr'),
-        customerId: customer.id,
-        customerName: customer.name,
-        accountNumber: customer.accountNumber,
+        customerId: resolvedCustomer.id,
+        customerName: resolvedCustomer.name,
+        accountNumber: resolvedCustomer.accountNumber,
         amount,
         customerCreditAmount,
         chargeBreakdown,
@@ -3723,10 +3731,14 @@ function normalizeStaffLedgerEntryType(row) {
       });
       save();
       recalcPreview();
-      // Clear amount/details only - keep account so staff can post next entry for same customer
-      resetJournalEntryFields(false);
-      // Re-focus amount for fast multi-entry
-      requestAnimationFrame(() => byId('journalAmount')?.focus({ preventScroll: true }));
+      // Clear ALL fields including account after adding to journal
+      resetJournalEntryFields(true);
+      state.ui.journalAccDraft = '';
+      state.ui.selectedJournalCustomerId = null;
+      if (byId('journalAcc')) byId('journalAcc').value = '';
+      if (byId('journalName')) byId('journalName').textContent = '—';
+      // Re-focus account for next entry
+      requestAnimationFrame(() => byId('journalAcc')?.focus({ preventScroll: true }));
     };
 
     const fieldNoteInput = byId('journalFieldNoteInput');
