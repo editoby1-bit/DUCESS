@@ -259,9 +259,12 @@
     state.tempGrants ||= [];
     state.staffAccounts ||= {};
     state.businessExtras ||= [];
-    state.businessDate ||= today();
-    ensureDefaultIncomeAccounts(state);
     state.dayClosures ||= [];
+    if (!state.businessDate) {
+      const latest = latestClosedBusinessDay();
+      state.businessDate = latest?.date ? (latest.nextBusinessDate || nextDate(latest.date)) : today();
+    }
+    ensureDefaultIncomeAccounts(state);
     reconcileBusinessDateFromClosures();
     state.staff.forEach(st => { ensureStaffWalletCustomer(st.id); ensureStaffAccount(st.id); });
     normalizeStaffWalletAccounts();
@@ -370,6 +373,11 @@
     return COD_LOCKED_POSTING_TYPES.includes(type);
   }
 
+
+  function codRemainingBalance(formAmount, totalCredits, totalDebits) {
+    return Number(formAmount || 0) - Number(totalCredits || 0) - Number(totalDebits || 0);
+  }
+
   function buildCodDailySnapshot(dateStr, postingStaff = []) {
     const rows = postingStaff.map(st => {
       const formAmount = getOpeningBalanceForDate(st.id, dateStr);
@@ -380,7 +388,7 @@
       const totalCredits = creditCash + creditTransfer;
       const totalDebits = debitCash + debitTransfer;
       const netBookBalance = totalCredits - totalDebits;
-      const remainingBalance = currentFloatAvailable(st.id, dateStr);
+      const remainingBalance = codRemainingBalance(formAmount, totalCredits, totalDebits);
       const variance = Math.max(0, -remainingBalance);
       const debt = Number(ensureStaffAccount(st.id)?.debtBalance || 0);
       return { staffId: st.id, staffName: st.name, formAmount, creditCash, creditTransfer, debitCash, debitTransfer, totalCredits, totalDebits, netBookBalance, remainingBalance, variance, debt };
@@ -698,7 +706,26 @@
   }
 
   function getCustomerByAccountNo(accountNumber) {
-    return state.customers.find(c => c.accountNumber === String(accountNumber || '').trim());
+    const key = String(accountNumber || '').trim();
+    const customer = state.customers.find(c => String(c.accountNumber || '') === key);
+    if (customer) return customer;
+    const staff = (state.staff || []).find(st => {
+      const acc = ensureStaffAccount(st.id);
+      return String(acc.accountNumber || '') === key || String(st.staffCode || st.staff_code || '') === key || String(st.id || '') === key;
+    });
+    if (!staff) return null;
+    const acc = ensureStaffAccount(staff.id);
+    return {
+      id: staff.id,
+      customerId: staff.id,
+      staffId: staff.id,
+      staffUuid: getStaffBackendId(staff),
+      accountNumber: acc.accountNumber || key,
+      name: staff.name || staff.full_name || staff.id,
+      balance: Number(acc.balance || 0),
+      active: staff.active !== false && staff.is_active !== false,
+      accountType: 'staff'
+    };
   }
 
   function searchCustomersByName(term) {
@@ -1091,7 +1118,10 @@ if (approvalRecord.type === 'float_topup') {
     } else if ((type === 'customer_credit' || type === 'customer_debit') && gateway.accounts) {
       const fn = type === 'customer_credit' ? gateway.accounts.submitCredit : gateway.accounts.submitDebit;
       result = await fn({
-        accountId: payload.customerId,
+        accountId: payload.accountType === 'staff' ? (payload.staffAccountUuid || payload.staffAccountId || payload.accountNumber || payload.customerId) : payload.customerId,
+        accountType: payload.accountType || 'customer',
+        staffAccountId: payload.staffAccountId || '',
+        staffAccountUuid: payload.staffAccountUuid || '',
         amount: Number(payload.amount || 0),
         details: payload.details || '',
         requestedByStaffId: getStaffBackendId(staff),
@@ -1101,7 +1131,7 @@ if (approvalRecord.type === 'float_topup') {
       });
     } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries) {
       result = await gateway.accounts.submitJournalEntries({
-        entries: (payload.rows || []).map(row => ({ accountId: row.customerId, txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown, totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount, chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId })),
+        entries: (payload.rows || []).map(row => ({ accountId: row.accountType === 'staff' ? (row.staffAccountUuid || row.staffAccountId || row.accountNumber || row.customerId) : row.customerId, accountType: row.accountType || 'customer', staffAccountId: row.staffAccountId || '', staffAccountUuid: row.staffAccountUuid || '', txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown, totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount, chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId })),
         requestedByStaffId: getStaffBackendId(staff),
         requestedByName: staff?.name || 'System',
         businessDate: payload.date,
@@ -2018,19 +2048,30 @@ function hideProcessing() {
       const normalActions = !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
       return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${csActions}${normalActions}</td></tr>`;
     }).join('');
-    const codRows=(state.cod||[]).filter(c=>c.status==='flagged').map((c,i)=>{
+    const codRows=(state.cod||[]).filter(c=>{
+      if (c.status === 'resolved') return false;
+      const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
+      const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
+      const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
+      const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
+      const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
+      const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
+      const variance = Number(c.variance ?? Math.max(0, -remaining));
+      const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
+      return c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining < 0;
+    }).map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
       const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
-      const remaining = Number(c.remainingBalance ?? c.runningFloat ?? currentFloatAvailable(c.staffId, c.date));
+      const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
       const variance = Number(c.variance ?? Math.max(0, -remaining));
       const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
       const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || ''; return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
-    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const formAmount = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getOpeningBalanceForDate(rec.staffId, rec.date)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? currentFloatAvailable(rec.staffId, rec.date)) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(formAmount):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
+    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const formAmount = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getOpeningBalanceForDate(rec.staffId, rec.date)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? codRemainingBalance(formAmount, Number(rec.totalCredits ?? ((rec.totalCreditCash||0)+(rec.totalCreditTransfer||0))), Number(rec.totalDebits ?? ((rec.totalDebitCash||0)+(rec.totalDebitTransfer||0))))) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(formAmount):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
     return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div></div>`:''}<div class="approvals-top-controls"><div class="action-row approvals-central-cod-row">${hasPermission('central_close_day')?'<button id="approvalsCentralCloseDayBtn">Central Close of Day</button>':''}</div><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
   }
@@ -3544,10 +3585,10 @@ function normalizeStaffLedgerEntryType(row) {
       const amountInput = byId('txAmount');
       amountInput.oninput = () => {
         state.ui.txAmountDraft = amountInput.value || '';
-        save();
         updateSingleCommissionPreview();
+        restoreSingleCustomerDisplay();
       };
-      amountInput.onchange = () => { state.ui.txAmountDraft = amountInput.value || ''; save(); };
+      amountInput.onchange = () => { state.ui.txAmountDraft = amountInput.value || ''; save(); restoreSingleCustomerDisplay(); };
     }
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
@@ -3850,6 +3891,9 @@ function normalizeStaffLedgerEntryType(row) {
             customerId: customer.id,
             customerName: customer.name,
             accountNumber: customer.accountNumber,
+            accountType: customer.accountType || 'customer',
+            staffAccountId: customer.accountType === 'staff' ? customer.staffId : '',
+            staffAccountUuid: customer.accountType === 'staff' ? customer.staffUuid : '',
             amount,
             customerCreditAmount,
             chargeBreakdown,
@@ -3895,6 +3939,9 @@ function normalizeStaffLedgerEntryType(row) {
               customerId: row.customerId,
               customerName: row.customerName,
               accountNumber: row.accountNumber,
+              accountType: row.accountType || 'customer',
+              staffAccountId: row.staffAccountId || '',
+              staffAccountUuid: row.staffAccountUuid || '',
               amount: row.amount,
               customerCreditAmount: row.customerCreditAmount,
               chargeBreakdown: row.chargeBreakdown,
@@ -4213,7 +4260,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
           const credits = creditCash + creditTransfer;
           const debits = debitCash + debitTransfer;
           const netBook = credits - debits;
-          const running = currentFloatAvailable(st.id,businessDate());
+          const running = codRemainingBalance(formAmount, credits, debits);
           const note=q(`[data-cod-note="${st.id}"]`)?.value?.trim()||'';
           const variance=Math.max(0,-running);
           const overdraw=Math.max(0,-running);
@@ -4255,7 +4302,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
           const credits=creditCash+creditTransfer;
           const debits=debitCash+debitTransfer;
           const netBook=credits-debits;
-          const running=currentFloatAvailable(st.id,businessDate());
+          const running=codRemainingBalance(formAmount, credits, debits);
           const note=q(`[data-cod-note="${st.id}"]`)?.value?.trim()||'';
           const variance=Math.max(0,-running);
           const overdraw=Math.max(0,-running);
@@ -4690,14 +4737,14 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const totalCredits = Number(cod.totalCredits ?? (totalCreditCash + totalCreditTransfer));
     const totalDebits = Number(cod.totalDebits ?? (totalDebitCash + totalDebitTransfer));
     const currentNetBookBalance = Number(cod.netBookBalance ?? (totalCredits - totalDebits));
-    const currentRemainingBalance = Number(cod.remainingBalance ?? cod.runningFloat ?? currentFloatAvailable(cod.staffId, cod.date));
+    const currentRemainingBalance = codRemainingBalance(formAmount, totalCredits, totalDebits);
     const currentVariance = Number(cod.variance ?? Math.max(0, -currentRemainingBalance));
     const currentOverdraw = Number(cod.overdraw ?? Math.max(0, -currentRemainingBalance));
     const defaultDebt = Math.max(currentOverdraw, currentVariance, Number(cod.debtAmount || 0));
     const isAdminOfficer = currentStaff()?.role === 'admin_officer';
     const savedAcceptedPosition = Number(cod.acceptedPosition ?? currentNetBookBalance);
     const savedAdjustment = Number(cod.adjustment ?? (savedAcceptedPosition - currentNetBookBalance));
-    const savedCreateDebt = cod.createDebt ?? ((cod.debtAmount || 0) > 0);
+    const savedCreateDebt = cod.createDebt ?? (defaultDebt > 0 || (cod.debtAmount || 0) > 0);
     const savedResolutionType = cod.resolutionType || (savedCreateDebt ? 'staff_debt' : 'balanced');
     openModal('Resolve Close of Day', `
       <div class="stack">
@@ -4748,6 +4795,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
             Object.assign(cod, result.data, { status: 'resolved', resolutionType, reversalNeeded: resolutionType === 'reversal_needed', createDebt, staffName: cod.staffName, formAmount, totalCreditCash, totalCreditTransfer, totalDebitCash, totalDebitTransfer, totalCredits, totalDebits, netBookBalance: currentNetBookBalance, remainingBalance: currentRemainingBalance, variance: currentVariance, overdraw: currentOverdraw, acceptedPosition, adjustment: resolutionType === 'reversal_needed' ? 0 : adjustment });
             applyCodBusinessAdjustment(cod, resolutionType === 'reversal_needed' ? 0 : adjustment, resolutionType, note);
             await syncCodFromGateway({ staffId: cod.staffId, businessDate: cod.date });
+            applyCodBusinessAdjustment(cod, resolutionType === 'reversal_needed' ? 0 : adjustment, resolutionType, note);
             await syncDebtBalancesFromGateway(cod.staffId);
           }
         } else {
@@ -4919,11 +4967,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function filterDateReference(rows = []) {
-    const preferred = dateOnly(businessDate && businessDate()) || today();
-    const dates = (rows || []).map(filterRowDate).filter(Boolean).sort();
-    if (!dates.length) return preferred;
-    if (dates.includes(preferred)) return preferred;
-    return dates[dates.length - 1];
+    // DUCESS balances must filter against the active DUCESS business date, not real calendar date
+    // and not the latest transaction date.
+    return dateOnly(businessDate && businessDate()) || '';
   }
 
   function filterByDate(rows, filter) {
