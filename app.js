@@ -1040,6 +1040,11 @@
   }
 
   if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
+    // Staff accounts (accountType === 'staff') are not in the Supabase customers table;
+    // their balance is maintained locally. Skip the remote sync to avoid "customer not found" errors.
+    if (approvalRecord.payload?.accountType === 'staff') {
+      return defaultResultOk(null);
+    }
     return syncCustomerFromGateway({
       customerId: approvalRecord.payload?.customerId,
       accountNumber: approvalRecord.payload?.accountNumber
@@ -1049,6 +1054,8 @@
   if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
     const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
     for (const row of rows) {
+      // Skip staff accounts - not in Supabase customers table
+      if (row.accountType === 'staff') continue;
       await syncCustomerFromGateway({
         customerId: row.customerId,
         accountNumber: row.accountNumber
@@ -1296,7 +1303,14 @@ if (approvalRecord.type === 'float_topup') {
         break;
       }
       case 'customer_credit': {
-        const c = state.customers.find(x => x.id === req.payload.customerId);
+        // Resolve customer: for staff accounts, the customerId may be a staffId;
+        // find the staff_wallet customer linked to that staff member.
+        let c = state.customers.find(x => x.id === req.payload.customerId);
+        if (!c && req.payload.accountType === 'staff') {
+          // Try finding the staff wallet customer linked to this staff
+          c = state.customers.find(x => x.staffId === req.payload.customerId && x.accountType === 'staff_wallet');
+          if (!c) c = state.customers.find(x => x.accountNumber === req.payload.accountNumber);
+        }
         if (!c || isCustomerFrozen(c) || c.active === false) break;
         const totalAmount = Number(req.payload.amount || 0);
         const chargeBreakdown = normalizeChargePayload(totalAmount, req.payload);
@@ -1357,7 +1371,12 @@ if (approvalRecord.type === 'float_topup') {
         break;
       }
       case 'customer_debit': {
-        const c = state.customers.find(x => x.id === req.payload.customerId);
+        // Resolve customer: for staff accounts, the customerId may be a staffId
+        let c = state.customers.find(x => x.id === req.payload.customerId);
+        if (!c && req.payload.accountType === 'staff') {
+          c = state.customers.find(x => x.staffId === req.payload.customerId && x.accountType === 'staff_wallet');
+          if (!c) c = state.customers.find(x => x.accountNumber === req.payload.accountNumber);
+        }
         if (!c || isCustomerFrozen(c) || c.active === false) break;
         c.transactions.push(txObj('debit', req.payload.amount, req.payload.details, req.requestedByName, req.requestedBy, currentStaff()?.name || '', 'customer', req.payload.date, {
           receivedOrPaidBy: req.payload.receivedOrPaidBy,
@@ -2060,7 +2079,7 @@ function hideProcessing() {
       const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
       const variance = Number(c.variance ?? Math.abs(remaining));
       const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
-      return c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining !== 0;
+      return c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining !== 0 || Math.abs(remaining) > 0;
     }).map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
@@ -3803,6 +3822,9 @@ function normalizeStaffLedgerEntryType(row) {
         customerId: resolvedCustomer.id,
         customerName: resolvedCustomer.name,
         accountNumber: resolvedCustomer.accountNumber,
+        accountType: resolvedCustomer.accountType || 'customer',
+        staffAccountId: resolvedCustomer.accountType === 'staff' ? resolvedCustomer.staffId : '',
+        staffAccountUuid: resolvedCustomer.accountType === 'staff' ? (resolvedCustomer.staffUuid || '') : '',
         amount,
         customerCreditAmount,
         chargeBreakdown,
@@ -3914,8 +3936,16 @@ function normalizeStaffLedgerEntryType(row) {
           resetFields();
           state.ui.txAccDraft = '';
           state.ui.txAmountDraft = '';
+          state.ui.txDetailsDraft = '';
+          state.ui.txCounterpartyDraft = '';
           state.ui.selectedCustomerId = null;
           save();
+          // Explicitly clear DOM fields that resetFields() may not have reached
+          if (byId('txAcc')) byId('txAcc').value = '';
+          if (byId('txAmount')) byId('txAmount').value = '';
+          if (byId('txDetails')) byId('txDetails').value = '';
+          if (byId('txCounterparty')) byId('txCounterparty').value = '';
+          if (byId('txName')) byId('txName').textContent = '—';
           showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} request sent for approval`);
           renderWorkspace();
         } finally {
