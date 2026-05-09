@@ -11805,3 +11805,35 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   text-transform: uppercase !important;
   letter-spacing: .04em !important;
 }
+
+
+/* Surgical COD modal horizontal scroll fix */
+.modal:has([data-cod-note]) {
+  width: min(920px, 96vw) !important;
+  max-width: 96vw !important;
+}
+.modal:has([data-cod-note]) .modal-body {
+  overflow: visible !important;
+}
+.modal:has([data-cod-note]) .table-wrap {
+  overflow-x: scroll !important;
+  overflow-y: auto !important;
+  max-height: 58vh !important;
+  scrollbar-gutter: stable both-edges !important;
+  padding-bottom: 12px !important;
+}
+.modal:has([data-cod-note]) .table {
+  min-width: 1120px !important;
+  table-layout: auto !important;
+}
+.modal:has([data-cod-note]) .table-wrap::-webkit-scrollbar {
+  height: 12px !important;
+}
+.modal:has([data-cod-note]) .table-wrap::-webkit-scrollbar-thumb {
+  background: #94a3b8 !important;
+  border-radius: 999px !important;
+}
+.modal:has([data-cod-note]) .table-wrap::-webkit-scrollbar-track {
+  background: #e5e7eb !important;
+  border-radius: 999px !important;
+}

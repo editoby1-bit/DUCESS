@@ -389,7 +389,7 @@
       const totalDebits = debitCash + debitTransfer;
       const netBookBalance = totalCredits - totalDebits;
       const remainingBalance = codRemainingBalance(formAmount, totalCredits, totalDebits);
-      const variance = Math.max(0, -remainingBalance);
+      const variance = Math.abs(remainingBalance);
       const debt = Number(ensureStaffAccount(st.id)?.debtBalance || 0);
       return { staffId: st.id, staffName: st.name, formAmount, creditCash, creditTransfer, debitCash, debitTransfer, totalCredits, totalDebits, netBookBalance, remainingBalance, variance, debt };
     });
@@ -1652,6 +1652,8 @@ function hideProcessing() {
         if (nextTool === 'credit' || nextTool === 'debit') {
           state.ui.txAccDraft = '';
           state.ui.txAmountDraft = '';
+      state.ui.txDetailsDraft = '';
+      state.ui.txCounterpartyDraft = '';
           state.ui.journalAccDraft = '';
           state.ui.selectedCustomerId = null;
           state.ui.selectedJournalCustomerId = null;
@@ -2056,9 +2058,9 @@ function hideProcessing() {
       const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
       const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
-      const variance = Number(c.variance ?? Math.max(0, -remaining));
+      const variance = Number(c.variance ?? Math.abs(remaining));
       const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
-      return c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining < 0;
+      return c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining !== 0;
     }).map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
@@ -2066,7 +2068,7 @@ function hideProcessing() {
       const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
       const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
-      const variance = Number(c.variance ?? Math.max(0, -remaining));
+      const variance = Number(c.variance ?? Math.abs(remaining));
       const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
       const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || ''; return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
@@ -3332,7 +3334,7 @@ function normalizeStaffLedgerEntryType(row) {
     // Restore journalName display if customer was previously selected
     requestAnimationFrame(() => {
       if (byId('journalName') && state.ui.selectedJournalCustomerId) {
-        const restoredCustomer = state.customers.find(c => c.id === state.ui.selectedJournalCustomerId);
+        const restoredCustomer = getCustomerByAccountNo(state.ui.journalAccDraft || byId('journalAcc')?.value || '');
         if (restoredCustomer && byId('journalName').textContent === '—') {
           byId('journalName').textContent = restoredCustomer.name;
         }
@@ -3910,8 +3912,12 @@ function normalizeStaffLedgerEntryType(row) {
           });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
           resetFields();
+          state.ui.txAccDraft = '';
+          state.ui.txAmountDraft = '';
+          state.ui.selectedCustomerId = null;
+          save();
           showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} request sent for approval`);
-          render();
+          renderWorkspace();
         } finally {
           hideProcessing();
         }
@@ -4247,6 +4253,9 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       return `<tr><td>${st.name}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${running<0?'balance-negative':''}">${money(running)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
     openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Form is the approved opening money collected from the field. Remaining Balance reduces as staff use the form. Net Balance is Total Credits minus Total Debits. Variance and Overdraw are derived from how the form is used.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
+      const closeBtn = document.activeElement;
+      const oldLabel = closeBtn && closeBtn.tagName === 'BUTTON' ? closeBtn.textContent : '';
+      if (closeBtn && closeBtn.tagName === 'BUTTON') { closeBtn.disabled = true; closeBtn.textContent = 'Closing...'; }
       showProcessing('Closing business day...');
       await nextPaint();
       try {
@@ -4304,9 +4313,9 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
           const netBook=credits-debits;
           const running=codRemainingBalance(formAmount, credits, debits);
           const note=q(`[data-cod-note="${st.id}"]`)?.value?.trim()||'';
-          const variance=Math.max(0,-running);
+          const variance=Math.abs(running);
           const overdraw=Math.max(0,-running);
-          state.cod.unshift({id:uid('cod'), staffId:st.id, staffName:st.name, date:businessDate(), formAmount, openingBalance:formAmount, totalCreditCash:creditCash, totalCreditTransfer:creditTransfer, totalDebitCash:debitCash, totalDebitTransfer:debitTransfer, totalCredits:credits, totalDebits:debits, netBookBalance:netBook, actualCash:running, expectedCash:running, runningFloat:running, remainingBalance:running, variance, overdraw, note, fieldPapers:[], status: variance===0 && overdraw===0 ? 'balanced':'flagged', approvedAt:new Date().toISOString(), approvedBy:currentStaff()?.name||''});
+          state.cod.unshift({id:uid('cod'), staffId:st.id, staffName:st.name, date:businessDate(), formAmount, openingBalance:formAmount, totalCreditCash:creditCash, totalCreditTransfer:creditTransfer, totalDebitCash:debitCash, totalDebitTransfer:debitTransfer, totalCredits:credits, totalDebits:debits, netBookBalance:netBook, actualCash:running, expectedCash:0, runningFloat:running, remainingBalance:running, variance, overdraw, note, fieldPapers:[], status: variance===0 ? 'balanced':'flagged', approvedAt:new Date().toISOString(), approvedBy:currentStaff()?.name||''});
         });
       }
       const closingDate = businessDate();
@@ -4317,6 +4326,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`);
       } finally {
         hideProcessing();
+        if (closeBtn && closeBtn.tagName === 'BUTTON') { closeBtn.disabled = false; closeBtn.textContent = oldLabel || 'Close Business Day'; }
       }
     }}]);
   }
@@ -4738,9 +4748,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const totalDebits = Number(cod.totalDebits ?? (totalDebitCash + totalDebitTransfer));
     const currentNetBookBalance = Number(cod.netBookBalance ?? (totalCredits - totalDebits));
     const currentRemainingBalance = codRemainingBalance(formAmount, totalCredits, totalDebits);
-    const currentVariance = Number(cod.variance ?? Math.max(0, -currentRemainingBalance));
+    const currentVariance = Number(cod.variance ?? Math.abs(currentRemainingBalance));
     const currentOverdraw = Number(cod.overdraw ?? Math.max(0, -currentRemainingBalance));
-    const defaultDebt = Math.max(currentOverdraw, currentVariance, Number(cod.debtAmount || 0));
+    const defaultDebt = Math.max(currentOverdraw, Number(cod.debtAmount || 0));
     const isAdminOfficer = currentStaff()?.role === 'admin_officer';
     const savedAcceptedPosition = Number(cod.acceptedPosition ?? currentNetBookBalance);
     const savedAdjustment = Number(cod.adjustment ?? (savedAcceptedPosition - currentNetBookBalance));
