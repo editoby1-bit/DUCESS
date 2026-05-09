@@ -1027,7 +1027,7 @@ function subscribeRealtime() {
 
    async function postSingleCustomerTransaction(requestRow, entry, txType, approver, options = {}) {
   const approvalRequestId = requestRow?.id;
-  const accountLookupId = entry?.accountId || entry?.customerId || requestRow?.entity_id || requestRow?.entityId;
+  const accountLookupId = entry?.accountType === 'staff' ? (entry?.staffAccountUuid || entry?.staffUuid || entry?.staffAccountId || entry?.staffId || entry?.accountNumber || entry?.accountId || entry?.customerId) : (entry?.accountId || entry?.customerId || entry?.accountNumber || requestRow?.entity_id || requestRow?.entityId);
 
   const accountSummaryResult = await getAccountSummary(accountLookupId);
   if (!accountSummaryResult.ok) return accountSummaryResult;
