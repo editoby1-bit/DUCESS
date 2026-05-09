@@ -557,19 +557,15 @@ async function submitDebtRepayment(_payload) {
       const key = String(accountId || '').trim();
       if (!key) return defaultResult.ok(null);
 
-      // Resolve staff accounts first when the payload is clearly a staff code
-      // (for example ST4/st4). This prevents a UUID-only customers.id lookup
-      // from throwing "Could not fetch customers from Supabase".
-      if (!isUuidLike(key) && /^st/i.test(key)) {
-        const staffSummary = await fetchStaffAccountByKey(key);
-        if (!staffSummary.ok) return staffSummary;
-        if (staffSummary.data) {
-          const staffBalance = await fetchBalancesByAccountIds([staffSummary.data.accountId]);
-          if (staffBalance.ok && staffBalance.data[0] && staffBalance.data[0].book_balance != null) {
-            staffSummary.data.bookBalance = Number(staffBalance.data[0].book_balance || 0);
-          }
-          return defaultResult.ok(staffSummary.data);
+      // Resolve staff accounts first for UUID, staff code, local staff id, or staff posting account.
+      const earlyStaffSummary = await fetchStaffAccountByKey(key);
+      if (!earlyStaffSummary.ok && earlyStaffSummary.error?.code !== 'STAFF_PROFILE_NOT_FOUND') return earlyStaffSummary;
+      if (earlyStaffSummary.ok && earlyStaffSummary.data) {
+        const staffBalance = await fetchBalancesByAccountIds([earlyStaffSummary.data.accountId]);
+        if (staffBalance.ok && staffBalance.data[0] && staffBalance.data[0].book_balance != null) {
+          earlyStaffSummary.data.bookBalance = Number(staffBalance.data[0].book_balance || 0);
         }
+        return defaultResult.ok(earlyStaffSummary.data);
       }
 
       // Migration bridge: approval payloads often pass the customer id as accountId.
@@ -1782,11 +1778,28 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (!byId.ok && byId.error?.code !== 'STAFF_PROFILE_NOT_FOUND') return byId;
       }
 
+      if (isUuidLike(key)) {
+        const byAuth = await getStaffProfileBySelector({ auth_user_id: key });
+        if (byAuth.ok && byAuth.data) return defaultResult.ok(staffToAccountSummary(byAuth.data));
+        if (!byAuth.ok && byAuth.error?.code !== 'STAFF_PROFILE_NOT_FOUND') return byAuth;
+      }
+
       const attempts = Array.from(new Set([key, key.toUpperCase(), key.toLowerCase()].filter(Boolean)));
       for (const staffCode of attempts) {
         const byCode = await getStaffProfileBySelector({ staff_code: staffCode });
         if (byCode.ok && byCode.data) return defaultResult.ok(staffToAccountSummary(byCode.data));
         if (!byCode.ok && byCode.error?.code !== 'STAFF_PROFILE_NOT_FOUND') return byCode;
+      }
+
+      // DUCESS staff posting account numbers are commonly 4000, 4001, etc.
+      // If that number is used, map it to staff list order instead of querying customers.
+      if (/^4\d{3}$/.test(key)) {
+        const { data, error: listError } = await client.from(staffTable).select(staffProfileSelect).order('staff_code', { ascending: true });
+        if (!listError && Array.isArray(data)) {
+          const index = Number(key) - 4000;
+          const row = data[index];
+          if (row) return defaultResult.ok({ ...staffToAccountSummary(row), accountNumber: key });
+        }
       }
       return defaultResult.ok(null);
     }
