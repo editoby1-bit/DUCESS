@@ -1030,6 +1030,25 @@ function subscribeRealtime() {
 
   const accountSummary = accountSummaryResult.data;
   if (!accountSummary?.accountId) {
+    // Staff accounts may not have a real Supabase account_id but the local
+    // state handles their balance. Return success so the approval can proceed.
+    if (entry?.accountType === 'staff') {
+      return defaultResult.ok({
+        alreadyPosted: false,
+        requestId: requestRow?.id,
+        accountId: null,
+        customerId: null,
+        amount: normalizeNumber(entry?.amount),
+        sourceAmount: normalizeNumber(entry?.amount),
+        totalChargeAmount: 0,
+        chargeBreakdown: [],
+        customerCreditAmount: normalizeNumber(entry?.amount),
+        txType,
+        balanceAfter: null,
+        transactionId: null,
+        staffAccountHandledLocally: true
+      });
+    }
     return defaultResult.err('ACCOUNT_NOT_FOUND', 'Could not resolve target account for approved request.');
   }
 
@@ -2179,6 +2198,13 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!canUseSupabase()) return local.accounts.getAccountSummary(accountId);
       const key = String(accountId || '').trim();
       if (!key) return defaultResult.ok(null);
+
+      // Staff account fast-path: try staff lookup first for UUID-like keys and 4xxx account numbers.
+      // This avoids the "customer not found" error for staff accounts that are not in the customers table.
+      const earlyStaffResult = await fetchStaffAccountByKey(key);
+      if (earlyStaffResult.ok && earlyStaffResult.data) {
+        return defaultResult.ok(earlyStaffResult.data);
+      }
 
       // Migration bridge: approval payloads often pass the customer id as accountId.
       // Resolve from customers first so posting does not depend on customer_accounts.
