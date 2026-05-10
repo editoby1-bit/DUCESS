@@ -11837,35 +11837,3 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   background: #e5e7eb !important;
   border-radius: 999px !important;
 }
-
-
-/* Enforce Central COD horizontal scroll */
-.modal:has([data-cod-note]) {
-  width: min(940px, 96vw) !important;
-  max-width: 96vw !important;
-}
-.modal:has([data-cod-note]) .modal-body {
-  overflow: visible !important;
-}
-.modal:has([data-cod-note]) .table-wrap {
-  overflow-x: scroll !important;
-  overflow-y: auto !important;
-  max-height: 58vh !important;
-  scrollbar-gutter: stable both-edges !important;
-  padding-bottom: 12px !important;
-}
-.modal:has([data-cod-note]) .table {
-  min-width: 1180px !important;
-  table-layout: auto !important;
-}
-.modal:has([data-cod-note]) .table-wrap::-webkit-scrollbar {
-  height: 14px !important;
-}
-.modal:has([data-cod-note]) .table-wrap::-webkit-scrollbar-thumb {
-  background: #64748b !important;
-  border-radius: 999px !important;
-}
-.modal:has([data-cod-note]) .table-wrap::-webkit-scrollbar-track {
-  background: #e2e8f0 !important;
-  border-radius: 999px !important;
-}
