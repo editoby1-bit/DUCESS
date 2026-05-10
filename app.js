@@ -2102,9 +2102,9 @@ function hideProcessing() {
       const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
       const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
-      const variance = Number(c.variance ?? Math.abs(remaining));
-      const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
-      return c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining !== 0 || Math.abs(remaining) > 0;
+      const variance = Math.abs(remaining);
+      const overdraw = Math.max(0, -remaining);
+      return c.status !== 'resolved' && (c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining !== 0);
     }).map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
@@ -2112,8 +2112,8 @@ function hideProcessing() {
       const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
       const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
-      const variance = Number(c.variance ?? Math.abs(remaining));
-      const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
+      const variance = Math.abs(remaining);
+      const overdraw = Math.max(0, -remaining);
       const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || ''; return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
@@ -3107,7 +3107,7 @@ function normalizeStaffLedgerEntryType(row) {
       save();
       lookupFill(byId('workspace'), c);
     };
-    byId('lookupBtn').onclick = () => openCustomerSearchModal(state.customers);
+    byId('lookupBtn').onclick = () => openCustomerSearchModal(allPostingAccountsForSearch());
     byId('lookupAcc').oninput = debounce(() => {
       const v = (byId('lookupAcc')?.value || '').trim();
       if (!v) return doLookup(true);
@@ -3260,7 +3260,7 @@ function normalizeStaffLedgerEntryType(row) {
       accInput.onkeyup = (e) => { if (e.key === 'Enter') doLookup(false); };
     }
     const searchBtn = byId(`${prefix}Search`);
-    if (searchBtn) searchBtn.onclick = () => openCustomerSearchModal(state.customers);
+    if (searchBtn) searchBtn.onclick = () => openCustomerSearchModal(allPostingAccountsForSearch());
     const editBtn = byId(`${prefix}Edit`);
     if (editBtn) editBtn.onclick = () => {
       const c = getSelectedCustomer() || getCustomerByAccountNo(byId(`${prefix}Acc`).value);
@@ -3958,20 +3958,23 @@ function normalizeStaffLedgerEntryType(row) {
           state.ui.txDetailsDraft = '';
           state.ui.txCounterpartyDraft = '';
           state.ui.selectedCustomerId = null;
+          const activeDraft = state.ui.telleringDrafts?.[visibilityKey];
+          if (activeDraft) activeDraft.singleCharges = { apply: false, checked: {}, values: {} };
           save();
-          // Explicitly clear DOM fields that resetFields() may not have reached
-          if (byId('txAcc')) byId('txAcc').value = '';
-          if (byId('txAmount')) byId('txAmount').value = '';
-          if (byId('txDetails')) byId('txDetails').value = '';
-          if (byId('txCounterparty')) byId('txCounterparty').value = '';
+          ['txAcc','txAmount','txDetails','txCounterparty'].forEach(id => { if (byId(id)) byId(id).value = ''; });
           if (byId('txName')) byId('txName').textContent = '—';
+          if (byId('txBalance')) byId('txBalance').innerHTML = '—';
           showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} request sent for approval`);
           renderWorkspace();
-          requestAnimationFrame(() => {
+          setTimeout(() => {
+            state.ui.txAccDraft = '';
+            state.ui.txAmountDraft = '';
+            state.ui.selectedCustomerId = null;
+            save();
             ['txAcc','txAmount','txDetails','txCounterparty'].forEach(id => { if (byId(id)) byId(id).value = ''; });
             if (byId('txName')) byId('txName').textContent = '—';
             if (byId('txBalance')) byId('txBalance').innerHTML = '—';
-          });
+          }, 80);
         } finally {
           hideProcessing();
         }
@@ -4345,14 +4348,14 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
               totalDebits: debits,
               netBookBalance: netBook,
               remainingBalance: running,
-              expectedCash: running,
+              expectedCash: 0,
               variance,
               overdraw
             }
           });
           if (result?.ok && result.data) {
             const existingIndex = (state.cod || []).findIndex(item => item.id === result.data.id);
-            const nextRow = Object.assign({}, result.data, { staffName: st.name, formAmount, openingBalance: formAmount, totalCreditCash: creditCash, totalCreditTransfer: creditTransfer, totalDebitCash: debitCash, totalDebitTransfer: debitTransfer, totalCredits: credits, totalDebits: debits, netBookBalance: netBook, actualCash: running, expectedCash: running, runningFloat: running, remainingBalance: running, variance, overdraw, note });
+            const nextRow = Object.assign({}, result.data, { staffName: st.name, formAmount, openingBalance: formAmount, totalCreditCash: creditCash, totalCreditTransfer: creditTransfer, totalDebitCash: debitCash, totalDebitTransfer: debitTransfer, totalCredits: credits, totalDebits: debits, netBookBalance: netBook, actualCash: running, expectedCash: 0, runningFloat: running, remainingBalance: running, variance, overdraw, note, status: variance===0 ? 'balanced':'flagged' });
             if (existingIndex >= 0) state.cod.splice(existingIndex, 1, nextRow); else state.cod.unshift(nextRow);
           } else if (result?.ok === false) { showToast(result.error?.message || 'Unable to submit close of day'); return; }
         }
