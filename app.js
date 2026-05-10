@@ -728,6 +728,31 @@
     };
   }
 
+  function allPostingAccountsForSearch() {
+    const staffAccounts = (state.staff || []).map(st => {
+      const acc = ensureStaffAccount(st.id);
+      return {
+        id: st.id,
+        customerId: st.id,
+        staffId: st.id,
+        staffUuid: getStaffBackendId(st),
+        accountNumber: acc.accountNumber || '',
+        name: st.name || st.full_name || st.id,
+        balance: Number(acc.balance || 0),
+        active: st.active !== false && st.is_active !== false,
+        accountType: 'staff'
+      };
+    }).filter(x => x.accountNumber);
+    const merged = [...(state.customers || []), ...staffAccounts];
+    const seen = new Set();
+    return merged.filter(x => {
+      const key = String(x.accountNumber || x.id || '');
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   function searchCustomersByName(term) {
     const q = String(term || '').trim().toLowerCase();
     if (!q) return [];
@@ -3548,7 +3573,7 @@ function normalizeStaffLedgerEntryType(row) {
       return c;
     };
 
-    if (byId('txSearch')) byId('txSearch').onclick = () => openCustomerSearchModal(state.customers);
+    if (byId('txSearch')) byId('txSearch').onclick = () => openCustomerSearchModal(allPostingAccountsForSearch());
     if (byId('txAcc')) {
       const clearSingleCustomer = () => {
         if (byId('txName')) byId('txName').textContent = '—';
@@ -3653,7 +3678,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('journalCollapseBtn')) byId('journalCollapseBtn').onclick = toggleJournalCollapse;
     if (byId('journalCollapseTopBtn')) byId('journalCollapseTopBtn').onclick = toggleJournalCollapse;
 
-    if (byId('journalSearchBtn')) byId('journalSearchBtn').onclick = () => openJournalCustomerSearchModal(state.customers);
+    if (byId('journalSearchBtn')) byId('journalSearchBtn').onclick = () => openJournalCustomerSearchModal(allPostingAccountsForSearch());
     if (byId('journalAcc')) {
       const clearJournalCustomer = () => {
         if (byId('journalName')) byId('journalName').textContent = '—';
@@ -3671,7 +3696,7 @@ function normalizeStaffLedgerEntryType(row) {
           // Do not save while editing the journal account field; saving can repaint and steal focus.
           return;
         }
-        const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
+        const selected = state.ui.selectedJournalCustomerId ? getCustomerByAccountNo(v) : null;
         if (selected && String(selected.accountNumber || '') !== v) {
           state.ui.selectedJournalCustomerId = null;
           if (byId('journalName')) byId('journalName').textContent = '—';
@@ -3692,9 +3717,7 @@ function normalizeStaffLedgerEntryType(row) {
         state.ui.journalAccDraft = v;
         if (!v) { clearJournalCustomer(); return; }
         // Check if already resolved (works for both customers and staff accounts)
-        const alreadyInCustomers = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
-        const alreadyByAccNo = !alreadyInCustomers ? getCustomerByAccountNo(v) : null;
-        const already = alreadyInCustomers || alreadyByAccNo;
+        const already = getCustomerByAccountNo(v);
         if (already && String(already.accountNumber || '') === v) {
           if (byId('journalName')) byId('journalName').textContent = already.name || '—';
           if (already.id !== state.ui.selectedJournalCustomerId) state.ui.selectedJournalCustomerId = already.id;
@@ -3797,12 +3820,8 @@ function normalizeStaffLedgerEntryType(row) {
       event?.stopPropagation?.();
       const journalEntrySnapshot = readJournalEntrySnapshot();
       const journalAccValue = String(byId('journalAcc')?.value || state.ui.journalAccDraft || '').trim();
-      const selectedJournalCustomer = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
-      // Try to find customer: first by selected ID, then by account number lookup
-      const customer = (selectedJournalCustomer && String(selectedJournalCustomer.accountNumber || '') === journalAccValue)
-        ? selectedJournalCustomer
-        : getCustomerByAccountNo(journalAccValue);
-      // If still not found by account number alone, try matching against all customers
+      const selectedJournalCustomer = getCustomerByAccountNo(journalAccValue);
+      const customer = selectedJournalCustomer || getCustomerByAccountNo(journalAccValue);
       const resolvedCustomer = customer || state.customers.find(c => String(c.accountNumber || '') === journalAccValue && c.active !== false);
       if (resolvedCustomer && !state.ui.selectedJournalCustomerId) {
         // Auto-resolve the customer if we found them by account number
@@ -3948,6 +3967,11 @@ function normalizeStaffLedgerEntryType(row) {
           if (byId('txName')) byId('txName').textContent = '—';
           showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} request sent for approval`);
           renderWorkspace();
+          requestAnimationFrame(() => {
+            ['txAcc','txAmount','txDetails','txCounterparty'].forEach(id => { if (byId(id)) byId(id).value = ''; });
+            if (byId('txName')) byId('txName').textContent = '—';
+            if (byId('txBalance')) byId('txBalance').innerHTML = '—';
+          });
         } finally {
           hideProcessing();
         }
@@ -4277,13 +4301,15 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       const credits = creditCash + creditTransfer;
       const debits = debitCash + debitTransfer;
       const netBook = credits - debits;
-      const running = currentFloatAvailable(st.id, businessDate());
-      const variance = Math.max(0, -running);
+      const running = codRemainingBalance(formAmount, credits, debits);
+      const variance = Math.abs(running);
       const overdraw = Math.max(0, -running);
       return `<tr><td>${st.name}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${running<0?'balance-negative':''}">${money(running)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
     openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Form is the approved opening money collected from the field. Remaining Balance reduces as staff use the form. Net Balance is Total Credits minus Total Debits. Variance and Overdraw are derived from how the form is used.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
-      closeModal();
+      const activeBtn = document.activeElement;
+      const oldLabel = activeBtn && activeBtn.tagName === 'BUTTON' ? activeBtn.textContent : '';
+      if (activeBtn && activeBtn.tagName === 'BUTTON') { activeBtn.disabled = true; activeBtn.textContent = 'Closing...'; }
       showProcessing('Closing business day...');
       await nextPaint();
       try {
@@ -4299,7 +4325,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
           const netBook = credits - debits;
           const running = codRemainingBalance(formAmount, credits, debits);
           const note=q(`[data-cod-note="${st.id}"]`)?.value?.trim()||'';
-          const variance=Math.max(0,-running);
+          const variance=Math.abs(running);
           const overdraw=Math.max(0,-running);
           const result = await gateway.cod.submitCod({
             staffId: st.id,
@@ -4320,6 +4346,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
               netBookBalance: netBook,
               remainingBalance: running,
               expectedCash: running,
+              variance,
               overdraw
             }
           });
@@ -4354,6 +4381,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`);
       } finally {
         hideProcessing();
+        if (activeBtn && activeBtn.tagName === 'BUTTON') { activeBtn.disabled = false; activeBtn.textContent = oldLabel || 'Close Business Day'; }
       }
     }}]);
   }
