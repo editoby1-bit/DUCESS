@@ -1287,7 +1287,7 @@ if (inserted.error) {
       // Skip Supabase posting for them to avoid "customer not found" errors.
       const allStaffEntries = entries.length > 0 && entries.every(e => e.accountType === 'staff');
       const hasStaffEntry = entries.some(e => e.accountType === 'staff');
-      if (allStaffEntries || hasStaffEntry) {
+      if (allStaffEntries || (hasStaffEntry && (type === 'customer_credit' || type === 'customer_debit'))) {
         return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '', staffAccountHandledLocally: true });
       }
 
