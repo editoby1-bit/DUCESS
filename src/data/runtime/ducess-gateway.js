@@ -1282,6 +1282,15 @@ if (inserted.error) {
 
       const txType = (type === 'customer_debit' || type === 'customer_debit_journal') ? 'debit' : 'credit';
       const entries = resolveRequestEntries(requestRow);
+
+      // Staff account transactions are handled entirely by local state (applyRequest).
+      // Skip Supabase posting for them to avoid "customer not found" errors.
+      const allStaffEntries = entries.length > 0 && entries.every(e => e.accountType === 'staff');
+      const hasStaffEntry = entries.some(e => e.accountType === 'staff');
+      if (allStaffEntries || (hasStaffEntry && (type === 'customer_credit' || type === 'customer_debit'))) {
+        return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '', staffAccountHandledLocally: true });
+      }
+
       const existingTxResult = await fetchExistingPostedTransactionsByRequest(requestRow.id);
       if (!existingTxResult.ok) return existingTxResult;
       if (existingTxResult.data.length >= entries.length && entries.length > 0) {
