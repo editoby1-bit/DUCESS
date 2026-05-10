@@ -598,7 +598,11 @@ async function submitDebtRepayment(_payload) {
 
       if (!customer) {
         const byAccountNumber = await getCustomerByAccountNumber(key);
-        if (!byAccountNumber.ok) return byAccountNumber;
+        if (!byAccountNumber.ok) {
+          const possibleStaff = await fetchStaffAccountByKey(key);
+          if (possibleStaff.ok && possibleStaff.data) return defaultResult.ok(possibleStaff.data);
+          return byAccountNumber;
+        }
         customer = byAccountNumber.data;
       }
 
@@ -1287,7 +1291,7 @@ if (inserted.error) {
       // Skip Supabase posting for them to avoid "customer not found" errors.
       const allStaffEntries = entries.length > 0 && entries.every(e => e.accountType === 'staff');
       const hasStaffEntry = entries.some(e => e.accountType === 'staff');
-      if (allStaffEntries || (hasStaffEntry && (type === 'customer_credit' || type === 'customer_debit'))) {
+      if (allStaffEntries || hasStaffEntry) {
         return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '', staffAccountHandledLocally: true });
       }
 
