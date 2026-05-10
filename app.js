@@ -1039,6 +1039,11 @@
   async function syncApprovalEffectsFromGateway(approvalRecord) {
   if (!approvalRecord?.type) return defaultResultOk(null);
 
+  // Enrich approvalRecord.payload from local state when the gateway returns a
+  // minimal record (e.g. after RPC approval). This ensures accountType is present.
+  const localApproval = (state.approvals || []).find(r => r.id === approvalRecord.id);
+  const enrichedPayload = Object.assign({}, localApproval?.payload || {}, approvalRecord.payload || {});
+
   if (approvalRecord.type === 'account_opening') {
     return syncCustomersListFromGateway();
   }
@@ -1046,17 +1051,17 @@
   if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
     // Staff accounts (accountType 'staff' or 'staff_wallet') are not in the Supabase customers table;
     // their balance is maintained locally. Skip the remote sync to avoid "customer not found" errors.
-    if (approvalRecord.payload?.accountType === 'staff' || approvalRecord.payload?.accountType === 'staff_wallet') {
+    if (enrichedPayload.accountType === 'staff' || enrichedPayload.accountType === 'staff_wallet') {
       return defaultResultOk(null);
     }
     return syncCustomerFromGateway({
-      customerId: approvalRecord.payload?.customerId,
-      accountNumber: approvalRecord.payload?.accountNumber
+      customerId: enrichedPayload.customerId,
+      accountNumber: enrichedPayload.accountNumber
     });
   }
 
   if (approvalRecord.type === 'customer_credit_journal' || approvalRecord.type === 'customer_debit_journal') {
-    const rows = Array.isArray(approvalRecord.payload?.rows) ? approvalRecord.payload.rows : [];
+    const rows = Array.isArray(enrichedPayload.rows) ? enrichedPayload.rows : [];
     for (const row of rows) {
       // Skip staff accounts - not in Supabase customers table
       if (row.accountType === 'staff' || row.accountType === 'staff_wallet') continue;
@@ -5030,26 +5035,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function filterDateReference(rows = []) {
-    // DUCESS balances filter against the active DUCESS business date.
-    // After a COD close, businessDate() advances to the next open date.
-    // If no entries exist on the new open date, fall back to the most recently
-    // closed business date so that "Daily" shows the last day's activity.
-    const activeDateIso = dateOnly(businessDate && businessDate()) || '';
-    if (!activeDateIso) return '';
-    // Check if there are any rows on the active (new open) date
-    const rowsArr = Array.isArray(rows) ? rows : [];
-    const hasEntryOnActiveDate = rowsArr.some(r => {
-      const iso = dateOnly(r?.date || r?.businessDate || r?.business_date || r?.transactionDate || r?.transaction_date || r?.postedAt || r?.approvedAt || r?.createdAt || r?.requestedAt);
-      return iso === activeDateIso;
-    });
-    if (hasEntryOnActiveDate) return activeDateIso;
-    // No entries on the active open date — find the most recent entry date that is <= activeDateIso
-    let latestIso = '';
-    rowsArr.forEach(r => {
-      const iso = dateOnly(r?.date || r?.businessDate || r?.business_date || r?.transactionDate || r?.transaction_date || r?.postedAt || r?.approvedAt || r?.createdAt || r?.requestedAt);
-      if (iso && iso <= activeDateIso && iso > latestIso) latestIso = iso;
-    });
-    return latestIso || activeDateIso;
+    // Always filter against the active DUCESS business date — never real calendar date,
+    // never the most-recent-entry date. Daily = what happened on the open business date.
+    return dateOnly(businessDate && businessDate()) || '';
   }
 
   function filterByDate(rows, filter) {
