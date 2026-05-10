@@ -3691,13 +3691,13 @@ function normalizeStaffLedgerEntryType(row) {
         const v = (byId('journalAcc').value || '').trim();
         state.ui.journalAccDraft = v;
         if (!v) { clearJournalCustomer(); return; }
-        // Do not run a lookup from blur/change. On some browsers, clicking Amount fires
-        // change before focus settles and the lookup/save path can repaint the journal row,
-        // making the account number appear to vanish. Auto-lookup already happens oninput
-        // for 4 digits; explicit lookup remains on Search button/Enter/Add to Journal.
-        const already = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
+        // Check if already resolved (works for both customers and staff accounts)
+        const alreadyInCustomers = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
+        const alreadyByAccNo = !alreadyInCustomers ? getCustomerByAccountNo(v) : null;
+        const already = alreadyInCustomers || alreadyByAccNo;
         if (already && String(already.accountNumber || '') === v) {
           if (byId('journalName')) byId('journalName').textContent = already.name || '—';
+          if (already.id !== state.ui.selectedJournalCustomerId) state.ui.selectedJournalCustomerId = already.id;
         }
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
@@ -4283,9 +4283,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       return `<tr><td>${st.name}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${running<0?'balance-negative':''}">${money(running)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
     openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Form is the approved opening money collected from the field. Remaining Balance reduces as staff use the form. Net Balance is Total Credits minus Total Debits. Variance and Overdraw are derived from how the form is used.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
-      const closeBtn = document.activeElement;
-      const oldLabel = closeBtn && closeBtn.tagName === 'BUTTON' ? closeBtn.textContent : '';
-      if (closeBtn && closeBtn.tagName === 'BUTTON') { closeBtn.disabled = true; closeBtn.textContent = 'Closing...'; }
+      closeModal();
       showProcessing('Closing business day...');
       await nextPaint();
       try {
@@ -4356,7 +4354,6 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       save(); closeModal(); render(); showToast(`Business day closed. New open date: ${state.businessDate}`);
       } finally {
         hideProcessing();
-        if (closeBtn && closeBtn.tagName === 'BUTTON') { closeBtn.disabled = false; closeBtn.textContent = oldLabel || 'Close Business Day'; }
       }
     }}]);
   }
@@ -4825,6 +4822,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         const acceptedPosition = isAdminOfficer ? Number(byId('codAcceptedPosition').value || 0) : savedAcceptedPosition;
         const adjustment = isAdminOfficer ? (acceptedPosition - currentNetBookBalance) : savedAdjustment;
         const debtAmt = createDebt ? Math.max(0, Number(byId('codDebtAmount').value || 0)) : 0;
+        closeModal();
         showProcessing('Resolving COD...');
         await nextPaint();
         try {
@@ -4875,7 +4873,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
             addStaffEntry(cod.staffId, 'cod_resolution_debt', debtAmt, 0, `COD debt recorded: ${note}`, { codId: cod.id });
           }
         }
-        save(); closeModal(); render(); showToast(resolutionType === 'reversal_needed' ? 'COD flagged for reversal/correction' : 'COD resolved');
+        save(); render(); showToast(resolutionType === 'reversal_needed' ? 'COD flagged for reversal/correction' : 'COD resolved');
         } finally {
           hideProcessing();
         }
