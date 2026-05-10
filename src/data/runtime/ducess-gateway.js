@@ -598,11 +598,7 @@ async function submitDebtRepayment(_payload) {
 
       if (!customer) {
         const byAccountNumber = await getCustomerByAccountNumber(key);
-        if (!byAccountNumber.ok) {
-          const possibleStaff = await fetchStaffAccountByKey(key);
-          if (possibleStaff.ok && possibleStaff.data) return defaultResult.ok(possibleStaff.data);
-          return byAccountNumber;
-        }
+        if (!byAccountNumber.ok) return byAccountNumber;
         customer = byAccountNumber.data;
       }
 
