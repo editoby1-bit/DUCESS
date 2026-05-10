@@ -1122,10 +1122,10 @@ if (approvalRecord.type === 'float_topup') {
         note: payload.note || '',
         requestedByName: staff?.name || 'System'
       });
-    } else if ((type === 'customer_credit' || type === 'customer_debit') && gateway.accounts) {
+    } else if ((type === 'customer_credit' || type === 'customer_debit') && gateway.accounts && payload.accountType !== 'staff') {
       const fn = type === 'customer_credit' ? gateway.accounts.submitCredit : gateway.accounts.submitDebit;
       result = await fn({
-        accountId: payload.accountType === 'staff' ? (payload.staffAccountUuid || payload.staffAccountId || payload.accountNumber || payload.customerId) : payload.customerId,
+        accountId: payload.customerId,
         accountType: payload.accountType || 'customer',
         staffAccountId: payload.staffAccountId || '',
         staffAccountUuid: payload.staffAccountUuid || '',
@@ -1136,7 +1136,7 @@ if (approvalRecord.type === 'float_topup') {
         requestedByName: staff?.name || 'System',
         customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, paymentMode: payload.paymentMode, staffId: payload.staffId, date: payload.date, customerCreditAmount: payload.customerCreditAmount, chargeBreakdown: payload.chargeBreakdown, totalChargeAmount: payload.totalChargeAmount, commissionAmount: payload.commissionAmount, chargeTraceId: payload.chargeTraceId || payload.commissionTraceId, commissionTraceId: payload.commissionTraceId
       });
-    } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries) {
+    } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries && !(payload.rows || []).some(row => row.accountType === 'staff')) {
       result = await gateway.accounts.submitJournalEntries({
         entries: (payload.rows || []).map(row => ({ accountId: row.accountType === 'staff' ? (row.staffAccountUuid || row.staffAccountId || row.accountNumber || row.customerId) : row.customerId, accountType: row.accountType || 'customer', staffAccountId: row.staffAccountId || '', staffAccountUuid: row.staffAccountUuid || '', txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown, totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount, chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId })),
         requestedByStaffId: getStaffBackendId(staff),
@@ -4808,7 +4808,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           <div class="field"><label>Create Teller Debt</label><select id="codCreateDebt" class="entry-input"><option value="yes" ${savedCreateDebt?'selected':''}>Yes</option><option value="no" ${!savedCreateDebt?'selected':''}>No</option></select></div>
         </div>
         <div class="form-grid two cod-resolution-grid">
-          <div class="field"><label>Debt Amount</label><input id="codDebtAmount" class="entry-input" type="number" placeholder="Enter teller debt amount" value="${cod.debtAmount ?? defaultDebt}"></div>
+          <div class="field"><label>Debt Amount</label><input id="codDebtAmount" class="entry-input" type="number" placeholder="Enter teller debt amount" value="${cod.debtAmount || defaultDebt}"></div>
           <div class="field"><label>Resolution Note</label><textarea id="codResolutionNote" class="entry-input">${cod.resolutionNote || ''}</textarea></div>
         </div>
       </div>
@@ -5005,9 +5005,26 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function filterDateReference(rows = []) {
-    // DUCESS balances must filter against the active DUCESS business date, not real calendar date
-    // and not the latest transaction date.
-    return dateOnly(businessDate && businessDate()) || '';
+    // DUCESS balances filter against the active DUCESS business date.
+    // After a COD close, businessDate() advances to the next open date.
+    // If no entries exist on the new open date, fall back to the most recently
+    // closed business date so that "Daily" shows the last day's activity.
+    const activeDateIso = dateOnly(businessDate && businessDate()) || '';
+    if (!activeDateIso) return '';
+    // Check if there are any rows on the active (new open) date
+    const rowsArr = Array.isArray(rows) ? rows : [];
+    const hasEntryOnActiveDate = rowsArr.some(r => {
+      const iso = dateOnly(r?.date || r?.businessDate || r?.business_date || r?.transactionDate || r?.transaction_date || r?.postedAt || r?.approvedAt || r?.createdAt || r?.requestedAt);
+      return iso === activeDateIso;
+    });
+    if (hasEntryOnActiveDate) return activeDateIso;
+    // No entries on the active open date — find the most recent entry date that is <= activeDateIso
+    let latestIso = '';
+    rowsArr.forEach(r => {
+      const iso = dateOnly(r?.date || r?.businessDate || r?.business_date || r?.transactionDate || r?.transaction_date || r?.postedAt || r?.approvedAt || r?.createdAt || r?.requestedAt);
+      if (iso && iso <= activeDateIso && iso > latestIso) latestIso = iso;
+    });
+    return latestIso || activeDateIso;
   }
 
   function filterByDate(rows, filter) {
@@ -5106,9 +5123,11 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     }
     if (state.ui.tool === 'credit' || state.ui.tool === 'debit') {
       state.ui.txAccDraft = c.accountNumber || '';
-      if (byId('txAcc')) byId('txAcc').value = c.accountNumber;
-      if (byId('txName')) byId('txName').textContent = c.name;
-      if (byId('txBalance')) byId('txBalance').textContent = money(c.balance);
+      state.ui.selectedCustomerId = c.id;
+      if (byId('txAcc')) byId('txAcc').value = c.accountNumber || '';
+      if (byId('txName')) byId('txName').textContent = c.name || '—';
+      if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
+      save();
       return;
     }
     if (state.ui.tool === 'account_statement') {
