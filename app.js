@@ -1541,8 +1541,38 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   let _renderScheduled = false;
+  // Input fields that must retain focus — a render while these are active
+  // would destroy the DOM node and lose the cursor.
+  const FOCUS_GUARD_SELECTORS = ['#txAmount', '#txAcc', '#journalAmount', '#journalAcc', '#txDetails', '#txCounterparty', '#journalDetails', '#journalCounterparty'];
+  let _deferredRenderPending = false;
+
+  function isInputFocused() {
+    const active = document.activeElement;
+    if (!active || active === document.body) return false;
+    return FOCUS_GUARD_SELECTORS.some(sel => active.matches && active.matches(sel));
+  }
+
   function scheduleRender() {
     if (_renderScheduled) return;
+    // If a protected input has focus, queue a deferred render instead of
+    // immediately replacing the DOM. The render fires as soon as the user
+    // leaves the field (blur event on the input or its parent).
+    if (isInputFocused()) {
+      if (_deferredRenderPending) return;
+      _deferredRenderPending = true;
+      const runDeferred = () => {
+        _deferredRenderPending = false;
+        if (!isInputFocused()) {
+          scheduleRender();
+        } else {
+          // Still focused — keep waiting
+          _deferredRenderPending = true;
+          document.activeElement.addEventListener('blur', runDeferred, { once: true });
+        }
+      };
+      document.activeElement.addEventListener('blur', runDeferred, { once: true });
+      return;
+    }
     _renderScheduled = true;
     requestAnimationFrame(() => { _renderScheduled = false; render(); });
   }
@@ -3642,7 +3672,9 @@ function normalizeStaffLedgerEntryType(row) {
       amountInput.oninput = () => {
         state.ui.txAmountDraft = amountInput.value || '';
         updateSingleCommissionPreview();
-        restoreSingleCustomerDisplay();
+        // Do NOT call restoreSingleCustomerDisplay here — it was triggering
+        // state mutations on every keystroke. The customer display is already
+        // set when the account is searched; it only needs restoring on blur/change.
       };
       amountInput.onchange = () => { state.ui.txAmountDraft = amountInput.value || ''; save(); restoreSingleCustomerDisplay(); };
     }
