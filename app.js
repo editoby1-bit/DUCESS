@@ -323,26 +323,45 @@
       .pop() || null;
   }
 
+  function collectKnownBusinessDates() {
+    const dates = [];
+    const add = (value) => {
+      const iso = String(value || '').slice(0,10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) dates.push(iso);
+    };
+    (state.dayClosures || []).forEach(row => { add(row.date || row.businessDate); add(row.nextBusinessDate); });
+    (state.cod || []).forEach(row => add(row.date || row.businessDate));
+    (state.approvals || []).forEach(row => add(approvalBusinessDate(row.type || row.requestType, row.payload || {})));
+    (state.customers || []).forEach(customer => (customer.transactions || []).forEach(tx => add(tx.date || tx.businessDate || tx.business_date)));
+    (state.businessExtras || []).forEach(row => add(row.date || row.businessDate));
+    return Array.from(new Set(dates)).sort();
+  }
+
   function reconcileBusinessDateFromClosures() {
     // DUCESS business date is sequential, not real calendar date.
-    // Only advance when the current business date points to a day already closed.
+    // Never repair backwards to the computer/calendar date or to an old closure.
     const latest = latestClosedBusinessDay();
-    if (!latest?.date) return false;
-    const expectedOpenDate = latest.nextBusinessDate || nextDate(latest.date);
     const current = String(state.businessDate || '').slice(0,10);
-    if (!current) {
-      state.businessDate = expectedOpenDate;
-      return true;
+    let target = current;
+
+    if (latest?.date) {
+      const expectedOpenDate = latest.nextBusinessDate || nextDate(latest.date);
+      if (!target || target === latest.date || target < expectedOpenDate) {
+        target = expectedOpenDate;
+      }
     }
-    // Never jump over skipped business days because DUCESS dates are sequential.
-    // Only advance when the active date itself has been closed.
-    if (current === latest.date) {
-      state.businessDate = expectedOpenDate;
-      return true;
+
+    // Recovery guard: if synced approvals/transactions are already on a later
+    // DUCESS business date, keep the active date at that later business date.
+    // This prevents one device from falling back to an older local date.
+    const latestKnownDate = collectKnownBusinessDates().pop();
+    if (latestKnownDate && (!target || target < latestKnownDate)) {
+      target = isBusinessDateClosed(latestKnownDate) ? nextDate(latestKnownDate) : latestKnownDate;
     }
-    // If a previous real-calendar sync jumped far ahead, repair back to the next sequential DUCESS date.
-    if (current > expectedOpenDate) {
-      state.businessDate = expectedOpenDate;
+
+    if (!target) return false;
+    if (target !== current) {
+      state.businessDate = target;
       return true;
     }
     return false;
@@ -1657,7 +1676,7 @@ if (approvalRecord.type === 'float_topup') {
   let _renderScheduled = false;
   // Input fields that must retain focus — a render while these are active
   // would destroy the DOM node and lose the cursor.
-  const FOCUS_GUARD_SELECTORS = ['#txAmount', '#txAcc', '#journalAmount', '#journalAcc', '#txDetails', '#txCounterparty', '#journalDetails', '#journalCounterparty'];
+  const FOCUS_GUARD_SELECTORS = ['#txAmount', '#txAcc', '#journalAmount', '#journalAcc', '#txDetails', '#txCounterparty', '#journalDetails', '#journalCounterparty', '[data-charge-input]'];
   let _deferredRenderPending = false;
 
   function isInputFocused() {

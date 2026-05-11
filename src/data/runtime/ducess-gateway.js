@@ -1415,6 +1415,41 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
+    async function setReviewLock(payload = {}) {
+      if (!canUseSupabase()) return defaultResult.ok(null);
+      const requestId = payload.requestId || payload.id || '';
+      if (!requestId) return defaultResult.err('APPROVAL_LOCK_INVALID', 'Approval request id is required.');
+      const ttlMs = Number(payload.ttlMs || 60000);
+      const currentResult = await getApprovalRequestById(requestId);
+      if (!currentResult.ok) return currentResult;
+      const current = currentResult.data;
+      if (!current || current.status !== 'pending') return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
+      const existing = current.payload?.__reviewLock || null;
+      const existingStarted = existing?.startedAt ? new Date(existing.startedAt).getTime() : 0;
+      const now = Date.now();
+      const actorId = String(payload.staffId || payload.staff_id || '');
+      if (existingStarted && (now - existingStarted) < ttlMs && String(existing.staffId || '') && String(existing.staffId || '') !== actorId) {
+        return defaultResult.err('APPROVAL_LOCKED', `This request is being reviewed by ${existing.staffName || 'another staff'}.`);
+      }
+      const nextPayload = mergeApprovalPayload(current.payload, {
+        __reviewLock: {
+          staffId: actorId,
+          staffName: payload.staffName || payload.staff_name || 'Staff',
+          startedAt: new Date(now).toISOString()
+        }
+      });
+      const { data, error } = await client
+        .from(approvalRequestsTable)
+        .update({ payload: nextPayload })
+        .eq('id', requestId)
+        .eq('status', 'pending')
+        .select(approvalRequestsSelect)
+        .maybeSingle();
+      if (error) return defaultResult.err('APPROVAL_LOCK_FAILED', 'Could not mark this request as being reviewed in Supabase.', error);
+      if (!data) return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
+      return defaultResult.ok(normalizeApprovalRecord(data));
+    }
+
     async function approveRequest(payload = {}) {
       if (!canUseSupabase()) return local.approvals.approveRequest(payload);
       const approver = {
@@ -2478,6 +2513,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         submitApprovalRequest,
         approveRequest,
         markApprovalApprovedDirect,
+        setReviewLock,
         rejectRequest,
       },
       cod: {
