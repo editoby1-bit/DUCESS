@@ -705,6 +705,12 @@ async function submitDebtRepayment(_payload) {
             session: sessionResult.data || null,
           });
         },
+        async changePassword() {
+          return defaultResult.err('AUTH_PASSWORD_UNAVAILABLE', 'Password changes require Supabase Auth.');
+        },
+        async resetStaffPassword() {
+          return defaultResult.err('AUTH_PASSWORD_UNAVAILABLE', 'Admin password reset requires Supabase Auth.');
+        },
       },
       staff: {
         getCurrentStaff,
@@ -2413,6 +2419,99 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return sessionResult;
     }
 
+    async function changePassword(payload = {}) {
+      if (!canUseSupabase()) return local.auth.changePassword(payload);
+      const oldPassword = payload.oldPassword || '';
+      const newPassword = payload.newPassword || '';
+      if (!oldPassword || !newPassword) return defaultResult.err('AUTH_PASSWORD_INPUT_REQUIRED', 'Old and new password are required.');
+      if (String(newPassword).length < 6) return defaultResult.err('AUTH_PASSWORD_TOO_SHORT', 'Password must be at least 6 characters.');
+
+      const sessionResult = await client.auth.getSession();
+      const authSession = sessionResult.data?.session;
+      const email = authSession?.user?.email;
+      if (sessionResult.error || !authSession?.user || !email) {
+        return defaultResult.err('AUTH_SESSION_REQUIRED', 'Active login session is required to change password.', sessionResult.error || null);
+      }
+
+      const verifyResult = await client.auth.signInWithPassword({ email, password: oldPassword });
+      if (verifyResult.error) {
+        return defaultResult.err('AUTH_OLD_PASSWORD_FAILED', 'Old password is incorrect.', verifyResult.error);
+      }
+
+      const updateResult = await client.auth.updateUser({ password: newPassword });
+      if (updateResult.error) {
+        return defaultResult.err('AUTH_PASSWORD_UPDATE_FAILED', updateResult.error.message || 'Could not update password.', updateResult.error);
+      }
+
+      try {
+        const staffResult = await getCurrentStaff();
+        const staff = staffResult.ok ? staffResult.data : null;
+        await insertAuditLogEntry({
+          actorStaffId: staff?.id || null,
+          actorName: staff?.fullName || staff?.name || '',
+          actionType: 'staff_password_changed',
+          entityType: 'staff',
+          entityId: staff?.id || null,
+          details: 'Staff changed own password',
+        }).catch(() => {});
+      } catch (_) {}
+
+      const refreshed = await client.auth.getSession();
+      return buildSessionFromSupabaseAuthSession(refreshed.data?.session || verifyResult.data?.session || authSession);
+    }
+
+    async function resetStaffPassword(payload = {}) {
+      if (!canUseSupabase()) return local.auth.resetStaffPassword(payload);
+      const staffCode = String(payload.staffCode || payload.staffId || '').trim().toUpperCase();
+      const staffAuthUserId = payload.authUserId || payload.auth_user_id || null;
+      const temporaryPassword = payload.temporaryPassword || payload.password || '';
+      if (!staffCode && !staffAuthUserId) return defaultResult.err('AUTH_RESET_TARGET_REQUIRED', 'Select staff to reset password.');
+      if (!temporaryPassword || String(temporaryPassword).length < 6) return defaultResult.err('AUTH_PASSWORD_TOO_SHORT', 'Temporary password must be at least 6 characters.');
+
+      const sessionResult = await client.auth.getSession();
+      const accessToken = sessionResult.data?.session?.access_token || config?.supabase?.anonKey || '';
+      const resetFnUrl = config?.supabase?.resetStaffPasswordEdgeFn
+        || `${config?.supabase?.url || ''}/functions/v1/reset-staff-password`;
+      const fallbackFnUrl = config?.supabase?.createStaffEdgeFn || `${config?.supabase?.url || ''}/functions/v1/create-staff-user`;
+      const body = {
+        action: 'reset_password',
+        staffCode,
+        staffId: payload.staffId || staffCode,
+        authUserId: staffAuthUserId,
+        password: temporaryPassword,
+        temporaryPassword,
+      };
+
+      async function callResetEndpoint(url) {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+          body: JSON.stringify(body),
+        });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || json.error) return defaultResult.err('AUTH_RESET_FAILED', json.error || json.message || 'Password reset failed.', json);
+        return defaultResult.ok(json);
+      }
+
+      let result = await callResetEndpoint(resetFnUrl);
+      if (!result.ok && fallbackFnUrl && fallbackFnUrl !== resetFnUrl) {
+        result = await callResetEndpoint(fallbackFnUrl);
+      }
+      if (!result.ok) return result;
+
+      try {
+        await insertAuditLogEntry({
+          actorStaffId: payload.updatedByStaffId || null,
+          actorName: payload.updatedByName || '',
+          actionType: 'staff_password_reset',
+          entityType: 'staff',
+          entityId: payload.staffId || staffAuthUserId || staffCode,
+          details: `Admin reset password for ${staffCode || staffAuthUserId}`,
+        }).catch(() => {});
+      } catch (_) {}
+      return defaultResult.ok({ success: true });
+    }
+
     async function logout() {
       if (!canUseSupabase()) return local.auth.logout();
       // Audit: logout before signing out
@@ -2473,6 +2572,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         logout,
         getSession,
         getCurrentStaffContext,
+        changePassword,
+        resetStaffPassword,
       },
       staff: {
         getCurrentStaff,
