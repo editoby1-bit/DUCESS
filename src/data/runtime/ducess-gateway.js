@@ -1402,13 +1402,19 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       };
       const decisionNote = payload.note || '';
 
+      // Always fetch the request row first so we can inspect the payload
+      // (needed for both the RPC bypass check and the direct posting path).
+      const requestResult = await fetchApprovalRequestRow(payload.requestId, 'pending');
+      if (!requestResult.ok) return requestResult;
+      const requestRow = requestResult.data;
+
       if (approvalPostingRpc) {
         // For staff account transactions, skip the RPC (which doesn't know about
         // DUCESS staff accounts) and fall through to direct posting which detects
         // staff entries and returns staffAccountHandledLocally: true.
         const requestPayload = requestRow?.payload || {};
         const isStaffCreditDebit = (requestRow?.request_type === 'customer_credit' || requestRow?.request_type === 'customer_debit') && (requestPayload.accountType === 'staff' || requestPayload.accountType === 'staff_wallet');
-        const isStaffJournal = (requestRow?.request_type === 'customer_credit_journal' || requestRow?.request_type === 'customer_debit_journal') && Array.isArray(requestPayload.rows) && requestPayload.rows.length > 0 && requestPayload.rows.every(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
+        const isStaffJournal = (requestRow?.request_type === 'customer_credit_journal' || requestRow?.request_type === 'customer_debit_journal') && Array.isArray(requestPayload.rows) && requestPayload.rows.length > 0 && requestPayload.rows.some(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
         if (!isStaffCreditDebit && !isStaffJournal) {
           const { data, error: rpcError } = await client.rpc(approvalPostingRpc, {
             p_request_id: payload.requestId,
@@ -1421,10 +1427,6 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         }
         // Staff account — fall through to direct posting path below
       }
-
-      const requestResult = await fetchApprovalRequestRow(payload.requestId, 'pending');
-      if (!requestResult.ok) return requestResult;
-      const requestRow = requestResult.data;
       if (payload?.payload && typeof payload.payload === 'object') {
   requestRow.payload = {
     ...(requestRow.payload || {}),
