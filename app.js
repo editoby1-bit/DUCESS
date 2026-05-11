@@ -744,11 +744,77 @@
     const result = await gateway.approvals.listApprovalRequests(filters);
     if (result?.ok && Array.isArray(result.data)) {
       state.approvals = result.data;
+      syncStaffBusinessEffectsFromApprovedRequests();
       syncOperationalEffectsFromApprovedRequests();
       reconcileBusinessDateFromClosures();
       save();
     }
     return result;
+  }
+
+  function resolveStaffWalletForBusinessPayload(payload = {}) {
+    const accountNumber = String(payload.accountNumber || '').trim();
+    const staffId = String(payload.staffAccountId || payload.staffId || payload.customerId || '').trim();
+    let wallet = null;
+    if (staffId) {
+      wallet = state.customers.find(c => c.accountType === 'staff_wallet' && (c.staffId === staffId || c.id === staffId));
+      if (!wallet && (state.staff || []).some(st => st.id === staffId)) wallet = ensureStaffWalletCustomer(staffId);
+    }
+    if (!wallet && accountNumber) wallet = state.customers.find(c => c.accountType === 'staff_wallet' && String(c.accountNumber || '') === accountNumber);
+    if (!wallet && accountNumber) wallet = getCustomerByAccountNo(accountNumber);
+    return wallet && (wallet.accountType === 'staff_wallet' || wallet.accountType === 'staff') ? wallet : null;
+  }
+
+  function applyApprovedStaffBusinessEntry(req, entryPayload = {}, txType = 'credit', rowKey = '') {
+    if (!req || req.status !== 'approved') return;
+    const payload = entryPayload || {};
+    if (!(payload.accountType === 'staff' || payload.accountType === 'staff_wallet')) return;
+    const wallet = resolveStaffWalletForBusinessPayload(payload);
+    if (!wallet) return;
+    wallet.transactions ||= [];
+    const sourceApprovalId = req.id || payload.sourceApprovalId || '';
+    const sourceRowKey = String(rowKey || payload.sourceRowKey || payload.accountNumber || payload.customerId || 'direct');
+    if (sourceApprovalId && wallet.transactions.some(tx => tx.sourceApprovalId === sourceApprovalId && tx.sourceRowKey === sourceRowKey && tx.type === txType)) return;
+    const grossAmount = Number(payload.amount || 0);
+    if (!(grossAmount > 0)) return;
+    const chargeBreakdown = txType === 'credit' ? normalizeChargePayload(grossAmount, payload) : [];
+    const totalCharges = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const postedAmount = txType === 'credit' ? getCustomerCreditAmount({ ...payload, chargeBreakdown }) : grossAmount;
+    const baseDetails = String(payload.details || '').trim();
+    const detailTag = txType === 'credit' && totalCharges > 0 ? `${baseDetails ? ' • ' : ''}${chargeInlineMeta({ amount: grossAmount, chargeBreakdown, customerCreditAmount: postedAmount })}` : '';
+    wallet.transactions.push(txObj(txType, postedAmount, `${baseDetails}${detailTag}`.trim(), req.requestedByName || staffName(req.requestedBy) || 'System', req.requestedBy || '', req.approvedBy || req.approvedByName || '', 'staff_wallet', payload.date || payload.businessDate || businessDate(), {
+      receivedOrPaidBy: payload.receivedOrPaidBy || '',
+      paymentMode: payload.paymentMode || payload.payoutSource || '',
+      postedBy: req.requestedByName || staffName(req.requestedBy) || 'System',
+      approvedBy: req.approvedBy || req.approvedByName || '',
+      sourceAmount: grossAmount,
+      chargeBreakdown,
+      totalChargeAmount: totalCharges,
+      customerCreditAmount: postedAmount,
+      sourceApprovalId,
+      sourceRowKey,
+      accountType: 'staff_wallet'
+    }));
+    recalcCustomerBalance(wallet);
+    const acc = ensureStaffAccount(wallet.staffId);
+    if (acc) acc.walletBalance = Number(wallet.balance || 0);
+  }
+
+  function syncStaffBusinessEffectsFromApprovedRequests() {
+    normalizeStaffWalletAccounts();
+    (state.approvals || []).forEach(req => {
+      if (!req || req.status !== 'approved') return;
+      const p = req.payload || {};
+      if (req.type === 'customer_credit' || req.type === 'customer_debit') {
+        const txType = req.type === 'customer_debit' ? 'debit' : 'credit';
+        applyApprovedStaffBusinessEntry(req, p, txType, 'direct');
+      }
+      if (req.type === 'customer_credit_journal' || req.type === 'customer_debit_journal') {
+        const txType = req.type === 'customer_debit_journal' ? 'debit' : 'credit';
+        (Array.isArray(p.rows) ? p.rows : []).forEach((row, index) => applyApprovedStaffBusinessEntry(req, { ...row, date: row.date || p.date || p.businessDate }, txType, row.id || `${index}:${row.accountNumber || row.customerId || ''}`));
+      }
+    });
+    syncAllStaffWallets();
   }
 
   function syncOperationalEffectsFromApprovedRequests() {
@@ -810,7 +876,6 @@
           sourceApprovalId: req.id
         });
       }
-      upsertStaffBusinessEntriesFromApproval(req);
       if (req.type === 'customer_credit') addChargeOperationalEntries(req, [p]);
       if (req.type === 'customer_credit_journal') addChargeOperationalEntries(req, Array.isArray(p.rows) ? p.rows : Array.isArray(p.entries) ? p.entries : []);
       if (req.type === 'create_operational_account') {
@@ -915,7 +980,7 @@
     await syncApprovalsFromGateway();
     await syncCodFromGateway();
     await syncDebtBalancesFromGateway();
-    render();
+    safeRender();
   }
 
   async function refreshRealtimeState(reason = 'realtime') {
@@ -934,7 +999,7 @@
       await syncAuditFromGateway();
       state.__lastRealtimeRefresh = { reason, at: new Date().toISOString() };
       save();
-      render();
+      safeRender();
       return defaultResultOk(true);
     } finally {
       realtimeRefreshInFlight = false;
@@ -977,7 +1042,7 @@
       }
       await syncCodFromGateway();
       await syncDebtBalancesFromGateway();
-      render();
+      safeRender();
     }, 120);
     const refreshCustomers = debounceAsync(async () => { await syncCustomersListFromGateway(); scheduleRender(); }, 160);
     const refreshStaff = debounceAsync(async () => { await syncStaffFromGateway(); scheduleRender(); }, 160);
@@ -1197,64 +1262,6 @@ if (approvalRecord.type === 'float_topup') {
     return result;
   }
 
-
-  function approvalStaffBusinessKey(approvalId, rowIndex = 0) {
-    return `${approvalId || 'staff-approval'}:staff-business:${rowIndex}`;
-  }
-
-  function upsertStaffBusinessEntryFromApproval(req, entry, txType, rowIndex = 0) {
-    if (!req || !entry) return;
-    const accountType = entry.accountType || req.payload?.accountType || '';
-    if (!(accountType === 'staff' || accountType === 'staff_wallet')) return;
-    state.businessExtras ||= [];
-    const sourceApprovalId = req.id || entry.sourceApprovalId || '';
-    const sourceKey = approvalStaffBusinessKey(sourceApprovalId, rowIndex);
-    if (state.businessExtras.some(e => e.sourceKey === sourceKey)) return;
-    const amount = Number(entry.customerCreditAmount ?? entry.amount ?? 0);
-    if (!(amount > 0)) return;
-    const date = entry.date || req.payload?.date || req.payload?.businessDate || businessDate();
-    const staffAccount = getCustomerByAccountNo(entry.accountNumber || '');
-    state.businessExtras.unshift({
-      id: uid('bizstaff'),
-      date: `${date}T12:00:00.000Z`,
-      businessDate: date,
-      accountNumber: entry.accountNumber || staffAccount?.accountNumber || 'STAFF',
-      accountName: entry.customerName || staffAccount?.name || entry.accountName || 'Staff Account',
-      details: entry.details || `${txType === 'credit' ? 'Staff credit' : 'Staff debit'} ${entry.accountNumber || ''}`.trim(),
-      note: entry.details || '',
-      kind: txType,
-      type: txType,
-      delta: txType === 'credit' ? amount : -amount,
-      amount,
-      balanceAfter: 0,
-      receivedOrPaidBy: entry.receivedOrPaidBy || '',
-      postedBy: req.requestedByName || staffName(req.requestedBy) || currentStaff()?.name || '',
-      approvedBy: req.approvedBy || req.approvedByName || currentStaff()?.name || '',
-      sourceApprovalId,
-      sourceKey,
-      sourceType: 'staff_account_transaction'
-    });
-  }
-
-  function upsertStaffBusinessEntriesFromApproval(req) {
-    if (!req || req.status !== 'approved') return;
-    const p = req.payload || {};
-    if ((req.type === 'customer_credit' || req.type === 'customer_debit') &&
-        (p.accountType === 'staff' || p.accountType === 'staff_wallet')) {
-      upsertStaffBusinessEntryFromApproval(req, p, req.type === 'customer_debit' ? 'debit' : 'credit', 0);
-      return;
-    }
-    if (req.type === 'customer_credit_journal' || req.type === 'customer_debit_journal') {
-      const txType = req.type === 'customer_debit_journal' ? 'debit' : 'credit';
-      (Array.isArray(p.rows) ? p.rows : Array.isArray(p.entries) ? p.entries : [])
-        .forEach((row, index) => {
-          if (row?.accountType === 'staff' || row?.accountType === 'staff_wallet') {
-            upsertStaffBusinessEntryFromApproval(req, { ...row, date: row.date || p.date || p.businessDate }, txType, index);
-          }
-        });
-    }
-  }
-
   async function approveRequestRemote(id, payloadOverride = null) {
     const pendingReq = (state.approvals || []).find(r => r.id === id);
     if (pendingReq && shouldLockApprovalType(pendingReq.type)) {
@@ -1289,7 +1296,6 @@ if (approvalRecord.type === 'float_topup') {
         pendingReq.approvedBy = staff?.name || 'System';
         pendingReq.approvedAt = new Date().toISOString();
         applyRequest(pendingReq);
-        upsertStaffBusinessEntriesFromApproval(pendingReq);
       }
       await syncApprovalsFromGateway();
       syncOperationalEffectsFromApprovedRequests();
@@ -1435,6 +1441,9 @@ if (approvalRecord.type === 'float_topup') {
           if (!c) c = state.customers.find(x => x.accountNumber === req.payload.accountNumber);
         }
         if (!c || isCustomerFrozen(c) || c.active === false) break;
+        const sourceApprovalId = req.payload.sourceApprovalId || req.id || '';
+        const sourceRowKey = String(req.payload.sourceRowKey || 'direct');
+        if (sourceApprovalId && (c.transactions || []).some(tx => tx.sourceApprovalId === sourceApprovalId && tx.sourceRowKey === sourceRowKey && tx.type === 'credit')) break;
         const totalAmount = Number(req.payload.amount || 0);
         const chargeBreakdown = normalizeChargePayload(totalAmount, req.payload);
         const totalCharges = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -1453,7 +1462,10 @@ if (approvalRecord.type === 'float_topup') {
           commissionAmount: chargeBreakdown.find(row => row.key === 'commission')?.amount || 0,
           chargeTraceId,
           commissionTraceId: chargeTraceId,
-          customerCreditAmount
+          customerCreditAmount,
+          sourceApprovalId,
+          sourceRowKey,
+          accountType: c.accountType || 'customer'
         }));
         recalcCustomerBalance(c);
         addStaffEntry(req.payload.staffId, 'customer_credit', totalAmount, -totalAmount, `Customer credit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z`, chargeBreakdown, totalChargeAmount: totalCharges, chargeTraceId, customerCreditAmount });
@@ -1502,11 +1514,17 @@ if (approvalRecord.type === 'float_topup') {
           if (!c) c = state.customers.find(x => x.accountNumber === req.payload.accountNumber);
         }
         if (!c || isCustomerFrozen(c) || c.active === false) break;
+        const sourceApprovalId = req.payload.sourceApprovalId || req.id || '';
+        const sourceRowKey = String(req.payload.sourceRowKey || 'direct');
+        if (sourceApprovalId && (c.transactions || []).some(tx => tx.sourceApprovalId === sourceApprovalId && tx.sourceRowKey === sourceRowKey && tx.type === 'debit')) break;
         c.transactions.push(txObj('debit', req.payload.amount, req.payload.details, req.requestedByName, req.requestedBy, currentStaff()?.name || '', 'customer', req.payload.date, {
           receivedOrPaidBy: req.payload.receivedOrPaidBy,
           paymentMode: req.payload.paymentMode || req.payload.payoutSource || '',
           postedBy: req.requestedByName,
-          approvedBy: currentStaff()?.name || ''
+          approvedBy: currentStaff()?.name || '',
+          sourceApprovalId,
+          sourceRowKey,
+          accountType: c.accountType || 'customer'
         }));
         recalcCustomerBalance(c);
         if (req.payload.payoutSource === 'teller') {
@@ -1515,18 +1533,20 @@ if (approvalRecord.type === 'float_topup') {
         break;
       }
       case 'customer_credit_journal': {
-        (req.payload.rows || []).forEach(row => applyRequest({
+        (req.payload.rows || []).forEach((row, index) => applyRequest({
+          id: req.id,
           type:'customer_credit',
-          payload:{...row, staffId:req.payload.staffId, date:req.payload.date},
+          payload:{...row, staffId:req.payload.staffId, date:req.payload.date, sourceApprovalId:req.id, sourceRowKey: row.id || `${index}:${row.accountNumber || row.customerId || ''}`},
           requestedByName:req.requestedByName,
           requestedBy:req.requestedBy
         }));
         break;
       }
       case 'customer_debit_journal': {
-        (req.payload.rows || []).forEach(row => applyRequest({
+        (req.payload.rows || []).forEach((row, index) => applyRequest({
+          id: req.id,
           type:'customer_debit',
-          payload:{...row, staffId:req.payload.staffId, date:req.payload.date},
+          payload:{...row, staffId:req.payload.staffId, date:req.payload.date, sourceApprovalId:req.id, sourceRowKey: row.id || `${index}:${row.accountNumber || row.customerId || ''}`},
           requestedByName:req.requestedByName,
           requestedBy:req.requestedBy
         }));
@@ -1637,60 +1657,43 @@ if (approvalRecord.type === 'float_topup') {
   let _renderScheduled = false;
   // Input fields that must retain focus — a render while these are active
   // would destroy the DOM node and lose the cursor.
-  const FOCUS_GUARD_SELECTORS = ['#txAmount', '#txAcc', '#txDetails', '#txCounterparty', '#journalAmount', '#journalAcc', '#journalDetails', '#journalCounterparty'];
+  const FOCUS_GUARD_SELECTORS = ['#txAmount', '#txAcc', '#journalAmount', '#journalAcc', '#txDetails', '#txCounterparty', '#journalDetails', '#journalCounterparty'];
   let _deferredRenderPending = false;
-  let _inputFocusHoldUntil = 0;
 
-  function protectedInputActive() {
+  function isInputFocused() {
     const active = document.activeElement;
-    return !!(active && active !== document.body && FOCUS_GUARD_SELECTORS.some(sel => active.matches && active.matches(sel)));
-  }
-
-  function markInputFocusHold(ms = 1800) {
-    _inputFocusHoldUntil = Math.max(_inputFocusHoldUntil || 0, Date.now() + ms);
-  }
-
-  document.addEventListener('focusin', (event) => {
-    if (event?.target?.matches && FOCUS_GUARD_SELECTORS.some(sel => event.target.matches(sel))) {
-      markInputFocusHold(2200);
-    }
-  }, true);
-
-  document.addEventListener('input', (event) => {
-    if (event?.target?.matches && FOCUS_GUARD_SELECTORS.some(sel => event.target.matches(sel))) {
-      markInputFocusHold(2200);
-    }
-  }, true);
-
-  function shouldDeferRenderForInput() {
-    return protectedInputActive() || Date.now() < (_inputFocusHoldUntil || 0);
+    if (!active || active === document.body) return false;
+    return FOCUS_GUARD_SELECTORS.some(sel => active.matches && active.matches(sel));
   }
 
   function scheduleRender() {
     if (_renderScheduled) return;
-    if (shouldDeferRenderForInput()) {
+    // If a protected input has focus, queue a deferred render instead of
+    // immediately replacing the DOM. The render fires as soon as the user
+    // leaves the field (blur event on the input or its parent).
+    if (isInputFocused()) {
       if (_deferredRenderPending) return;
       _deferredRenderPending = true;
-      const tryDeferred = () => {
-        if (shouldDeferRenderForInput()) {
-          setTimeout(tryDeferred, 250);
-          return;
-        }
+      const runDeferred = () => {
         _deferredRenderPending = false;
-        scheduleRender();
+        if (!isInputFocused()) {
+          scheduleRender();
+        } else {
+          // Still focused — keep waiting
+          _deferredRenderPending = true;
+          document.activeElement.addEventListener('blur', runDeferred, { once: true });
+        }
       };
-      setTimeout(tryDeferred, 250);
+      document.activeElement.addEventListener('blur', runDeferred, { once: true });
       return;
     }
     _renderScheduled = true;
-    requestAnimationFrame(() => {
-      _renderScheduled = false;
-      if (shouldDeferRenderForInput()) {
-        scheduleRender();
-        return;
-      }
-      render();
-    });
+    requestAnimationFrame(() => { _renderScheduled = false; render(); });
+  }
+
+  function safeRender() {
+    if (isInputFocused()) scheduleRender();
+    else render();
   }
 
   function render() {
@@ -3786,7 +3789,6 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('txAmount')) {
       const amountInput = byId('txAmount');
       amountInput.oninput = () => {
-        markInputFocusHold();
         state.ui.txAmountDraft = amountInput.value || '';
         updateSingleCommissionPreview();
         // Do NOT call restoreSingleCustomerDisplay here — it was triggering
@@ -3805,11 +3807,10 @@ function normalizeStaffLedgerEntryType(row) {
         updateSingleCommissionPreview();
       };
       if (input) input.oninput = () => {
-        markInputFocusHold();
         telleringDraft.singleCharges.values[def.key] = input.value || '';
+        save();
         updateSingleCommissionPreview();
       };
-      if (input) input.onchange = () => { telleringDraft.singleCharges.values[def.key] = input.value || ''; save(); };
     });
 
     const jumpToJournalPane = () => {
@@ -3903,7 +3904,6 @@ function normalizeStaffLedgerEntryType(row) {
       journalAmountInput.onfocus = protectJournalAccountDraft;
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
-        markInputFocusHold();
         protectJournalAccountDraft();
         telleringDraft.journalAmount = journalAmountInput.value || '';
         updateJournalCommissionPreview();
@@ -3920,11 +3920,10 @@ function normalizeStaffLedgerEntryType(row) {
         updateJournalCommissionPreview();
       };
       if (input) input.oninput = () => {
-        markInputFocusHold();
         telleringDraft.journalCharges.values[def.key] = input.value || '';
+        save();
         updateJournalCommissionPreview();
       };
-      if (input) input.onchange = () => { telleringDraft.journalCharges.values[def.key] = input.value || ''; save(); };
     });
 
     const readJournalEntrySnapshot = () => ({
