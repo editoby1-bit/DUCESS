@@ -810,6 +810,7 @@
           sourceApprovalId: req.id
         });
       }
+      upsertStaffBusinessEntriesFromApproval(req);
       if (req.type === 'customer_credit') addChargeOperationalEntries(req, [p]);
       if (req.type === 'customer_credit_journal') addChargeOperationalEntries(req, Array.isArray(p.rows) ? p.rows : Array.isArray(p.entries) ? p.entries : []);
       if (req.type === 'create_operational_account') {
@@ -1196,6 +1197,64 @@ if (approvalRecord.type === 'float_topup') {
     return result;
   }
 
+
+  function approvalStaffBusinessKey(approvalId, rowIndex = 0) {
+    return `${approvalId || 'staff-approval'}:staff-business:${rowIndex}`;
+  }
+
+  function upsertStaffBusinessEntryFromApproval(req, entry, txType, rowIndex = 0) {
+    if (!req || !entry) return;
+    const accountType = entry.accountType || req.payload?.accountType || '';
+    if (!(accountType === 'staff' || accountType === 'staff_wallet')) return;
+    state.businessExtras ||= [];
+    const sourceApprovalId = req.id || entry.sourceApprovalId || '';
+    const sourceKey = approvalStaffBusinessKey(sourceApprovalId, rowIndex);
+    if (state.businessExtras.some(e => e.sourceKey === sourceKey)) return;
+    const amount = Number(entry.customerCreditAmount ?? entry.amount ?? 0);
+    if (!(amount > 0)) return;
+    const date = entry.date || req.payload?.date || req.payload?.businessDate || businessDate();
+    const staffAccount = getCustomerByAccountNo(entry.accountNumber || '');
+    state.businessExtras.unshift({
+      id: uid('bizstaff'),
+      date: `${date}T12:00:00.000Z`,
+      businessDate: date,
+      accountNumber: entry.accountNumber || staffAccount?.accountNumber || 'STAFF',
+      accountName: entry.customerName || staffAccount?.name || entry.accountName || 'Staff Account',
+      details: entry.details || `${txType === 'credit' ? 'Staff credit' : 'Staff debit'} ${entry.accountNumber || ''}`.trim(),
+      note: entry.details || '',
+      kind: txType,
+      type: txType,
+      delta: txType === 'credit' ? amount : -amount,
+      amount,
+      balanceAfter: 0,
+      receivedOrPaidBy: entry.receivedOrPaidBy || '',
+      postedBy: req.requestedByName || staffName(req.requestedBy) || currentStaff()?.name || '',
+      approvedBy: req.approvedBy || req.approvedByName || currentStaff()?.name || '',
+      sourceApprovalId,
+      sourceKey,
+      sourceType: 'staff_account_transaction'
+    });
+  }
+
+  function upsertStaffBusinessEntriesFromApproval(req) {
+    if (!req || req.status !== 'approved') return;
+    const p = req.payload || {};
+    if ((req.type === 'customer_credit' || req.type === 'customer_debit') &&
+        (p.accountType === 'staff' || p.accountType === 'staff_wallet')) {
+      upsertStaffBusinessEntryFromApproval(req, p, req.type === 'customer_debit' ? 'debit' : 'credit', 0);
+      return;
+    }
+    if (req.type === 'customer_credit_journal' || req.type === 'customer_debit_journal') {
+      const txType = req.type === 'customer_debit_journal' ? 'debit' : 'credit';
+      (Array.isArray(p.rows) ? p.rows : Array.isArray(p.entries) ? p.entries : [])
+        .forEach((row, index) => {
+          if (row?.accountType === 'staff' || row?.accountType === 'staff_wallet') {
+            upsertStaffBusinessEntryFromApproval(req, { ...row, date: row.date || p.date || p.businessDate }, txType, index);
+          }
+        });
+    }
+  }
+
   async function approveRequestRemote(id, payloadOverride = null) {
     const pendingReq = (state.approvals || []).find(r => r.id === id);
     if (pendingReq && shouldLockApprovalType(pendingReq.type)) {
@@ -1230,6 +1289,7 @@ if (approvalRecord.type === 'float_topup') {
         pendingReq.approvedBy = staff?.name || 'System';
         pendingReq.approvedAt = new Date().toISOString();
         applyRequest(pendingReq);
+        upsertStaffBusinessEntriesFromApproval(pendingReq);
       }
       await syncApprovalsFromGateway();
       syncOperationalEffectsFromApprovedRequests();
@@ -1577,38 +1637,60 @@ if (approvalRecord.type === 'float_topup') {
   let _renderScheduled = false;
   // Input fields that must retain focus — a render while these are active
   // would destroy the DOM node and lose the cursor.
-  const FOCUS_GUARD_SELECTORS = ['#txAmount', '#txAcc', '#journalAmount', '#journalAcc', '#txDetails', '#txCounterparty', '#journalDetails', '#journalCounterparty'];
+  const FOCUS_GUARD_SELECTORS = ['#txAmount', '#txAcc', '#txDetails', '#txCounterparty', '#journalAmount', '#journalAcc', '#journalDetails', '#journalCounterparty'];
   let _deferredRenderPending = false;
+  let _inputFocusHoldUntil = 0;
 
-  function isInputFocused() {
+  function protectedInputActive() {
     const active = document.activeElement;
-    if (!active || active === document.body) return false;
-    return FOCUS_GUARD_SELECTORS.some(sel => active.matches && active.matches(sel));
+    return !!(active && active !== document.body && FOCUS_GUARD_SELECTORS.some(sel => active.matches && active.matches(sel)));
+  }
+
+  function markInputFocusHold(ms = 1800) {
+    _inputFocusHoldUntil = Math.max(_inputFocusHoldUntil || 0, Date.now() + ms);
+  }
+
+  document.addEventListener('focusin', (event) => {
+    if (event?.target?.matches && FOCUS_GUARD_SELECTORS.some(sel => event.target.matches(sel))) {
+      markInputFocusHold(2200);
+    }
+  }, true);
+
+  document.addEventListener('input', (event) => {
+    if (event?.target?.matches && FOCUS_GUARD_SELECTORS.some(sel => event.target.matches(sel))) {
+      markInputFocusHold(2200);
+    }
+  }, true);
+
+  function shouldDeferRenderForInput() {
+    return protectedInputActive() || Date.now() < (_inputFocusHoldUntil || 0);
   }
 
   function scheduleRender() {
     if (_renderScheduled) return;
-    // If a protected input has focus, queue a deferred render instead of
-    // immediately replacing the DOM. The render fires as soon as the user
-    // leaves the field (blur event on the input or its parent).
-    if (isInputFocused()) {
+    if (shouldDeferRenderForInput()) {
       if (_deferredRenderPending) return;
       _deferredRenderPending = true;
-      const runDeferred = () => {
-        _deferredRenderPending = false;
-        if (!isInputFocused()) {
-          scheduleRender();
-        } else {
-          // Still focused — keep waiting
-          _deferredRenderPending = true;
-          document.activeElement.addEventListener('blur', runDeferred, { once: true });
+      const tryDeferred = () => {
+        if (shouldDeferRenderForInput()) {
+          setTimeout(tryDeferred, 250);
+          return;
         }
+        _deferredRenderPending = false;
+        scheduleRender();
       };
-      document.activeElement.addEventListener('blur', runDeferred, { once: true });
+      setTimeout(tryDeferred, 250);
       return;
     }
     _renderScheduled = true;
-    requestAnimationFrame(() => { _renderScheduled = false; render(); });
+    requestAnimationFrame(() => {
+      _renderScheduled = false;
+      if (shouldDeferRenderForInput()) {
+        scheduleRender();
+        return;
+      }
+      render();
+    });
   }
 
   function render() {
@@ -3704,6 +3786,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('txAmount')) {
       const amountInput = byId('txAmount');
       amountInput.oninput = () => {
+        markInputFocusHold();
         state.ui.txAmountDraft = amountInput.value || '';
         updateSingleCommissionPreview();
         // Do NOT call restoreSingleCustomerDisplay here — it was triggering
@@ -3722,10 +3805,11 @@ function normalizeStaffLedgerEntryType(row) {
         updateSingleCommissionPreview();
       };
       if (input) input.oninput = () => {
+        markInputFocusHold();
         telleringDraft.singleCharges.values[def.key] = input.value || '';
-        save();
         updateSingleCommissionPreview();
       };
+      if (input) input.onchange = () => { telleringDraft.singleCharges.values[def.key] = input.value || ''; save(); };
     });
 
     const jumpToJournalPane = () => {
@@ -3819,6 +3903,7 @@ function normalizeStaffLedgerEntryType(row) {
       journalAmountInput.onfocus = protectJournalAccountDraft;
       journalAmountInput.oninput = () => {
         if (journalAmountInput.dataset?.restoring === '1') return;
+        markInputFocusHold();
         protectJournalAccountDraft();
         telleringDraft.journalAmount = journalAmountInput.value || '';
         updateJournalCommissionPreview();
@@ -3835,10 +3920,11 @@ function normalizeStaffLedgerEntryType(row) {
         updateJournalCommissionPreview();
       };
       if (input) input.oninput = () => {
+        markInputFocusHold();
         telleringDraft.journalCharges.values[def.key] = input.value || '';
-        save();
         updateJournalCommissionPreview();
       };
+      if (input) input.onchange = () => { telleringDraft.journalCharges.values[def.key] = input.value || ''; save(); };
     });
 
     const readJournalEntrySnapshot = () => ({
