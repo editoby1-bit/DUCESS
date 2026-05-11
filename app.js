@@ -1205,6 +1205,40 @@ if (approvalRecord.type === 'float_topup') {
     if (!isSupabaseApprovalMode()) { approveRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
 
+    // Detect staff account transactions before calling the gateway.
+    // The gateway's approval flow (RPC or direct posting) tries to fetch
+    // the account from Supabase customers table — staff accounts don't
+    // exist there. Handle staff approvals entirely in local state.
+    const pendingPayload = pendingReq?.payload || {};
+    const isStaffDirectTx = (pendingReq?.type === 'customer_credit' || pendingReq?.type === 'customer_debit') &&
+      (pendingPayload.accountType === 'staff' || pendingPayload.accountType === 'staff_wallet');
+    const isStaffJournalTx = (pendingReq?.type === 'customer_credit_journal' || pendingReq?.type === 'customer_debit_journal') &&
+      Array.isArray(pendingPayload.rows) && pendingPayload.rows.length > 0 &&
+      pendingPayload.rows.some(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
+
+    if (isStaffDirectTx || isStaffJournalTx) {
+      // Mark approved in Supabase via a minimal direct update (no posting RPC, no customer fetch)
+      const markResult = await gateway.approvals.markApprovalApprovedDirect({
+        requestId: id,
+        approvedByStaffId: getStaffBackendId(staff),
+        approvedByName: staff?.name || 'System',
+      });
+      if (!markResult?.ok) return markResult;
+      // Apply locally so balances update
+      if (pendingReq) {
+        pendingReq.status = 'approved';
+        pendingReq.approvedBy = staff?.name || 'System';
+        pendingReq.approvedAt = new Date().toISOString();
+        applyRequest(pendingReq);
+      }
+      await syncApprovalsFromGateway();
+      syncOperationalEffectsFromApprovedRequests();
+      save();
+      pushAudit('request_approved', `${pendingReq?.type || 'request'} approved`);
+      render();
+      return markResult;
+    }
+
     const result = await gateway.approvals.approveRequest({
   requestId: id,
   approvedByStaffId: getStaffBackendId(staff),
