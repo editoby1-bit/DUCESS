@@ -5371,11 +5371,11 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function openChangePasswordModal() {
     openModal('Change Password', `
       <div class="form-grid two" style="gap:10px;max-width:520px">
-        <div class="field" style="grid-column:1/-1"><label>Old Password</label><input id="changeOldPassword" class="entry-input" type="password" autocomplete="current-password"></div>
-        <div class="field"><label>New Password</label><input id="changeNewPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters"></div>
-        <div class="field"><label>Confirm New Password</label><input id="changeConfirmPassword" class="entry-input" type="password" autocomplete="new-password"></div>
+        <div class="field" style="grid-column:1/-1"><label>Old Password</label>${passwordInputRow('<input id="changeOldPassword" class="entry-input" type="password" autocomplete="current-password">', 'changeOldPassword')}</div>
+        <div class="field"><label>New Password</label>${passwordInputRow('<input id="changeNewPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters">', 'changeNewPassword')}</div>
+        <div class="field"><label>Confirm New Password</label>${passwordInputRow('<input id="changeConfirmPassword" class="entry-input" type="password" autocomplete="new-password">', 'changeConfirmPassword')}</div>
       </div>
-      <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Your session will remain active where supported.</p>
+      <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">After a refresh or reopen, DUCESS will require login again.</p>
     `, [
       { label:'Cancel', className:'secondary', onClick: closeModal },
       { label:'Update Password', onClick: async () => {
@@ -5403,6 +5403,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         }
       }}
     ]);
+    bindPasswordToggles(byId('modalBody') || document);
   }
 
   function openAdminResetPasswordModal(staffId) {
@@ -5415,8 +5416,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <p style="margin:0 0 10px;font-size:0.86em">Reset password for <strong>${escapeHtml(target.name || target.full_name || staffCode)}</strong>.</p>
         <div class="form-grid two" style="gap:10px">
           <div class="field"><label>Staff Code</label><div class="display-field">${escapeHtml(String(staffCode))}</div></div>
-          <div class="field"><label>Temporary Password</label><input id="adminTempPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters"></div>
-          <div class="field"><label>Confirm Password</label><input id="adminTempPasswordConfirm" class="entry-input" type="password" autocomplete="new-password"></div>
+          <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="adminTempPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters">', 'adminTempPassword')}</div>
+          <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="adminTempPasswordConfirm" class="entry-input" type="password" autocomplete="new-password">', 'adminTempPasswordConfirm')}</div>
         </div>
         <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Give this temporary password to the staff securely.</p>
       </div>
@@ -5453,16 +5454,18 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         }
       }}
     ]);
+    bindPasswordToggles(byId('modalBody') || document);
   }
 
   function bindStaffDirectory() {
     const addBtn = byId('addStaffBtn');
-    if (addBtn) addBtn.onclick = () => openModal('Onboard New Staff', `
+    if (addBtn) addBtn.onclick = () => {
+      openModal('Onboard New Staff', `
       <div class="form-grid two" style="gap:12px">
         <div class="field"><label>Full Name <span style="color:red">*</span></label><input id="newStaffName" class="entry-input" placeholder="e.g. Amaka Obi"></div>
         <div class="field"><label>Staff Code / Login ID <span style="color:red">*</span></label><input id="newStaffCode" class="entry-input" placeholder="e.g. AMK001" style="text-transform:uppercase"></div>
         <div class="field"><label>Role <span style="color:red">*</span></label><select id="newStaffRole" class="entry-input">${Object.keys(ROLE_LABELS).map(k=>`<option value="${k}">${ROLE_LABELS[k]}</option>`).join('')}</select></div>
-        <div class="field"><label>Temporary Password <span style="color:red">*</span></label><input id="newStaffPassword" class="entry-input" type="password" placeholder="Minimum 6 characters"></div>
+        <div class="field"><label>Temporary Password <span style="color:red">*</span></label>${passwordInputRow('<input id="newStaffPassword" class="entry-input" type="password" placeholder="Minimum 6 characters">', 'newStaffPassword')}</div>
         <div class="field" style="grid-column:1/-1"><label>Branch (optional)</label><input id="newStaffBranch" class="entry-input" placeholder="e.g. Main Branch"></div>
       </div>
       <p style="margin:10px 0 0;font-size:0.82em;color:var(--text-muted)">Staff will log in using their Staff Code and this password. They can change their password after first login.</p>
@@ -5524,6 +5527,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         }
       }}
     ]);
+      bindPasswordToggles(byId('modalBody') || document);
+    };
 
     const changePasswordBtn = byId('changePasswordBtn');
     if (changePasswordBtn) changePasswordBtn.onclick = openChangePasswordModal;
@@ -5685,6 +5690,69 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     });
   }
 
+
+  function makePasswordToggle(inputId, label='Show') {
+    return `<button type="button" class="secondary tiny-btn" data-password-toggle="${inputId}" style="white-space:nowrap;padding:7px 10px;font-size:0.78em">${label}</button>`;
+  }
+
+  function bindPasswordToggles(root=document) {
+    qq('[data-password-toggle]', root).forEach(btn => {
+      if (btn.dataset.boundPasswordToggle === '1') return;
+      btn.dataset.boundPasswordToggle = '1';
+      btn.onclick = () => {
+        const input = byId(btn.dataset.passwordToggle);
+        if (!input) return;
+        const showing = input.type === 'text';
+        input.type = showing ? 'password' : 'text';
+        btn.textContent = showing ? 'Show' : 'Hide';
+      };
+    });
+  }
+
+  function passwordInputRow(inputHtml, inputId) {
+    return `<div style="display:flex;gap:6px;align-items:center">${inputHtml}${makePasswordToggle(inputId)}</div>`;
+  }
+
+  function openAdminRecoveryModal() {
+    openModal('Admin Password Recovery', `
+      <div class="grid two compact-grid">
+        <div class="field"><label>Admin Staff ID</label><input id="recoverAdminStaffId" class="entry-input" type="text" autocomplete="username" placeholder="e.g. ADMIN001"></div>
+        <div class="field"><label>Recovery Code</label>${passwordInputRow('<input id="recoverAdminCode" class="entry-input" type="password" autocomplete="off">', 'recoverAdminCode')}</div>
+        <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="recoverAdminTempPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters">', 'recoverAdminTempPassword')}</div>
+        <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="recoverAdminTempConfirm" class="entry-input" type="password" autocomplete="new-password">', 'recoverAdminTempConfirm')}</div>
+      </div>
+      <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Use only the approved recovery code configured for the organization. After reset, sign in with the temporary password and change it immediately.</p>
+    `, [
+      { label:'Cancel', className:'secondary', onClick: closeModal },
+      { label:'Reset Admin Password', onClick: async () => {
+        const staffCode = byId('recoverAdminStaffId')?.value?.trim() || '';
+        const recoveryCode = byId('recoverAdminCode')?.value || '';
+        const temporaryPassword = byId('recoverAdminTempPassword')?.value || '';
+        const confirmPassword = byId('recoverAdminTempConfirm')?.value || '';
+        if (!staffCode) return showToast('Enter Admin Staff ID');
+        if (!recoveryCode) return showToast('Enter recovery code');
+        if (!temporaryPassword || temporaryPassword.length < 6) return showToast('Temporary password must be at least 6 characters');
+        if (temporaryPassword !== confirmPassword) return showToast('Passwords do not match');
+        const submitBtn = q('#modalActions button:not(.secondary)');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Resetting…'; }
+        try {
+          const result = await gateway.auth?.recoverAdminPassword?.({ staffCode, recoveryCode, temporaryPassword });
+          if (!result?.ok) {
+            showToast(result?.error?.message || 'Admin recovery reset failed');
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Reset Admin Password'; }
+            return;
+          }
+          closeModal();
+          showToast('✓ Admin password reset. Sign in with the temporary password.');
+        } catch (err) {
+          showToast('Admin recovery reset failed');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Reset Admin Password'; }
+        }
+      }}
+    ]);
+    bindPasswordToggles(byId('modalBody') || document);
+  }
+
   // ===== LOGIN SCREEN =====
   function showLoginScreen() {
     const screen = byId('loginScreen');
@@ -5706,6 +5774,35 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const passInput = byId('loginPassword');
     const errEl = byId('loginError');
     if (!btn) return;
+    if (passInput && !passInput.parentElement?.querySelector('[data-password-toggle="loginPassword"]')) {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '6px';
+      row.style.alignItems = 'center';
+      passInput.parentElement.insertBefore(row, passInput);
+      row.appendChild(passInput);
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'secondary tiny-btn';
+      toggle.dataset.passwordToggle = 'loginPassword';
+      toggle.style.whiteSpace = 'nowrap';
+      toggle.style.padding = '7px 10px';
+      toggle.style.fontSize = '0.78em';
+      toggle.textContent = 'Show';
+      row.appendChild(toggle);
+    }
+    if (btn.parentElement && !byId('adminRecoveryBtn')) {
+      const recoverBtn = document.createElement('button');
+      recoverBtn.type = 'button';
+      recoverBtn.id = 'adminRecoveryBtn';
+      recoverBtn.className = 'secondary tiny-btn';
+      recoverBtn.style.width = '100%';
+      recoverBtn.style.marginTop = '8px';
+      recoverBtn.textContent = 'Admin forgot password?';
+      recoverBtn.onclick = openAdminRecoveryModal;
+      btn.parentElement.appendChild(recoverBtn);
+    }
+    bindPasswordToggles(byId('loginScreen') || document);
 
     async function attemptLogin() {
       const staffId = (staffInput?.value || '').trim();
@@ -5758,28 +5855,14 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     bindLoginScreen();
 
     if (isSupabaseApprovalMode()) {
-      // Check for existing session first
-      gateway.auth.getSession().then(async (sessionResult) => {
-        if (sessionResult?.ok && sessionResult.data?.staff?.id) {
-          // Already logged in — restore session
-          const sessionStaff = sessionResult.data.staff;
-          if (sessionStaff.id && !state.staff.find(s => s.id === sessionStaff.id)) {
-            state.activeStaffId = sessionStaff.id;
-            save();
-          }
-          hideLoginScreen();
-          render();
-          setupRealtimeSubscriptions();
-          refreshRealtimeState('session-restore').catch(() => syncApprovalsFromGateway().then((r) => { if (r?.ok) render(); }));
-        } else {
-          // No session — show login
-          showLoginScreen();
-          render(); // render shell behind login (populates theme etc)
-        }
-      }).catch(() => {
-        showLoginScreen();
-        render();
-      });
+      // Security rule: never restore a previous terminal session after refresh/reopen.
+      // The shell may render behind the login overlay, but staff must sign in again.
+      gateway.auth?.logout?.().catch(() => {});
+      state.ui.module = null;
+      state.ui.tool = null;
+      save();
+      showLoginScreen();
+      render();
     } else {
       // Local mode — skip login
       render();
