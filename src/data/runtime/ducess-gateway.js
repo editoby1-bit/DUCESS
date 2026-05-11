@@ -711,6 +711,9 @@ async function submitDebtRepayment(_payload) {
         async resetStaffPassword() {
           return defaultResult.err('AUTH_PASSWORD_UNAVAILABLE', 'Admin password reset requires Supabase Auth.');
         },
+        async recoverAdminPassword() {
+          return defaultResult.err('AUTH_RECOVERY_UNAVAILABLE', 'Admin recovery requires Supabase Auth.');
+        },
       },
       staff: {
         getCurrentStaff,
@@ -795,8 +798,10 @@ const anonKey = "sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I";
     try {
       const client = supabaseFactory(url, anonKey, {
         auth: {
-          persistSession: true,
-          autoRefreshToken: true,
+          // DUCESS terminals must not silently restore a one-time login after refresh/reopen.
+          // Keep Supabase auth in memory only for the active page session.
+          persistSession: false,
+          autoRefreshToken: false,
           detectSessionInUrl: true,
         }
       });
@@ -2512,6 +2517,39 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok({ success: true });
     }
 
+
+    async function recoverAdminPassword(payload = {}) {
+      if (!canUseSupabase()) return defaultResult.err('AUTH_RECOVERY_UNAVAILABLE', 'Admin recovery requires Supabase Auth.');
+      const staffCode = String(payload.staffCode || '').trim().toUpperCase();
+      const recoveryCode = String(payload.recoveryCode || payload.recoveryKey || '').trim();
+      const temporaryPassword = payload.temporaryPassword || payload.password || '';
+      if (!staffCode) return defaultResult.err('AUTH_RECOVERY_STAFF_REQUIRED', 'Enter the Admin Staff ID.');
+      if (!recoveryCode) return defaultResult.err('AUTH_RECOVERY_CODE_REQUIRED', 'Enter the recovery code.');
+      if (!temporaryPassword || String(temporaryPassword).length < 6) return defaultResult.err('AUTH_PASSWORD_TOO_SHORT', 'Temporary password must be at least 6 characters.');
+
+      const recoveryFnUrl = config?.supabase?.recoverAdminPasswordEdgeFn
+        || config?.supabase?.resetStaffPasswordEdgeFn
+        || `${config?.supabase?.url || ''}/functions/v1/reset-staff-password`;
+      const accessToken = config?.supabase?.anonKey || '';
+      const resp = await fetch(recoveryFnUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'admin_recovery_reset',
+          staffCode,
+          recoveryCode,
+          recoveryKey: recoveryCode,
+          password: temporaryPassword,
+          temporaryPassword,
+        }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || json.error) {
+        return defaultResult.err('AUTH_ADMIN_RECOVERY_FAILED', json.error || json.message || 'Admin recovery reset failed.', json);
+      }
+      return defaultResult.ok({ success: true });
+    }
+
     async function logout() {
       if (!canUseSupabase()) return local.auth.logout();
       // Audit: logout before signing out
@@ -2574,6 +2612,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         getCurrentStaffContext,
         changePassword,
         resetStaffPassword,
+        recoverAdminPassword,
       },
       staff: {
         getCurrentStaff,
