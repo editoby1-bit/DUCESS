@@ -1394,6 +1394,27 @@ if (insertError) {
 if (insertError) return defaultResult.err('APPROVAL_CREATE_FAILED', 'Could not create approval request in Supabase.', insertError);
 return defaultResult.ok(normalizeApprovalRecord(data));
 }
+    async function markApprovalApprovedDirect(payload = {}) {
+      if (!canUseSupabase()) return local.approvals.approveRequest(payload);
+      const patch = {
+        status: 'approved',
+        approved_at: new Date().toISOString(),
+        approved_by_staff_id: payload.approvedByStaffId || '',
+        approved_by_name: payload.approvedByName || '',
+        decision_note: payload.note || 'Staff account — handled locally',
+      };
+      const { data, error } = await client
+        .from(approvalRequestsTable)
+        .update(patch)
+        .eq('id', payload.requestId)
+        .eq('status', 'pending')
+        .select(approvalRequestsSelect)
+        .maybeSingle();
+      if (error) return defaultResult.err('APPROVAL_APPROVE_FAILED', 'Could not approve request in Supabase.', error);
+      if (!data) return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
+      return defaultResult.ok(normalizeApprovalRecord(data));
+    }
+
     async function approveRequest(payload = {}) {
       if (!canUseSupabase()) return local.approvals.approveRequest(payload);
       const approver = {
@@ -2456,6 +2477,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         getApprovalRequestById,
         submitApprovalRequest,
         approveRequest,
+        markApprovalApprovedDirect,
         rejectRequest,
       },
       cod: {
