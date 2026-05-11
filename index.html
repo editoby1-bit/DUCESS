@@ -25,14 +25,14 @@
         <div class="login-title">DUCESS ENTERPRISE</div>
         <div class="login-sub">Staff Portal</div>
       </div>
-      <div class="login-form">
+      <div class="login-form" autocomplete="off">
         <div class="login-field">
           <label for="loginStaffId">Staff ID</label>
-          <input id="loginStaffId" class="entry-input" type="text" placeholder="e.g. ADMIN001" autocomplete="username" />
+          <input id="loginStaffId" class="entry-input" type="text" placeholder="e.g. ADMIN001" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" />
         </div>
         <div class="login-field">
           <label for="loginPassword">Password</label>
-          <input id="loginPassword" class="entry-input" type="password" placeholder="Enter your password" autocomplete="current-password" />
+          <input id="loginPassword" class="entry-input" type="password" placeholder="Enter your password" autocomplete="new-password" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" />
         </div>
         <div id="loginError" class="login-error hidden"></div>
         <button id="loginBtn" class="login-btn">Sign In</button>

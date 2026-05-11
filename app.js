@@ -5371,9 +5371,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function openChangePasswordModal() {
     openModal('Change Password', `
       <div class="form-grid two" style="gap:10px;max-width:520px">
-        <div class="field" style="grid-column:1/-1"><label>Old Password</label>${passwordInputRow('<input id="changeOldPassword" class="entry-input" type="password" autocomplete="current-password">', 'changeOldPassword')}</div>
-        <div class="field"><label>New Password</label>${passwordInputRow('<input id="changeNewPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters">', 'changeNewPassword')}</div>
-        <div class="field"><label>Confirm New Password</label>${passwordInputRow('<input id="changeConfirmPassword" class="entry-input" type="password" autocomplete="new-password">', 'changeConfirmPassword')}</div>
+        <div class="field" style="grid-column:1/-1"><label>Old Password</label>${passwordInputRow('<input id="changeOldPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'changeOldPassword')}</div>
+        <div class="field"><label>New Password</label>${passwordInputRow('<input id="changeNewPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'changeNewPassword')}</div>
+        <div class="field"><label>Confirm New Password</label>${passwordInputRow('<input id="changeConfirmPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'changeConfirmPassword')}</div>
       </div>
       <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">After a refresh or reopen, DUCESS will require login again.</p>
     `, [
@@ -5404,6 +5404,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       }}
     ]);
     bindPasswordToggles(byId('modalBody') || document);
+    hardenCredentialInputs(byId('modalBody') || document);
   }
 
   function openAdminResetPasswordModal(staffId) {
@@ -5416,8 +5417,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <p style="margin:0 0 10px;font-size:0.86em">Reset password for <strong>${escapeHtml(target.name || target.full_name || staffCode)}</strong>.</p>
         <div class="form-grid two" style="gap:10px">
           <div class="field"><label>Staff Code</label><div class="display-field">${escapeHtml(String(staffCode))}</div></div>
-          <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="adminTempPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters">', 'adminTempPassword')}</div>
-          <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="adminTempPasswordConfirm" class="entry-input" type="password" autocomplete="new-password">', 'adminTempPasswordConfirm')}</div>
+          <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="adminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'adminTempPassword')}</div>
+          <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="adminTempPasswordConfirm" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'adminTempPasswordConfirm')}</div>
         </div>
         <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Give this temporary password to the staff securely.</p>
       </div>
@@ -5455,6 +5456,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       }}
     ]);
     bindPasswordToggles(byId('modalBody') || document);
+    hardenCredentialInputs(byId('modalBody') || document);
   }
 
   function bindStaffDirectory() {
@@ -5528,6 +5530,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       }}
     ]);
       bindPasswordToggles(byId('modalBody') || document);
+    hardenCredentialInputs(byId('modalBody') || document);
     };
 
     const changePasswordBtn = byId('changePasswordBtn');
@@ -5713,13 +5716,26 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     return `<div style="display:flex;gap:6px;align-items:center">${inputHtml}${makePasswordToggle(inputId)}</div>`;
   }
 
+  function hardenCredentialInputs(root=document) {
+    qq('input[type="password"], #loginStaffId, [data-no-password-store]', root).forEach(input => {
+      input.setAttribute('autocomplete', input.id === 'loginPassword' ? 'new-password' : 'off');
+      input.setAttribute('autocorrect', 'off');
+      input.setAttribute('autocapitalize', 'none');
+      input.setAttribute('spellcheck', 'false');
+      input.setAttribute('data-no-password-store', 'true');
+      if (!input.name || /password|username|staff/i.test(input.name)) {
+        input.name = `ducess_${input.id || 'credential'}_${Math.random().toString(36).slice(2,8)}`;
+      }
+    });
+  }
+
   function openAdminRecoveryModal() {
     openModal('Admin Password Recovery', `
       <div class="grid two compact-grid">
         <div class="field"><label>Admin Staff ID</label><input id="recoverAdminStaffId" class="entry-input" type="text" autocomplete="username" placeholder="e.g. ADMIN001"></div>
         <div class="field"><label>Recovery Code</label>${passwordInputRow('<input id="recoverAdminCode" class="entry-input" type="password" autocomplete="off">', 'recoverAdminCode')}</div>
-        <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="recoverAdminTempPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters">', 'recoverAdminTempPassword')}</div>
-        <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="recoverAdminTempConfirm" class="entry-input" type="password" autocomplete="new-password">', 'recoverAdminTempConfirm')}</div>
+        <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="recoverAdminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'recoverAdminTempPassword')}</div>
+        <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="recoverAdminTempConfirm" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'recoverAdminTempConfirm')}</div>
       </div>
       <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Use only the approved recovery code configured for the organization. After reset, sign in with the temporary password and change it immediately.</p>
     `, [
@@ -5751,6 +5767,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       }}
     ]);
     bindPasswordToggles(byId('modalBody') || document);
+    hardenCredentialInputs(byId('modalBody') || document);
   }
 
   // ===== LOGIN SCREEN =====
@@ -5773,6 +5790,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const staffInput = byId('loginStaffId');
     const passInput = byId('loginPassword');
     const errEl = byId('loginError');
+    hardenCredentialInputs(byId('loginScreen') || document);
+    if (staffInput) staffInput.value = '';
+    if (passInput) passInput.value = '';
     if (!btn) return;
     if (passInput && !passInput.parentElement?.querySelector('[data-password-toggle="loginPassword"]')) {
       const row = document.createElement('div');
@@ -5803,6 +5823,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       btn.parentElement.appendChild(recoverBtn);
     }
     bindPasswordToggles(byId('loginScreen') || document);
+    hardenCredentialInputs(byId('loginScreen') || document);
 
     async function attemptLogin() {
       const staffId = (staffInput?.value || '').trim();
@@ -5823,6 +5844,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         btn.textContent = 'Sign In';
         return;
       }
+      // Login success — wipe typed credentials from the DOM immediately.
+      if (passInput) passInput.value = '';
+      if (staffInput) staffInput.value = '';
       // Login success — set active staff from session
       const sessionStaff = result.data?.staff;
       if (sessionStaff?.id) {
@@ -5853,6 +5877,14 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     } catch (err) {}
     applyTheme(state.ui.theme || 'classic', false);
     bindLoginScreen();
+    window.addEventListener('pageshow', () => {
+      const login = byId('loginScreen');
+      if (login && !login.classList.contains('hidden')) {
+        if (byId('loginStaffId')) byId('loginStaffId').value = '';
+        if (byId('loginPassword')) byId('loginPassword').value = '';
+        hardenCredentialInputs(login);
+      }
+    }, { once: true });
 
     if (isSupabaseApprovalMode()) {
       // Security rule: never restore a previous terminal session after refresh/reopen.
