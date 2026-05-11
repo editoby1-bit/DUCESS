@@ -2645,7 +2645,7 @@ function nextPaint() {
     });
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="changePasswordBtn" class="secondary tiny-btn">Change Password</button><button id="addStaffBtn">ADD STAFF</button></div>
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
           <select id="staffDirectoryRoleFilter" class="entry-input" style="height:24px;max-width:170px;font-size:0.78em;padding:2px 8px">
@@ -2659,7 +2659,7 @@ function nextPaint() {
           const staffName = s.name || s.full_name || '—';
           const staffRole = s.role || s.role_code || '';
           const isActive = s.active !== false && s.is_active !== false;
-          return `<tr><td>${i+1}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${escapeHtml(staffName)}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td>${money(acc.walletBalance)}</td><td class="${Number(acc.debtBalance||0)>0?'balance-negative':''}">-${money(acc.debtBalance)}</td><td>${money(acc.balance)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button><button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
+          return `<tr><td>${i+1}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${escapeHtml(staffName)}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td>${money(acc.walletBalance)}</td><td class="${Number(acc.debtBalance||0)>0?'balance-negative':''}">-${money(acc.debtBalance)}</td><td>${money(acc.balance)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
         }).join('') || '<tr><td colspan="9">No staff found</td></tr>'}</tbody></table></div>
       </div>`;
   }
@@ -5368,6 +5368,93 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     }
   }
 
+  function openChangePasswordModal() {
+    openModal('Change Password', `
+      <div class="form-grid two" style="gap:10px;max-width:520px">
+        <div class="field" style="grid-column:1/-1"><label>Old Password</label><input id="changeOldPassword" class="entry-input" type="password" autocomplete="current-password"></div>
+        <div class="field"><label>New Password</label><input id="changeNewPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters"></div>
+        <div class="field"><label>Confirm New Password</label><input id="changeConfirmPassword" class="entry-input" type="password" autocomplete="new-password"></div>
+      </div>
+      <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Your session will remain active where supported.</p>
+    `, [
+      { label:'Cancel', className:'secondary', onClick: closeModal },
+      { label:'Update Password', onClick: async () => {
+        const oldPassword = byId('changeOldPassword')?.value || '';
+        const newPassword = byId('changeNewPassword')?.value || '';
+        const confirmPassword = byId('changeConfirmPassword')?.value || '';
+        if (!oldPassword) return showToast('Enter old password');
+        if (!newPassword || newPassword.length < 6) return showToast('New password must be at least 6 characters');
+        if (newPassword !== confirmPassword) return showToast('New passwords do not match');
+        const submitBtn = document.querySelector('.modal-actions button:last-child');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Updating…'; }
+        try {
+          await nextPaint();
+          const result = await gateway.auth?.changePassword?.({ oldPassword, newPassword });
+          if (!result?.ok) {
+            showToast(result?.error?.message || 'Could not change password');
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Password'; }
+            return;
+          }
+          closeModal();
+          showToast('✓ Password changed successfully');
+        } catch (err) {
+          showToast('Could not change password');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Password'; }
+        }
+      }}
+    ]);
+  }
+
+  function openAdminResetPasswordModal(staffId) {
+    if (!isAdminStaff()) return showToast('Only admin can reset passwords');
+    const target = state.staff.find(s => s.id === staffId);
+    if (!target) return showToast('Staff not found');
+    const staffCode = target.staffCode || target.staff_code || target.staffId || target.id || '';
+    openModal('Reset Staff Password', `
+      <div style="max-width:520px">
+        <p style="margin:0 0 10px;font-size:0.86em">Reset password for <strong>${escapeHtml(target.name || target.full_name || staffCode)}</strong>.</p>
+        <div class="form-grid two" style="gap:10px">
+          <div class="field"><label>Staff Code</label><div class="display-field">${escapeHtml(String(staffCode))}</div></div>
+          <div class="field"><label>Temporary Password</label><input id="adminTempPassword" class="entry-input" type="password" autocomplete="new-password" placeholder="Minimum 6 characters"></div>
+          <div class="field"><label>Confirm Password</label><input id="adminTempPasswordConfirm" class="entry-input" type="password" autocomplete="new-password"></div>
+        </div>
+        <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Give this temporary password to the staff securely.</p>
+      </div>
+    `, [
+      { label:'Cancel', className:'secondary', onClick: closeModal },
+      { label:'Reset Password', onClick: async () => {
+        const temporaryPassword = byId('adminTempPassword')?.value || '';
+        const confirmPassword = byId('adminTempPasswordConfirm')?.value || '';
+        if (!temporaryPassword || temporaryPassword.length < 6) return showToast('Temporary password must be at least 6 characters');
+        if (temporaryPassword !== confirmPassword) return showToast('Passwords do not match');
+        const submitBtn = document.querySelector('.modal-actions button:last-child');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Resetting…'; }
+        try {
+          await nextPaint();
+          const actor = currentStaff();
+          const result = await gateway.auth?.resetStaffPassword?.({
+            staffId: target.id,
+            staffCode,
+            authUserId: target.authUserId || target.auth_user_id || target.uuid || '',
+            temporaryPassword,
+            updatedByStaffId: actor?.id || null,
+            updatedByName: actor?.name || actor?.fullName || null,
+          });
+          if (!result?.ok) {
+            showToast(result?.error?.message || 'Could not reset password');
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Reset Password'; }
+            return;
+          }
+          closeModal();
+          showToast('✓ Staff password reset successfully');
+        } catch (err) {
+          showToast('Could not reset password');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Reset Password'; }
+        }
+      }}
+    ]);
+  }
+
   function bindStaffDirectory() {
     const addBtn = byId('addStaffBtn');
     if (addBtn) addBtn.onclick = () => openModal('Onboard New Staff', `
@@ -5437,6 +5524,10 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         }
       }}
     ]);
+
+    const changePasswordBtn = byId('changePasswordBtn');
+    if (changePasswordBtn) changePasswordBtn.onclick = openChangePasswordModal;
+    qq('[data-staff-reset-password]').forEach(btn => btn.onclick = () => openAdminResetPasswordModal(btn.dataset.staffResetPassword));
 
     const staffDirectorySearch = byId('staffDirectorySearch');
     if (staffDirectorySearch) {
