@@ -1287,7 +1287,7 @@ if (inserted.error) {
       // Skip Supabase posting for them to avoid "customer not found" errors.
       const allStaffEntries = entries.length > 0 && entries.every(e => e.accountType === 'staff');
       const hasStaffEntry = entries.some(e => e.accountType === 'staff');
-      if (allStaffEntries || hasStaffEntry) {
+      if (allStaffEntries || (hasStaffEntry && (type === 'customer_credit' || type === 'customer_debit'))) {
         return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '', staffAccountHandledLocally: true });
       }
 
@@ -1403,14 +1403,23 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const decisionNote = payload.note || '';
 
       if (approvalPostingRpc) {
-        const { data, error: rpcError } = await client.rpc(approvalPostingRpc, {
-          p_request_id: payload.requestId,
-          p_approved_by_staff_id: approver.staffId,
-          p_approved_by_name: approver.name,
-          p_decision_note: decisionNote,
-        });
-        if (rpcError) return defaultResult.err('APPROVAL_POST_RPC_FAILED', 'Could not approve and post request through Supabase RPC.', rpcError);
-        return defaultResult.ok(normalizeApprovalRecord(data));
+        // For staff account transactions, skip the RPC (which doesn't know about
+        // DUCESS staff accounts) and fall through to direct posting which detects
+        // staff entries and returns staffAccountHandledLocally: true.
+        const requestPayload = requestRow?.payload || {};
+        const isStaffCreditDebit = (requestRow?.request_type === 'customer_credit' || requestRow?.request_type === 'customer_debit') && (requestPayload.accountType === 'staff' || requestPayload.accountType === 'staff_wallet');
+        const isStaffJournal = (requestRow?.request_type === 'customer_credit_journal' || requestRow?.request_type === 'customer_debit_journal') && Array.isArray(requestPayload.rows) && requestPayload.rows.length > 0 && requestPayload.rows.every(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
+        if (!isStaffCreditDebit && !isStaffJournal) {
+          const { data, error: rpcError } = await client.rpc(approvalPostingRpc, {
+            p_request_id: payload.requestId,
+            p_approved_by_staff_id: approver.staffId,
+            p_approved_by_name: approver.name,
+            p_decision_note: decisionNote,
+          });
+          if (rpcError) return defaultResult.err('APPROVAL_POST_RPC_FAILED', 'Could not approve and post request through Supabase RPC.', rpcError);
+          return defaultResult.ok(normalizeApprovalRecord(data));
+        }
+        // Staff account — fall through to direct posting path below
       }
 
       const requestResult = await fetchApprovalRequestRow(payload.requestId, 'pending');
