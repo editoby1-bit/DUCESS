@@ -2645,7 +2645,7 @@ function nextPaint() {
     });
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="changePasswordBtn" class="secondary tiny-btn">Change Password</button><button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="changePasswordBtn" class="secondary tiny-btn">Change Password</button>${isAdminStaff() ? '<button id="adminRecoveryKeyBtn" class="secondary tiny-btn">Recovery Key</button>' : ''}<button id="addStaffBtn">ADD STAFF</button></div>
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
           <select id="staffDirectoryRoleFilter" class="entry-input" style="height:24px;max-width:170px;font-size:0.78em;padding:2px 8px">
@@ -5459,6 +5459,72 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     hardenCredentialInputs(byId('modalBody') || document);
   }
 
+
+  function openRecoveryKeyDisplayModal(recoveryKey, generatedAt) {
+    const safeKey = escapeHtml(recoveryKey || '');
+    openModal('Admin Recovery Key', `
+      <div class="compact-panel" style="padding:10px;border:1px solid var(--line);border-radius:12px">
+        <p style="margin:0 0 8px;font-size:0.86em;color:var(--text-muted)">Save this key now. It is shown once and is required if the Admin forgets password.</p>
+        <div style="font-family:monospace;font-size:0.98em;letter-spacing:.04em;padding:10px;border:1px dashed var(--line);border-radius:10px;background:var(--panel-soft);word-break:break-all">${safeKey}</div>
+        <p style="margin:8px 0 0;font-size:0.76em;color:var(--text-muted)">Generated: ${escapeHtml(generatedAt || new Date().toISOString())}</p>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:0.82em"><input id="recoveryKeySavedConfirm" type="checkbox"> I have copied/saved this recovery key safely.</label>
+      </div>
+    `, [
+      { label:'Copy Key', className:'secondary', onClick: async () => {
+        try { await navigator.clipboard.writeText(recoveryKey || ''); showToast('Recovery key copied'); } catch (_) { showToast('Copy failed. Please copy manually.'); }
+      }},
+      { label:'Download Key', className:'secondary', onClick: () => {
+        const blob = new Blob([`DUCESS Admin Recovery Key\n\n${recoveryKey}\n\nGenerated: ${generatedAt || new Date().toISOString()}\nKeep this file offline and secure.`], { type:'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'DUCESS-admin-recovery-key.txt';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }},
+      { label:'Close', onClick: () => {
+        if (!byId('recoveryKeySavedConfirm')?.checked) return showToast('Confirm that you have saved the recovery key');
+        closeModal();
+      }}
+    ]);
+  }
+
+  async function openAdminRecoveryKeyModal(forceSetup=false) {
+    if (!isAdminStaff()) return showToast('Only Admin can manage recovery key');
+    const title = forceSetup ? 'Generate Recovery Key Required' : 'Admin Recovery Key';
+    openModal(title, `
+      <div class="compact-panel" style="padding:10px;border:1px solid var(--line);border-radius:12px">
+        <p style="margin:0 0 8px;font-size:0.86em;color:var(--text-muted)">${forceSetup ? 'No Admin recovery key exists yet. Generate one now so this deployment can recover Admin access if password is forgotten.' : 'Generate or regenerate the Admin recovery key. Regeneration invalidates the previous key on this device/deployment.'}</p>
+        <p style="margin:0;font-size:0.78em;color:var(--text-muted)">The key is displayed once. Store it offline before closing.</p>
+      </div>
+    `, [
+      ...(forceSetup ? [] : [{ label:'Cancel', className:'secondary', onClick: closeModal }]),
+      { label: forceSetup ? 'Generate Recovery Key' : 'Generate / Regenerate Key', onClick: async () => {
+        const btn = q('#modalActions button:not(.secondary)');
+        if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+        try {
+          const result = await gateway.auth?.generateAdminRecoveryKey?.({ regenerate: !forceSetup });
+          if (!result?.ok) {
+            showToast(result?.error?.message || 'Could not generate recovery key');
+            if (btn) { btn.disabled = false; btn.textContent = forceSetup ? 'Generate Recovery Key' : 'Generate / Regenerate Key'; }
+            return;
+          }
+          openRecoveryKeyDisplayModal(result.data?.recoveryKey, result.data?.generatedAt);
+        } catch (err) {
+          showToast('Could not generate recovery key');
+          if (btn) { btn.disabled = false; btn.textContent = forceSetup ? 'Generate Recovery Key' : 'Generate / Regenerate Key'; }
+        }
+      }}
+    ]);
+  }
+
+  async function enforceAdminRecoveryKeySetup() {
+    if (!isAdminStaff()) return;
+    try {
+      const result = await gateway.auth?.hasAdminRecoveryKey?.();
+      if (result?.ok && !result.data?.exists) setTimeout(() => openAdminRecoveryKeyModal(true), 250);
+    } catch (_) {}
+  }
+
   function bindStaffDirectory() {
     const addBtn = byId('addStaffBtn');
     if (addBtn) addBtn.onclick = () => {
@@ -5535,6 +5601,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
 
     const changePasswordBtn = byId('changePasswordBtn');
     if (changePasswordBtn) changePasswordBtn.onclick = openChangePasswordModal;
+    const adminRecoveryKeyBtn = byId('adminRecoveryKeyBtn');
+    if (adminRecoveryKeyBtn) adminRecoveryKeyBtn.onclick = () => openAdminRecoveryKeyModal(false);
     qq('[data-staff-reset-password]').forEach(btn => btn.onclick = () => openAdminResetPasswordModal(btn.dataset.staffResetPassword));
 
     const staffDirectorySearch = byId('staffDirectorySearch');
@@ -5733,11 +5801,11 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     openModal('Admin Password Recovery', `
       <div class="grid two compact-grid">
         <div class="field"><label>Admin Staff ID</label><input id="recoverAdminStaffId" class="entry-input" type="text" autocomplete="username" placeholder="e.g. ADMIN001"></div>
-        <div class="field"><label>Recovery Code</label>${passwordInputRow('<input id="recoverAdminCode" class="entry-input" type="password" autocomplete="off">', 'recoverAdminCode')}</div>
+        <div class="field"><label>Recovery Key</label>${passwordInputRow('<input id="recoverAdminCode" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="DUCESS-RK-...">', 'recoverAdminCode')}</div>
         <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="recoverAdminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'recoverAdminTempPassword')}</div>
         <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="recoverAdminTempConfirm" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'recoverAdminTempConfirm')}</div>
       </div>
-      <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Use only the approved recovery code configured for the organization. After reset, sign in with the temporary password and change it immediately.</p>
+      <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Use the Admin Recovery Key generated inside Administration. The key is shown once and should be stored offline. After reset, sign in with the temporary password and change it immediately.</p>
     `, [
       { label:'Cancel', className:'secondary', onClick: closeModal },
       { label:'Reset Admin Password', onClick: async () => {
@@ -5746,7 +5814,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         const temporaryPassword = byId('recoverAdminTempPassword')?.value || '';
         const confirmPassword = byId('recoverAdminTempConfirm')?.value || '';
         if (!staffCode) return showToast('Enter Admin Staff ID');
-        if (!recoveryCode) return showToast('Enter recovery code');
+        if (!recoveryCode) return showToast('Enter recovery key');
         if (!temporaryPassword || temporaryPassword.length < 6) return showToast('Temporary password must be at least 6 characters');
         if (temporaryPassword !== confirmPassword) return showToast('Passwords do not match');
         const submitBtn = q('#modalActions button:not(.secondary)');
@@ -5858,6 +5926,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       await syncApprovalsFromGateway();
       await syncCodFromGateway();
       render();
+      await enforceAdminRecoveryKeySetup();
     }
 
     btn.onclick = attemptLogin;
