@@ -312,13 +312,21 @@
   function nextDate(iso) { const d=new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10); }
 
   function latestClosedBusinessDay() {
-    const rows = Array.isArray(state.dayClosures) ? state.dayClosures : [];
-    return rows
-      .map(row => ({
+    const closureRows = Array.isArray(state.dayClosures) ? state.dayClosures : [];
+    const codRows = Array.isArray(state.cod) ? state.cod : [];
+    return [
+      ...closureRows.map(row => ({
         date: String(row.date || row.businessDate || '').slice(0,10),
         nextBusinessDate: String(row.nextBusinessDate || '').slice(0,10)
-      }))
-      .filter(row => row.date)
+      })),
+      ...codRows
+        .filter(row => row && row.status !== 'draft')
+        .map(row => {
+          const date = String(row.date || row.businessDate || '').slice(0,10);
+          return { date, nextBusinessDate: date ? nextDate(date) : '' };
+        })
+    ]
+      .filter(row => /^\d{4}-\d{2}-\d{2}$/.test(row.date))
       .sort((a,b) => a.date.localeCompare(b.date))
       .pop() || null;
   }
@@ -355,8 +363,11 @@
     // DUCESS business date, keep the active date at that later business date.
     // This prevents one device from falling back to an older local date.
     const latestKnownDate = collectKnownBusinessDates().pop();
-    if (latestKnownDate && (!target || target < latestKnownDate)) {
-      target = isBusinessDateClosed(latestKnownDate) ? nextDate(latestKnownDate) : latestKnownDate;
+    if (latestKnownDate) {
+      const latestKnownClosed = isBusinessDateClosed(latestKnownDate);
+      if (!target || target < latestKnownDate || (latestKnownClosed && target === latestKnownDate)) {
+        target = latestKnownClosed ? nextDate(latestKnownDate) : latestKnownDate;
+      }
     }
 
     if (!target) return false;
@@ -2312,8 +2323,11 @@ function hideProcessing() {
     }).join('');
     const codRows=(state.cod||[]).filter(c=>{
       const codDate = String(c.date || c.businessDate || '').slice(0,10);
-      if (!codDate || codDate >= openDate) return false;
-      if (c.status === 'resolved') return false;
+      // COD Resolution visibility must be controlled by the COD record itself,
+      // not by the current open date. If one device has not advanced yet, using
+      // openDate here hides the closed-day evidence and makes resolution vanish.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(codDate)) return false;
+      if (c.status === 'resolved' || c.status === 'draft') return false;
       const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
