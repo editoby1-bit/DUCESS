@@ -2572,7 +2572,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const staffResult = await getCurrentStaff();
       const staff = staffResult.ok ? staffResult.data : null;
       const role = String(staff?.role_code || staff?.role || '').toLowerCase();
-      if (role !== 'admin') return defaultResult.err('AUTH_ADMIN_ONLY', 'Only Admin can generate recovery key.');
+      if (!['admin','admin_officer','administrator','administrative_officer'].includes(role)) return defaultResult.err('AUTH_ADMIN_ONLY', 'Only Admin can generate recovery key.');
       const key = makeRecoveryKey();
       const hash = await sha256Hex(key);
       try {
