@@ -4483,6 +4483,11 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 .cod-resolution-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  display: block;
+  width: 100%;
+}
+.cod-resolution-table-wrap .table {
+  min-width: 920px;
 }
 
 /* COD mobile note field stabilization: keep mobile layout intact while making NOTE usable */
