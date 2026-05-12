@@ -4487,7 +4487,29 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   width: 100%;
 }
 .cod-resolution-table-wrap .table {
-  min-width: 920px;
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.cod-resolution-table-wrap .table th,
+.cod-resolution-table-wrap .table td {
+  font-size: 11px;
+  padding: 8px 6px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.cod-resolution-table-wrap .table th:nth-child(2),
+.cod-resolution-table-wrap .table td:nth-child(2),
+.cod-resolution-table-wrap .table th:nth-child(3),
+.cod-resolution-table-wrap .table td:nth-child(3){
+  width: 58px;
+}
+
+.cod-resolution-table-wrap .table th:last-child,
+.cod-resolution-table-wrap .table td:last-child {
+  width: 74px;
 }
 
 /* COD mobile note field stabilization: keep mobile layout intact while making NOTE usable */
