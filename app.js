@@ -2645,7 +2645,8 @@ function nextPaint() {
     });
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="changePasswordBtn" class="secondary tiny-btn">Change Password</button>${isAdminStaff() ? '<button id="adminRecoveryKeyBtn" class="secondary tiny-btn">Recovery Key</button>' : ''}<button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="changePasswordBtn" class="secondary tiny-btn">Change Password</button><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
+        ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
           <select id="staffDirectoryRoleFilter" class="entry-input" style="height:24px;max-width:170px;font-size:0.78em;padding:2px 8px">
@@ -5603,6 +5604,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     if (changePasswordBtn) changePasswordBtn.onclick = openChangePasswordModal;
     const adminRecoveryKeyBtn = byId('adminRecoveryKeyBtn');
     if (adminRecoveryKeyBtn) adminRecoveryKeyBtn.onclick = () => openAdminRecoveryKeyModal(false);
+    const adminRecoveryKeyInlineBtn = byId('adminRecoveryKeyInlineBtn');
+    if (adminRecoveryKeyInlineBtn) adminRecoveryKeyInlineBtn.onclick = () => openAdminRecoveryKeyModal(false);
     qq('[data-staff-reset-password]').forEach(btn => btn.onclick = () => openAdminResetPasswordModal(btn.dataset.staffResetPassword));
 
     const staffDirectorySearch = byId('staffDirectorySearch');
