@@ -1786,22 +1786,6 @@ if (approvalRecord.type === 'float_topup') {
     const roleEl = byId('staffRoleDisplay');
     if (nameEl) nameEl.textContent = activeStaff?.name || '';
     if (roleEl) roleEl.textContent = ROLE_LABELS[activeStaff?.role] || activeStaff?.role || '';
-
-    // Self-service password change must be available to every logged-in staff,
-    // including non-admin roles that cannot access Administration/Staff Directory.
-    const topActions = document.querySelector('.top-actions');
-    const logoutBtn = byId('btnLogout');
-    let headerChangePasswordBtn = byId('btnChangePasswordSelf');
-    if (topActions && logoutBtn && !headerChangePasswordBtn) {
-      headerChangePasswordBtn = document.createElement('button');
-      headerChangePasswordBtn.type = 'button';
-      headerChangePasswordBtn.id = 'btnChangePasswordSelf';
-      headerChangePasswordBtn.className = 'ghost-btn';
-      headerChangePasswordBtn.textContent = 'Change Password';
-      topActions.insertBefore(headerChangePasswordBtn, logoutBtn);
-    }
-    if (headerChangePasswordBtn) headerChangePasswordBtn.onclick = openChangePasswordModal;
-
     byId('btnTodayFloat').onclick = openFloatModal;
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
@@ -2728,7 +2712,7 @@ function nextPaint() {
     });
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="changePasswordBtn" class="secondary tiny-btn">Change Password</button><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
         ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
@@ -5501,6 +5485,59 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     hardenCredentialInputs(byId('modalBody') || document);
   }
 
+  function openLoginChangePasswordModal() {
+    const loginStaffValue = (byId('loginStaffId')?.value || '').trim().toUpperCase();
+    openModal('Change Password', `
+      <div class="form-grid two" style="gap:10px;max-width:520px">
+        <div class="field" style="grid-column:1/-1"><label>Staff ID</label><input id="loginChangeStaffId" class="entry-input" value="${escapeHtml(loginStaffValue)}" placeholder="e.g. ADMIN001" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" style="text-transform:uppercase"></div>
+        <div class="field" style="grid-column:1/-1"><label>Current Password</label>${passwordInputRow('<input id="loginChangeOldPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'loginChangeOldPassword')}</div>
+        <div class="field"><label>New Password</label>${passwordInputRow('<input id="loginChangeNewPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'loginChangeNewPassword')}</div>
+        <div class="field"><label>Confirm New Password</label>${passwordInputRow('<input id="loginChangeConfirmPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'loginChangeConfirmPassword')}</div>
+      </div>
+      <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Use your current Staff ID and password. After the update, sign in with the new password.</p>
+    `, [
+      { label:'Cancel', className:'secondary', onClick: closeModal },
+      { label:'Update Password', onClick: async () => {
+        const staffId = (byId('loginChangeStaffId')?.value || '').trim().toUpperCase();
+        const oldPassword = byId('loginChangeOldPassword')?.value || '';
+        const newPassword = byId('loginChangeNewPassword')?.value || '';
+        const confirmPassword = byId('loginChangeConfirmPassword')?.value || '';
+        if (!staffId) return showToast('Enter Staff ID');
+        if (!oldPassword) return showToast('Enter current password');
+        if (!newPassword || newPassword.length < 6) return showToast('New password must be at least 6 characters');
+        if (newPassword !== confirmPassword) return showToast('New passwords do not match');
+        const submitBtn = document.querySelector('.modal-actions button:last-child');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Updating…'; }
+        try {
+          await nextPaint();
+          const loginResult = await gateway.auth?.loginWithStaffId?.({ staffId, password: oldPassword });
+          if (!loginResult?.ok) {
+            showToast(loginResult?.error?.message || 'Current Staff ID or password is incorrect');
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Password'; }
+            return;
+          }
+          const result = await gateway.auth?.changePassword?.({ oldPassword, newPassword });
+          if (!result?.ok) {
+            showToast(result?.error?.message || 'Could not change password');
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Password'; }
+            return;
+          }
+          await gateway.auth?.logout?.().catch?.(() => {});
+          if (byId('loginStaffId')) byId('loginStaffId').value = staffId;
+          if (byId('loginPassword')) byId('loginPassword').value = '';
+          closeModal();
+          showLoginScreen();
+          showToast('✓ Password changed. Sign in with the new password.');
+        } catch (err) {
+          showToast('Could not change password');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Password'; }
+        }
+      }}
+    ]);
+    bindPasswordToggles(byId('modalBody') || document);
+    hardenCredentialInputs(byId('modalBody') || document);
+  }
+
   function openAdminResetPasswordModal(staffId) {
     if (!isAdminStaff()) return showToast('Only admin can reset passwords');
     const target = state.staff.find(s => s.id === staffId);
@@ -5693,8 +5730,6 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     hardenCredentialInputs(byId('modalBody') || document);
     };
 
-    const changePasswordBtn = byId('changePasswordBtn');
-    if (changePasswordBtn) changePasswordBtn.onclick = openChangePasswordModal;
     const adminRecoveryKeyBtn = byId('adminRecoveryKeyBtn');
     if (adminRecoveryKeyBtn) adminRecoveryKeyBtn.onclick = () => openAdminRecoveryKeyModal(false);
     const adminRecoveryKeyInlineBtn = byId('adminRecoveryKeyInlineBtn');
@@ -5975,16 +6010,38 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       toggle.textContent = 'Show';
       row.appendChild(toggle);
     }
-    if (btn.parentElement && !byId('adminRecoveryBtn')) {
+    if (btn.parentElement && !byId('loginPasswordTools')) {
+      const tools = document.createElement('div');
+      tools.id = 'loginPasswordTools';
+      tools.style.display = 'flex';
+      tools.style.alignItems = 'center';
+      tools.style.justifyContent = 'space-between';
+      tools.style.gap = '8px';
+      tools.style.marginTop = '8px';
+
+      const changeBtn = document.createElement('button');
+      changeBtn.type = 'button';
+      changeBtn.id = 'loginChangePasswordBtn';
+      changeBtn.className = 'secondary tiny-btn';
+      changeBtn.style.flex = '1';
+      changeBtn.style.padding = '6px 8px';
+      changeBtn.style.fontSize = '0.74em';
+      changeBtn.textContent = 'Change password';
+      changeBtn.onclick = openLoginChangePasswordModal;
+      tools.appendChild(changeBtn);
+
       const recoverBtn = document.createElement('button');
       recoverBtn.type = 'button';
       recoverBtn.id = 'adminRecoveryBtn';
       recoverBtn.className = 'secondary tiny-btn';
-      recoverBtn.style.width = '100%';
-      recoverBtn.style.marginTop = '8px';
+      recoverBtn.style.flex = '1';
+      recoverBtn.style.padding = '6px 8px';
+      recoverBtn.style.fontSize = '0.74em';
       recoverBtn.textContent = 'Admin forgot password?';
       recoverBtn.onclick = openAdminRecoveryModal;
-      btn.parentElement.appendChild(recoverBtn);
+      tools.appendChild(recoverBtn);
+
+      btn.parentElement.appendChild(tools);
     }
     bindPasswordToggles(byId('loginScreen') || document);
     hardenCredentialInputs(byId('loginScreen') || document);
