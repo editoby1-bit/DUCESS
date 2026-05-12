@@ -11969,67 +11969,61 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   padding-right: 12px !important;
 }
 
-
-/* Surgical COD Resolution Queue compact alignment patch */
-#approval-section .cod-resolution-table-wrap{
-  overflow-x: hidden !important;
-  width: 100% !important;
+/* Surgical COD Resolution Queue compact layout patch
+   Scope: Approval Queue > COD Resolution Queue only */
+.cod-resolution-table-wrap{
+  overflow-x:hidden !important;
 }
-
-#approval-section .cod-resolution-table-wrap .cod-resolution-table{
-  width: 100% !important;
-  min-width: 0 !important;
-  table-layout: auto !important;
+.cod-resolution-table-wrap .cod-resolution-table,
+.cod-resolution-table-wrap table.cod-resolution-table{
+  width:100% !important;
+  min-width:0 !important;
+  table-layout:fixed !important;
 }
-
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th,
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td{
-  font-size: 12px !important;
-  line-height: 1.12 !important;
-  padding: 10px 5px !important;
-  white-space: normal !important;
-  word-break: normal !important;
-  overflow-wrap: normal !important;
-  hyphens: none !important;
-  vertical-align: middle !important;
+.cod-resolution-table-wrap .cod-resolution-table th,
+.cod-resolution-table-wrap .cod-resolution-table td{
+  font-size:11px !important;
+  line-height:1.15 !important;
+  padding:8px 5px !important;
+  white-space:normal !important;
+  word-break:normal !important;
+  overflow-wrap:normal !important;
+  hyphens:none !important;
+  vertical-align:middle !important;
 }
-
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th{
-  font-size: 11px !important;
-  letter-spacing: .03em !important;
-}
-
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(1),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(1){width: 34px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(2),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(2){width: 76px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(3),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(3){width: 78px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(4),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(4){width: 70px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(5),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(5),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(6),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(6),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(7),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(7),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(8),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(8){width: 88px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(9),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(9){width: 106px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(10),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(10),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(11),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(11){width: 86px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(12),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(12){width: 56px !important;}
-#approval-section .cod-resolution-table-wrap .cod-resolution-table th:nth-child(13),
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(13){width: 78px !important;}
-
-#approval-section .cod-resolution-table-wrap .cod-resolution-table td:nth-child(13) button[data-cod-resolve]{
-  min-width: 66px !important;
-  width: auto !important;
-  padding: 8px 12px !important;
-  white-space: nowrap !important;
-  word-break: keep-all !important;
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(1),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(1){width:42px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(2),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(2){width:78px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(3),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(3){width:80px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(4),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(4){width:70px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(5),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(5){width:78px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(6),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(6){width:96px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(7),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(7){width:78px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(8),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(8){width:96px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(9),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(9){width:112px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(10),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(10){width:88px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(11),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(11){width:88px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(12),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(12){width:70px !important;}
+.cod-resolution-table-wrap .cod-resolution-table th:nth-child(13),
+.cod-resolution-table-wrap .cod-resolution-table td:nth-child(13){width:96px !important;}
+.cod-resolution-table-wrap .cod-resolution-table [data-cod-resolve],
+.cod-resolution-table-wrap .cod-resolution-table button.warning{
+  white-space:nowrap !important;
+  word-break:keep-all !important;
+  overflow-wrap:normal !important;
+  min-width:82px !important;
+  padding:8px 12px !important;
+  line-height:1 !important;
+  border-radius:12px !important;
 }
