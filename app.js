@@ -5468,7 +5468,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <p style="margin:0 0 8px;font-size:0.86em;color:var(--text-muted)">Save this key now. It is shown once and is required if the Admin forgets password.</p>
         <div style="font-family:monospace;font-size:0.98em;letter-spacing:.04em;padding:10px;border:1px dashed var(--line);border-radius:10px;background:var(--panel-soft);word-break:break-all">${safeKey}</div>
         <p style="margin:8px 0 0;font-size:0.76em;color:var(--text-muted)">Generated: ${escapeHtml(generatedAt || new Date().toISOString())}</p>
-        <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:0.82em"><input id="recoveryKeySavedConfirm" type="checkbox"> I have copied/saved this recovery key safely.</label>
+        <label style="display:inline-flex;gap:8px;align-items:center;margin-top:10px;font-size:0.82em;line-height:1.25"><input id="recoveryKeySavedConfirm" type="checkbox" style="width:14px;height:14px;min-width:14px;max-width:14px;margin:0;accent-color:var(--accent,#1f5f91)"> <span>I have copied/saved this recovery key safely.</span></label>
       </div>
     `, [
       { label:'Copy Key', className:'secondary', onClick: async () => {
