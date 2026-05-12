@@ -5262,8 +5262,13 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
 
   function exportCsv(rows, filename) {
     if (!rows.length) return showToast('Nothing to export');
-    const cols = Object.keys(rows[0]);
-    const csv = [cols.join(',')].concat(rows.map(r => cols.map(k => JSON.stringify(r[k] ?? '')).join(','))).join('\n');
+    const escapeCell = value => JSON.stringify(value ?? '');
+    const csv = Array.isArray(rows[0])
+      ? rows.map(row => (row || []).map(escapeCell).join(',')).join('\n')
+      : (() => {
+          const cols = Object.keys(rows[0]);
+          return [cols.join(',')].concat(rows.map(r => cols.map(k => escapeCell(r[k])).join(','))).join('\n');
+        })();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
     a.download = filename; a.click();
