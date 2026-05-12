@@ -11954,3 +11954,18 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   #modalBack .modal[data-modal-title="Central Close of Day"] .table th:nth-child(13),
   #modalBack .modal[data-modal-title="Central Close of Day"] .table td:nth-child(13){min-width:130px;}
 }
+
+/* COD Resolution Queue Resolve button nowrap surgical fix */
+#approval-section table button,
+#approval-section .btn,
+#approval-section button {
+  white-space: nowrap !important;
+}
+
+#approval-section table button{
+  min-width: 88px !important;
+  width: auto !important;
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+
