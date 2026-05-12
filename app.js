@@ -2327,16 +2327,12 @@ function hideProcessing() {
       // not by the current open date. If one device has not advanced yet, using
       // openDate here hides the closed-day evidence and makes resolution vanish.
       if (!/^\d{4}-\d{2}-\d{2}$/.test(codDate)) return false;
+      // Once a COD record has entered the resolution lifecycle, its own
+      // status controls visibility. Do not re-hide it because a later live
+      // balance recalculation temporarily reads zero/stale values. Resolution
+      // records must remain visible until they are explicitly resolved.
       if (c.status === 'resolved' || c.status === 'draft') return false;
-      const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
-      const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
-      const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
-      const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
-      const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
-      const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
-      const variance = Math.abs(remaining);
-      const overdraw = Math.max(0, -remaining);
-      return c.status === 'flagged' || variance > 0 || overdraw > 0 || remaining !== 0;
+      return true;
     }).map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
