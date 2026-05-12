@@ -711,6 +711,12 @@ async function submitDebtRepayment(_payload) {
         async resetStaffPassword() {
           return defaultResult.err('AUTH_PASSWORD_UNAVAILABLE', 'Admin password reset requires Supabase Auth.');
         },
+        async hasAdminRecoveryKey() {
+          try { return defaultResult.ok({ exists: !!localStorage.getItem('ducess_admin_recovery_key_hash_v1') }); } catch (_) { return defaultResult.ok({ exists: false }); }
+        },
+        async generateAdminRecoveryKey() {
+          return defaultResult.err('AUTH_RECOVERY_REQUIRES_SUPABASE', 'Recovery key setup requires Supabase mode.');
+        },
         async recoverAdminPassword() {
           return defaultResult.err('AUTH_RECOVERY_UNAVAILABLE', 'Admin recovery requires Supabase Auth.');
         },
@@ -2518,6 +2524,84 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
 
+
+    const adminRecoveryStorageKey = 'ducess_admin_recovery_key_hash_v1';
+    const adminRecoveryMetaKey = 'ducess_admin_recovery_key_meta_v1';
+
+    function bytesToHex(bytes) {
+      return Array.from(bytes || []).map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function sha256Hex(value) {
+      const text = String(value || '');
+      if (crypto?.subtle && typeof TextEncoder !== 'undefined') {
+        const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+        return bytesToHex(new Uint8Array(buffer));
+      }
+      let h1 = 0x811c9dc5;
+      for (let i = 0; i < text.length; i += 1) {
+        h1 ^= text.charCodeAt(i);
+        h1 = Math.imul(h1, 0x01000193) >>> 0;
+      }
+      return String(h1.toString(16)).padStart(8, '0');
+    }
+
+    function makeRecoveryKey() {
+      const bytes = new Uint8Array(12);
+      if (crypto?.getRandomValues) crypto.getRandomValues(bytes);
+      else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+      const body = Array.from(bytes).map((b) => (b % 36).toString(36).toUpperCase()).join('').match(/.{1,4}/g).join('-');
+      return `DUCESS-RK-${body}`;
+    }
+
+    async function hasAdminRecoveryKey() {
+      try {
+        const hash = localStorage.getItem(adminRecoveryStorageKey) || '';
+        return defaultResult.ok({ exists: !!hash });
+      } catch (err) {
+        return defaultResult.ok({ exists: false });
+      }
+    }
+
+    async function generateAdminRecoveryKey(payload = {}) {
+      if (!canUseSupabase()) return local.auth.generateAdminRecoveryKey(payload);
+      const sessionResult = await client.auth.getSession();
+      if (sessionResult.error || !sessionResult.data?.session?.user) {
+        return defaultResult.err('AUTH_SESSION_REQUIRED', 'Login as Admin to generate recovery key.', sessionResult.error || null);
+      }
+      const staffResult = await getCurrentStaff();
+      const staff = staffResult.ok ? staffResult.data : null;
+      const role = String(staff?.role_code || staff?.role || '').toLowerCase();
+      if (role !== 'admin') return defaultResult.err('AUTH_ADMIN_ONLY', 'Only Admin can generate recovery key.');
+      const key = makeRecoveryKey();
+      const hash = await sha256Hex(key);
+      try {
+        localStorage.setItem(adminRecoveryStorageKey, hash);
+        localStorage.setItem(adminRecoveryMetaKey, JSON.stringify({ generatedAt: new Date().toISOString(), generatedBy: staff?.id || null }));
+      } catch (err) {
+        return defaultResult.err('AUTH_RECOVERY_STORE_FAILED', 'Could not store recovery key hash on this device.', err);
+      }
+      await insertAuditLogEntry({
+        actorStaffId: staff?.id || null,
+        actorName: staff?.fullName || staff?.name || '',
+        actionType: payload.regenerate ? 'admin_recovery_key_regenerated' : 'admin_recovery_key_generated',
+        entityType: 'auth',
+        entityId: 'admin_recovery',
+        details: payload.regenerate ? 'Admin regenerated recovery key' : 'Admin generated recovery key',
+      }).catch(() => {});
+      return defaultResult.ok({ recoveryKey: key, generatedAt: new Date().toISOString() });
+    }
+
+    async function verifyLocalRecoveryKey(recoveryKey) {
+      const entered = String(recoveryKey || '').trim();
+      if (!entered) return false;
+      try {
+        const storedHash = localStorage.getItem(adminRecoveryStorageKey) || '';
+        if (!storedHash) return false;
+        return (await sha256Hex(entered)) === storedHash;
+      } catch (_) { return false; }
+    }
+
     async function recoverAdminPassword(payload = {}) {
       if (!canUseSupabase()) return defaultResult.err('AUTH_RECOVERY_UNAVAILABLE', 'Admin recovery requires Supabase Auth.');
       const staffCode = String(payload.staffCode || '').trim().toUpperCase();
@@ -2526,6 +2610,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!staffCode) return defaultResult.err('AUTH_RECOVERY_STAFF_REQUIRED', 'Enter the Admin Staff ID.');
       if (!recoveryCode) return defaultResult.err('AUTH_RECOVERY_CODE_REQUIRED', 'Enter the recovery code.');
       if (!temporaryPassword || String(temporaryPassword).length < 6) return defaultResult.err('AUTH_PASSWORD_TOO_SHORT', 'Temporary password must be at least 6 characters.');
+      const keyOk = await verifyLocalRecoveryKey(recoveryCode);
+      if (!keyOk) return defaultResult.err('AUTH_RECOVERY_KEY_INVALID', 'Recovery key is invalid or has not been generated on this deployment.');
 
       const recoveryFnUrl = config?.supabase?.recoverAdminPasswordEdgeFn
         || config?.supabase?.resetStaffPasswordEdgeFn
@@ -2612,6 +2698,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         getCurrentStaffContext,
         changePassword,
         resetStaffPassword,
+        hasAdminRecoveryKey,
+        generateAdminRecoveryKey,
         recoverAdminPassword,
       },
       staff: {
