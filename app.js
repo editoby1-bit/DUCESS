@@ -372,7 +372,7 @@
     return payloadDate || approval?.requestedAt || approval?.requested_at || '';
   }
 
-  const COD_LOCKED_POSTING_TYPES = ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','operational_entry'];
+  const COD_LOCKED_POSTING_TYPES = ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','float_declaration','float_topup','wallet_fund','debt_repayment','operational_entry','close_of_day'];
 
   function approvalBusinessDate(type, payload = {}) {
     return String(payload?.date || payload?.businessDate || payload?.float_date || businessDate()).slice(0,10);
@@ -381,7 +381,13 @@
   function isBusinessDateClosed(dateStr = businessDate()) {
     const target = String(dateStr || '').slice(0,10);
     if (!target) return false;
-    return (state.dayClosures || []).some(row => String(row.date || row.businessDate || '').slice(0,10) === target);
+    // A DUCESS business date is closed if Central COD has closed it locally
+    // OR if COD submissions for that date have synced from Supabase.
+    // This makes COD Resolution dates authoritative across devices, not just
+    // dependent on one browser's local dayClosures array.
+    const locallyClosed = (state.dayClosures || []).some(row => String(row.date || row.businessDate || '').slice(0,10) === target);
+    const codClosed = (state.cod || []).some(row => String(row.date || row.businessDate || '').slice(0,10) === target && row.status !== 'draft');
+    return locallyClosed || codClosed;
   }
 
   function businessDateClosedMessage(dateStr = businessDate()) {
@@ -1215,6 +1221,7 @@ if (approvalRecord.type === 'float_topup') {
 }
 
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
+    reconcileBusinessDateFromClosures();
     const requestDate = approvalBusinessDate(type, payload);
     if (shouldLockApprovalType(type) && isBusinessDateClosed(requestDate)) {
       return defaultResultErr('BUSINESS_DATE_CLOSED', businessDateClosedMessage(requestDate));
@@ -2278,8 +2285,17 @@ function hideProcessing() {
     state.ui.selectedApprovalIds ||= [];
     cleanupApprovalReviewLocks();
     const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','float_declaration'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
+    reconcileBusinessDateFromClosures();
+    const openDate = businessDate();
     const currentSection = state.ui.approvalsSection || 'tellering';
-    const allRows = state.approvals.filter(a => categories[currentSection].includes(a.type));
+    const allRows = state.approvals.filter(a => {
+      if (!categories[currentSection].includes(a.type)) return false;
+      const reqDate = approvalBusinessDate(a.type, a.payload || {});
+      // Approval Queue belongs to the CURRENT OPEN business date only.
+      // Closed dates belong to COD Resolution/history and must not remain
+      // mixed with actionable approval work.
+      return reqDate === openDate && !isBusinessDateClosed(reqDate);
+    });
     const limit = state.ui.approvalsLimit || 20;
     const approvals = allRows.slice(0, limit);
     const rows = approvals.map((a, i) => {
@@ -2295,6 +2311,8 @@ function hideProcessing() {
       return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${csActions}${normalActions}</td></tr>`;
     }).join('');
     const codRows=(state.cod||[]).filter(c=>{
+      const codDate = String(c.date || c.businessDate || '').slice(0,10);
+      if (!codDate || codDate >= openDate) return false;
       if (c.status === 'resolved') return false;
       const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
