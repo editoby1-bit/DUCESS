@@ -1786,6 +1786,22 @@ if (approvalRecord.type === 'float_topup') {
     const roleEl = byId('staffRoleDisplay');
     if (nameEl) nameEl.textContent = activeStaff?.name || '';
     if (roleEl) roleEl.textContent = ROLE_LABELS[activeStaff?.role] || activeStaff?.role || '';
+
+    // Self-service password change must be available to every logged-in staff,
+    // including non-admin roles that cannot access Administration/Staff Directory.
+    const topActions = document.querySelector('.top-actions');
+    const logoutBtn = byId('btnLogout');
+    let headerChangePasswordBtn = byId('btnChangePasswordSelf');
+    if (topActions && logoutBtn && !headerChangePasswordBtn) {
+      headerChangePasswordBtn = document.createElement('button');
+      headerChangePasswordBtn.type = 'button';
+      headerChangePasswordBtn.id = 'btnChangePasswordSelf';
+      headerChangePasswordBtn.className = 'ghost-btn';
+      headerChangePasswordBtn.textContent = 'Change Password';
+      topActions.insertBefore(headerChangePasswordBtn, logoutBtn);
+    }
+    if (headerChangePasswordBtn) headerChangePasswordBtn.onclick = openChangePasswordModal;
+
     byId('btnTodayFloat').onclick = openFloatModal;
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
