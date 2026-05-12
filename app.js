@@ -1195,6 +1195,18 @@ if (approvalRecord.type === 'float_topup') {
   return defaultResultOk(true);
 }
 
+  if (approvalRecord.type === 'wallet_fund' || (approvalRecord.type === 'debt_repayment' && enrichedPayload.source === 'my_balance')) {
+    const localReq = (state.approvals || []).find(r => r.id === approvalRecord.id);
+    if (localReq) {
+      localReq.status = 'approved';
+      localReq.approvedBy = approvalRecord.approvedBy || approvalRecord.approvedByName || localReq.approvedBy;
+      localReq.approvedAt = approvalRecord.approvedAt || localReq.approvedAt || new Date().toISOString();
+      applyRequest(localReq);
+      save();
+    }
+    return defaultResultOk(true);
+  }
+
   if (approvalRecord.type === 'debt_repayment') {
     return syncDebtBalancesFromGateway();
   }
@@ -1304,9 +1316,11 @@ if (approvalRecord.type === 'float_topup') {
     const isStaffJournalTx = (pendingReq?.type === 'customer_credit_journal' || pendingReq?.type === 'customer_debit_journal') &&
       Array.isArray(pendingPayload.rows) && pendingPayload.rows.length > 0 &&
       pendingPayload.rows.some(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
+    const isMyBalanceRequest = pendingReq?.type === 'wallet_fund' ||
+      (pendingReq?.type === 'debt_repayment' && pendingPayload.source === 'my_balance');
 
-    if (isStaffDirectTx || isStaffJournalTx) {
-      // Mark approved in Supabase via a minimal direct update (no posting RPC, no customer fetch)
+    if (isStaffDirectTx || isStaffJournalTx || isMyBalanceRequest) {
+      // Mark approved in Supabase via a minimal direct update (no posting RPC, no customer/debt-table fetch)
       const markResult = await gateway.approvals.markApprovalApprovedDirect({
         requestId: id,
         approvedByStaffId: getStaffBackendId(staff),
@@ -1625,16 +1639,25 @@ if (approvalRecord.type === 'float_topup') {
       }
       case 'wallet_fund': {
         const acc = ensureStaffAccount(req.payload.staffId); const wallet=getStaffWalletCustomer(req.payload.staffId);
-        if (wallet) { wallet.transactions.push(txObj('credit', req.payload.amount, req.payload.note || 'Wallet funded', req.requestedByName, req.requestedBy, currentStaff()?.name || '', 'staff_wallet', businessDate())); recalcCustomerBalance(wallet); acc.walletBalance = Number(wallet.balance||0); }
-        addStaffEntry(req.payload.staffId, 'wallet_fund', req.payload.amount, 0, req.payload.note || 'Wallet funded');
+        if (wallet && !wallet.transactions?.some(tx => tx.sourceApprovalId === req.id && tx.type === 'credit')) {
+          wallet.transactions ||= [];
+          wallet.transactions.push(txObj('credit', req.payload.amount, req.payload.note || 'Wallet funded', req.requestedByName, req.requestedBy, currentStaff()?.name || '', 'staff_wallet', req.payload.date || businessDate(), { sourceApprovalId: req.id }));
+          recalcCustomerBalance(wallet); acc.walletBalance = Number(wallet.balance||0);
+          addStaffEntry(req.payload.staffId, 'wallet_fund', req.payload.amount, 0, req.payload.note || 'Wallet funded');
+        }
         break;
       }
       case 'debt_repayment': {
         const acc = ensureStaffAccount(req.payload.staffId); const wallet=getStaffWalletCustomer(req.payload.staffId);
-        if (wallet) { wallet.transactions.push(txObj('debit', req.payload.amount, req.payload.note || 'Debt repaid', req.requestedByName, req.requestedBy, currentStaff()?.name || '', 'staff_wallet', businessDate())); recalcCustomerBalance(wallet); acc.walletBalance = Number(wallet.balance||0); }
-        acc.debtBalance = Math.max(0, Number(acc.debtBalance||0) - Number(req.payload.amount||0));
-        addStaffEntry(req.payload.staffId, 'debt_repayment', req.payload.amount, 0, req.payload.note || 'Debt repaid');
-        state.businessExtras ||= []; state.businessExtras.unshift({ date:new Date().toISOString(), accountNumber: acc.accountNumber, details:'Staff debt repayment', kind:'credit', amount:Number(req.payload.amount||0), balanceAfter:0, receivedOrPaidBy: req.requestedByName, postedBy: currentStaff()?.name || req.requestedByName });
+        if (wallet && !wallet.transactions?.some(tx => tx.sourceApprovalId === req.id && tx.type === 'debit')) {
+          wallet.transactions ||= [];
+          wallet.transactions.push(txObj('debit', req.payload.amount, req.payload.note || 'Debt repaid', req.requestedByName, req.requestedBy, currentStaff()?.name || '', 'staff_wallet', req.payload.date || businessDate(), { sourceApprovalId: req.id }));
+          recalcCustomerBalance(wallet); acc.walletBalance = Number(wallet.balance||0);
+          acc.debtBalance = Math.max(0, Number(acc.debtBalance||0) - Number(req.payload.amount||0));
+          addStaffEntry(req.payload.staffId, 'debt_repayment', req.payload.amount, 0, req.payload.note || 'Debt repaid');
+          state.businessExtras ||= [];
+          if (!state.businessExtras.some(e => e.sourceApprovalId === req.id)) state.businessExtras.unshift({ sourceApprovalId:req.id, date:req.payload.date || businessDate(), accountNumber: acc.accountNumber, details:'Staff debt repayment', kind:'credit', amount:Number(req.payload.amount||0), balanceAfter:0, receivedOrPaidBy: req.requestedByName, postedBy: currentStaff()?.name || req.requestedByName });
+        }
         break;
       }
       case 'temp_grant': {
@@ -2324,7 +2347,7 @@ function hideProcessing() {
     return {
       account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation',
       customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', float_declaration:'Form', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
-      create_operational_account:'Operational Account', close_of_day:'Close of Day', temp_grant:'Temporary Grant'
+      create_operational_account:'Operational Account', close_of_day:'Close of Day', temp_grant:'Temporary Grant', wallet_fund:'Wallet Funding', debt_repayment:'Debt Repayment'
     }[type] || type;
   }
 
@@ -4901,15 +4924,21 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         </div>
       </div>
     `,[
-      {label:'Fund Wallet', onClick: ()=> {
+      {label:'Fund Wallet', onClick: async ()=> {
         const amt = Number(byId('walletFundAmt').value||0); if(!(amt>0)) return showToast('Enter amount');
-        createRequest('wallet_fund',{staffId:st.id,amount:amt,note:byId('walletNote').value.trim()}); closeModal(); render(); showToast('Wallet funding sent for approval');
+        const note = byId('walletNote').value.trim();
+        const result = await submitApprovalThroughGateway('wallet_fund',{source:'my_balance', staffId:st.id, staffName:st.name, amount:amt, note, date:businessDate()});
+        if (!result?.ok) return showToast(result?.error?.message || 'Could not send wallet funding for approval');
+        closeModal(); render(); showToast('Wallet funding sent for approval');
       }},
-      {label:'Pay Debt', onClick: ()=> {
+      {label:'Pay Debt', onClick: async ()=> {
         const amt = Number(byId('walletRepayAmt').value||0); if(!(amt>0)) return showToast('Enter amount');
         if (amt > Number(acc.walletBalance||0)) return showToast('Insufficient wallet balance');
         if (amt > Number(acc.debtBalance||0)) return showToast('Amount exceeds debt');
-        createRequest('debt_repayment',{staffId:st.id,amount:amt,note:byId('walletNote').value.trim()}); closeModal(); render(); showToast('Debt repayment sent for approval');
+        const note = byId('walletNote').value.trim();
+        const result = await submitApprovalThroughGateway('debt_repayment',{source:'my_balance', staffId:st.id, staffName:st.name, amount:amt, note, date:businessDate()});
+        if (!result?.ok) return showToast(result?.error?.message || 'Could not send debt repayment for approval');
+        closeModal(); render(); showToast('Debt repayment sent for approval');
       }},
       {label:'Close', className:'secondary', onClick: closeModal}
     ]);
