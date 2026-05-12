@@ -936,7 +936,17 @@
     if (result?.ok && Array.isArray(result.data)) {
       const existing = new Map((state.cod || []).map(item => [item.id, item]));
       result.data.forEach(item => {
-        existing.set(item.id, Object.assign({}, existing.get(item.id) || {}, item, { staffName: staffName(item.staffId) || item.staffName || item.staffId }));
+        const prev = existing.get(item.id) || {};
+        const merged = Object.assign({}, prev, item, {
+          staffName: staffName(item.staffId) || item.staffName || item.staffId
+        });
+        // Preserve locally-stored per-mode breakdown fields not stored in Supabase
+        ['totalCreditCash','totalCreditTransfer','totalDebitCash','totalDebitTransfer','formAmount'].forEach(key => {
+          if (merged[key] == null || merged[key] === 0) {
+            if (prev[key] != null && prev[key] !== 0) merged[key] = prev[key];
+          }
+        });
+        existing.set(item.id, merged);
       });
       state.cod = Array.from(existing.values()).sort((a,b)=>new Date(b.submittedAt||b.resolvedAt||b.date)-new Date(a.submittedAt||a.resolvedAt||a.date));
       reconcileBusinessDateFromClosures();
@@ -2292,7 +2302,10 @@ function hideProcessing() {
   }
 
   function renderApprovals() {
-    state.ui.codAdminDate ||= businessDate();
+    if (!state.ui.codAdminDate) {
+      const lastClosed = latestClosedBusinessDay();
+      state.ui.codAdminDate = lastClosed?.date || businessDate();
+    }
     state.ui.selectedApprovalIds ||= [];
     cleanupApprovalReviewLocks();
     const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','float_declaration'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
@@ -2321,6 +2334,7 @@ function hideProcessing() {
       const normalActions = !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
       return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${csActions}${normalActions}</td></tr>`;
     }).join('');
+    state.ui.codResolutionLimit ||= 10;
     const codRows=(state.cod||[]).filter(c=>{
       const codDate = String(c.date || c.businessDate || '').slice(0,10);
       // COD Resolution visibility must be controlled by the COD record itself,
@@ -2333,7 +2347,7 @@ function hideProcessing() {
       // records must remain visible until they are explicitly resolved.
       if (c.status === 'resolved' || c.status === 'draft') return false;
       return true;
-    }).map((c,i)=>{
+    }).slice(0, state.ui.codResolutionLimit || 10).map((c,i)=>{
       const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
@@ -2348,8 +2362,10 @@ function hideProcessing() {
     }).join('');
     const selected = state.ui.codAdminDate;
     const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const formAmount = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getOpeningBalanceForDate(rec.staffId, rec.date)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? codRemainingBalance(formAmount, Number(rec.totalCredits ?? ((rec.totalCreditCash||0)+(rec.totalCreditTransfer||0))), Number(rec.totalDebits ?? ((rec.totalDebitCash||0)+(rec.totalDebitTransfer||0))))) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(formAmount):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
+    const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
+    const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div></div>`:''}<div class="approvals-top-controls"><div class="action-row approvals-central-cod-row">${hasPermission('central_close_day')?'<button id="approvalsCentralCloseDayBtn">Central Close of Day</button>':''}</div><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="action-row approvals-central-cod-row">${hasPermission('central_close_day')?'<button id="approvalsCentralCloseDayBtn">Central Close of Day</button>':''}</div><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
   }
 
   function approvalSubmittedBy(a) {
@@ -4394,6 +4410,10 @@ function normalizeStaffLedgerEntryType(row) {
     if (less) less.onclick = () => { state.ui.approvalsLimit = Math.max(20, (state.ui.approvalsLimit || 20) - 20); save(); renderWorkspace(); };
     const codDate = byId('codAdminDate');
     if (codDate) codDate.onchange = () => { state.ui.codAdminDate = codDate.value || businessDate(); save(); renderWorkspace(); };
+    const codResolutionMore = byId('codResolutionMore');
+    if (codResolutionMore) codResolutionMore.onclick = () => { state.ui.codResolutionLimit = (state.ui.codResolutionLimit||10)+10; save(); renderWorkspace(); };
+    const codResolutionLess = byId('codResolutionLess');
+    if (codResolutionLess) codResolutionLess.onclick = () => { state.ui.codResolutionLimit = Math.max(10,(state.ui.codResolutionLimit||10)-10); save(); renderWorkspace(); };
     const approvalsCentralCloseDayBtn = byId('approvalsCentralCloseDayBtn');
     if (approvalsCentralCloseDayBtn) approvalsCentralCloseDayBtn.onclick = () => openCODModal();
     qq('[data-approval-section]').forEach(btn => btn.onclick = ()=>{ state.ui.approvalsSection = btn.dataset.approvalSection; save(); renderWorkspace(); smoothScrollToOpenedSegment('#approvalsSectionTabs'); });
