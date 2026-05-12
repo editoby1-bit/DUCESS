@@ -2750,7 +2750,7 @@ function nextPaint() {
       ['S/N','DATE','TYPE','ACCOUNT NAME','AMOUNT','DETAILS','BALANCE AFTER','POSTED BY'],
       ...rows.map(r => [
         r.sn,
-        r.date,
+        `‌${r.date || ''}`,
         String(r.type || '').toUpperCase(),
         r.accountName,
         Number(r.amount || 0),
@@ -2874,7 +2874,7 @@ function nextPaint() {
       ['S/N','DATE','TYPE','ACCOUNT NAME','AMOUNT','DETAILS','BALANCE AFTER','RECEIVED OR PAID BY','POSTED BY'],
       ...rows.map(r => [
         r.sn,
-        r.date,
+        `‌${r.date || ''}`,
         r.type,
         r.accountName,
         Number(r.amount || 0),
@@ -5270,7 +5270,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           return [cols.join(',')].concat(rows.map(r => cols.map(k => escapeCell(r[k])).join(','))).join('\n');
         })();
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+    a.href = URL.createObjectURL(new Blob(['﻿' + csv], {type:'text/csv;charset=utf-8;'}));
     a.download = filename; a.click();
   }
 
