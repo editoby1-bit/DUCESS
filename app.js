@@ -682,7 +682,11 @@
   }
 
   function fmtDate(iso) {
-    const d = new Date(iso);
+    const raw = String(iso || '');
+    // Keep DUCESS business dates as plain business dates.
+    // Parsing YYYY-MM-DD with new Date() can shift one day in some browser timezones.
+    const plainDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const d = plainDate ? new Date(Number(plainDate[1]), Number(plainDate[2]) - 1, Number(plainDate[3]), 12, 0, 0) : new Date(raw);
     return isNaN(d) ? iso : DATE_FMT.format(d);
   }
 
