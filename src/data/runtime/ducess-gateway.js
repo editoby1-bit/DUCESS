@@ -204,6 +204,7 @@ const ROLE_DEFAULT_TOOLS = {
       businessDate: row.businessDate || row.business_date || row.date || '',
       date: row.businessDate || row.business_date || row.date || '',
       openingBalance: Number(row.openingBalance ?? row.opening_balance ?? 0),
+      formAmount: Number(row.formAmount ?? row.openingBalance ?? row.opening_balance ?? 0),
       floatTopUps: Number(row.floatTopUps ?? row.float_topups ?? 0),
       effectiveOpeningBalance: Number(row.effectiveOpeningBalance ?? row.effective_opening_balance ?? 0),
       totalCredits: Number(row.totalCredits ?? row.total_credits ?? 0),
