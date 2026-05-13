@@ -5012,16 +5012,29 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   font-size:18px;
 }
 .tellering-inline-meta{
-  margin-top:14px;
+  margin-top:8px;
 }
 .tellering-meta-line{
   display:grid;
-  grid-template-columns:minmax(180px,1.05fr) minmax(210px,1fr) 160px minmax(210px,1.15fr);
-  gap:14px;
+  grid-template-columns:minmax(140px,1fr) minmax(160px,1fr) 140px minmax(160px,1fr);
+  gap:10px;
   align-items:end;
 }
 .tellering-meta-line .field{
   min-width:0;
+}
+.tellering-meta-line .field label{
+  font-size:10px !important;
+  text-transform:uppercase;
+  letter-spacing:0.04em;
+  color:var(--muted,#888);
+  margin-bottom:3px !important;
+}
+.tellering-meta-line .entry-input,
+.tellering-meta-line .display-field{
+  font-size:13px;
+  padding-top:5px;
+  padding-bottom:5px;
 }
 .inline-mode-toggle{
   display:flex;
@@ -5651,6 +5664,18 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   display:flex;
   flex-direction:column;
   gap:8px;
+  padding-bottom:0;
+}
+
+.posting-row-commission-toggle.subtle-commission-toggle-row{
+  margin-top:2px;
+  padding-bottom:0;
+}
+
+/* Posting card ends cleanly after last content row */
+.polished-posting-modal + .form-card,
+.posting-modal-rows.polished-posting-modal{
+  padding-bottom:14px;
 }
 
 .posting-row{
@@ -5677,14 +5702,16 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 
 .posting-acc-search-inline #txAcc{
-  width:80px;
-  min-width:80px;
-  max-width:80px;
+  width:120px;
+  min-width:120px;
+  max-width:120px;
   margin:0;
 }
 
 .posting-acc-search-inline #txSearch{
   margin:0;
+  width:auto;
+  min-width:0;
 }
 
 /* Inline pill KPIs — compact, no box, just label+value pairs */
