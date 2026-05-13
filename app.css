@@ -12081,3 +12081,198 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   font-size:14px !important;
   margin-top:0 !important;
 }
+
+/* ===== 2026-05-13 surgical UI polish: Credit/Debit KPI beside Search =====
+   Scope: Tellering Credit/Debit posting sheet only. No logic changes. */
+@media (min-width: 901px){
+  .tellering-sheet.journal-sheet.standalone-posting-sheet{
+    width:min(720px, calc(100vw - 48px)) !important;
+    max-width:min(720px, calc(100vw - 48px)) !important;
+    padding:13px 16px 14px !important;
+  }
+
+  .standalone-posting-sheet .polished-posting-modal{
+    max-width:680px !important;
+    gap:8px !important;
+  }
+
+  .standalone-posting-sheet .sheet-head-row.single-head{
+    margin-bottom:8px !important;
+  }
+
+  .standalone-posting-sheet .sheet-title{
+    font-size:17px !important;
+    line-height:1.05 !important;
+  }
+
+  .standalone-posting-sheet .sheet-super{
+    font-size:10px !important;
+    letter-spacing:.22em !important;
+    line-height:1 !important;
+  }
+
+  .standalone-posting-sheet .posting-row-top{
+    display:grid !important;
+    grid-template-columns:max-content max-content !important;
+    justify-content:start !important;
+    align-items:center !important;
+    column-gap:8px !important;
+    width:max-content !important;
+    max-width:100% !important;
+  }
+
+  .standalone-posting-sheet .posting-row-top .posting-row-left{
+    flex:0 0 auto !important;
+    width:max-content !important;
+    min-width:0 !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-group.posting-inline-account{
+    display:grid !important;
+    grid-template-columns:88px 78px 62px !important;
+    gap:3px 6px !important;
+    align-items:center !important;
+    width:max-content !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-account .sheet-label,
+  .standalone-posting-sheet .posting-row-name .sheet-label,
+  .standalone-posting-sheet .posting-row-amount .sheet-label{
+    font-size:9px !important;
+    line-height:1 !important;
+    letter-spacing:.01em !important;
+    white-space:nowrap !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-account #txAcc{
+    width:78px !important;
+    min-width:78px !important;
+    max-width:78px !important;
+    height:30px !important;
+    min-height:30px !important;
+    padding:5px 8px !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-account #txSearch{
+    width:62px !important;
+    min-width:62px !important;
+    max-width:62px !important;
+    height:28px !important;
+    min-height:28px !important;
+    padding:4px 8px !important;
+    font-size:11px !important;
+  }
+
+  .standalone-posting-sheet .posting-row-top .posting-kpis,
+  .standalone-posting-sheet .compact-posting-kpis{
+    display:flex !important;
+    flex:0 0 auto !important;
+    justify-content:flex-start !important;
+    align-items:center !important;
+    gap:5px !important;
+    margin:0 !important;
+    width:max-content !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi.small,
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi.small{
+    min-width:58px !important;
+    max-width:86px !important;
+    min-height:30px !important;
+    padding:5px 8px !important;
+    border-radius:11px !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi.small:nth-child(2),
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi.small:nth-child(2){
+    min-width:88px !important;
+    max-width:96px !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi-label,
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi-label{
+    font-size:9px !important;
+    line-height:.95 !important;
+    letter-spacing:.025em !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi-value,
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi-value{
+    font-size:12px !important;
+    line-height:1 !important;
+    margin-top:1px !important;
+  }
+
+  .standalone-posting-sheet .posting-row-name{
+    display:grid !important;
+    grid-template-columns:88px 506px !important;
+    gap:3px 6px !important;
+    align-items:center !important;
+    width:max-content !important;
+    max-width:100% !important;
+  }
+
+  .standalone-posting-sheet .posting-row-name #txName,
+  .standalone-posting-sheet .posting-row-name .value-wide{
+    width:506px !important;
+    max-width:506px !important;
+    min-height:32px !important;
+    height:32px !important;
+    padding:5px 10px !important;
+  }
+
+  .standalone-posting-sheet .posting-row-amount{
+    display:grid !important;
+    grid-template-columns:88px 150px auto auto !important;
+    gap:3px 6px !important;
+    align-items:center !important;
+    width:max-content !important;
+    max-width:100% !important;
+  }
+
+  .standalone-posting-sheet .posting-row-amount #txAmount{
+    width:150px !important;
+    min-width:150px !important;
+    max-width:150px !important;
+    height:32px !important;
+    min-height:32px !important;
+    padding:5px 8px !important;
+  }
+
+  .standalone-posting-sheet .posting-row-amount #txPostSingle,
+  .standalone-posting-sheet .posting-row-amount #txJournalAdd{
+    height:26px !important;
+    min-height:26px !important;
+    padding:4px 9px !important;
+    font-size:11px !important;
+    width:auto !important;
+    min-width:0 !important;
+  }
+
+  .standalone-posting-sheet .posting-row-commission-toggle{
+    margin-top:2px !important;
+  }
+
+  .standalone-posting-sheet .commission-toggle-chip{
+    font-size:10px !important;
+  }
+
+  .tellering-inline-meta.tellering-entry-card{
+    width:min(720px, calc(100vw - 48px)) !important;
+    max-width:min(720px, calc(100vw - 48px)) !important;
+    padding:9px 12px !important;
+  }
+
+  .tellering-inline-meta .tellering-meta-line.compact-fields-inline{
+    grid-template-columns:210px 132px 160px 210px !important;
+    gap:6px 8px !important;
+    align-items:end !important;
+  }
+
+  .tellering-inline-meta .entry-input,
+  .tellering-inline-meta .display-field{
+    height:32px !important;
+    min-height:32px !important;
+    padding:5px 9px !important;
+  }
+}
