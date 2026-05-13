@@ -12307,3 +12307,215 @@ label.tx-toggle-pill span { font-size: 10px !important; }
     padding:5px 9px !important;
   }
 }
+
+/* ===== 2026-05-13 surgical UI polish follow-up: Credit/Debit compact restore =====
+   Scope: Tellering Credit/Debit modal only. Restores account input/search size,
+   keeps KPIs after Search, reduces the card to end after Generate Journal/Variance,
+   and polishes the lower Received By/Mode/Business Date/Details strip. */
+@media (min-width: 901px){
+  .tellering-sheet.journal-sheet.standalone-posting-sheet{
+    width: min(650px, calc(100vw - 48px)) !important;
+    max-width: min(650px, calc(100vw - 48px)) !important;
+    padding: 14px 18px 15px !important;
+  }
+
+  .standalone-posting-sheet .polished-posting-modal{
+    max-width: 610px !important;
+    gap: 8px !important;
+  }
+
+  .standalone-posting-sheet .sheet-head-row.single-head{
+    margin-bottom: 10px !important;
+  }
+
+  .standalone-posting-sheet .sheet-title{
+    font-size: 18px !important;
+    line-height: 1.05 !important;
+  }
+
+  .standalone-posting-sheet .posting-row-top{
+    display: grid !important;
+    grid-template-columns: max-content max-content !important;
+    column-gap: 8px !important;
+    align-items: center !important;
+    justify-content: start !important;
+    width: max-content !important;
+    max-width: 100% !important;
+  }
+
+  .standalone-posting-sheet .posting-row-top .posting-row-left{
+    width: max-content !important;
+    min-width: 0 !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-group.posting-inline-account{
+    display: grid !important;
+    grid-template-columns: 82px 86px 72px !important;
+    gap: 4px 7px !important;
+    align-items: center !important;
+    width: max-content !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-account .sheet-label,
+  .standalone-posting-sheet .posting-row-name .sheet-label,
+  .standalone-posting-sheet .posting-row-amount .sheet-label{
+    font-size: 9.5px !important;
+    line-height: 1 !important;
+    letter-spacing: .01em !important;
+    white-space: nowrap !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-account #txAcc{
+    width: 86px !important;
+    min-width: 86px !important;
+    max-width: 86px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 6px 9px !important;
+    text-align: left !important;
+  }
+
+  .standalone-posting-sheet .posting-inline-account #txSearch{
+    width: 72px !important;
+    min-width: 72px !important;
+    max-width: 72px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+    border-radius: 13px !important;
+    white-space: nowrap !important;
+  }
+
+  .standalone-posting-sheet .posting-row-top .posting-kpis,
+  .standalone-posting-sheet .compact-posting-kpis{
+    display: flex !important;
+    flex: 0 0 auto !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 7px !important;
+    margin: 0 !important;
+    width: max-content !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi.small,
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi.small{
+    min-width: 54px !important;
+    max-width: 78px !important;
+    min-height: 28px !important;
+    padding: 3px 7px !important;
+    border-radius: 9px !important;
+    box-shadow: none !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi.small:nth-child(2),
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi.small:nth-child(2){
+    min-width: 70px !important;
+    max-width: 78px !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi-label,
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi-label{
+    font-size: 8.5px !important;
+    line-height: .95 !important;
+    letter-spacing: .025em !important;
+  }
+
+  .standalone-posting-sheet .compact-posting-kpis .mini-kpi-value,
+  .standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi-value{
+    font-size: 12px !important;
+    line-height: 1 !important;
+    margin-top: 1px !important;
+  }
+
+  .standalone-posting-sheet .posting-row-name{
+    display: grid !important;
+    grid-template-columns: 82px 506px !important;
+    gap: 4px 7px !important;
+    align-items: center !important;
+    width: max-content !important;
+    max-width: 100% !important;
+  }
+
+  .standalone-posting-sheet .posting-row-name #txName,
+  .standalone-posting-sheet .posting-row-name .value-wide{
+    width: 506px !important;
+    max-width: 506px !important;
+    min-height: 33px !important;
+    height: 33px !important;
+    padding: 6px 10px !important;
+  }
+
+  .standalone-posting-sheet .posting-row-amount{
+    display: grid !important;
+    grid-template-columns: 82px 150px auto auto !important;
+    gap: 4px 7px !important;
+    align-items: center !important;
+    width: max-content !important;
+    max-width: 100% !important;
+  }
+
+  .standalone-posting-sheet .posting-row-amount #txAmount{
+    width: 150px !important;
+    min-width: 150px !important;
+    max-width: 150px !important;
+    height: 33px !important;
+    min-height: 33px !important;
+    padding: 6px 9px !important;
+  }
+
+  .standalone-posting-sheet .posting-row-amount #txPostSingle,
+  .standalone-posting-sheet .posting-row-amount #txJournalAdd{
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+    border-radius: 13px !important;
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  .standalone-posting-sheet .posting-row-commission-toggle{
+    margin-top: 4px !important;
+  }
+
+  .standalone-posting-sheet .commission-toggle-chip{
+    font-size: 10.5px !important;
+  }
+
+  .tellering-inline-meta.tellering-entry-card{
+    width: min(650px, calc(100vw - 48px)) !important;
+    max-width: min(650px, calc(100vw - 48px)) !important;
+    padding: 8px 10px 9px !important;
+  }
+
+  .tellering-inline-meta .tellering-meta-line.compact-fields-inline{
+    display: grid !important;
+    grid-template-columns: 200px 118px 150px 200px !important;
+    gap: 6px 8px !important;
+    align-items: end !important;
+  }
+
+  .tellering-inline-meta .field label,
+  .tellering-inline-meta .mode-label,
+  .tellering-inline-meta label{
+    font-size: 9px !important;
+    line-height: 1 !important;
+    letter-spacing: .04em !important;
+  }
+
+  .tellering-inline-meta .entry-input,
+  .tellering-inline-meta .display-field{
+    height: 31px !important;
+    min-height: 31px !important;
+    padding: 5px 9px !important;
+    border-radius: 9px !important;
+  }
+
+  .tellering-inline-meta .mode-options,
+  .tellering-inline-meta .mode-field,
+  .tellering-inline-meta .radio-row{
+    gap: 8px !important;
+    align-items: center !important;
+  }
+}
