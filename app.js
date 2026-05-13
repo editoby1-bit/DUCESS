@@ -2145,28 +2145,26 @@ function hideProcessing() {
             </div>
           </div>
           <div class="posting-modal-rows polished-posting-modal">
-            <div class="posting-row posting-row-top">
-              <div class="posting-row-left">
-                <div class="posting-inline-group posting-inline-account">
-                  <label class="sheet-label posting-label-account" for="txAcc">Account Number</label>
-                  <input id="txAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
-                  <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
+            <div class="posting-row posting-row-acc-kpi">
+              <div class="posting-acc-search-inline">
+                <label class="sheet-label posting-label-account" for="txAcc">Acct No.</label>
+                <input id="txAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
+                <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
+                <div class="posting-kpis-inline">
+                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">FORM</span><span class="mini-kpi-pill-value">${money(opening)}</span></div>
+                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">BALANCE</span><span class="mini-kpi-pill-value" id="postingRunningFloat">${money(Math.max(0, running))}</span></div>
+                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">VARIANCE</span><span class="mini-kpi-pill-value balance-negative" id="postingVariance">${money(Math.max(0, -running))}</span></div>
                 </div>
-              </div>
-              <div class="posting-kpis compact-posting-kpis">
-                <div class="mini-kpi small"><span class="mini-kpi-label">Form</span><span class="mini-kpi-value">${money(opening)}</span></div>
-                <div class="mini-kpi small"><span class="mini-kpi-label">Remaining Balance</span><span class="mini-kpi-value" id="postingRunningFloat">${money(Math.max(0, running))}</span></div>
-                <div class="mini-kpi small"><span class="mini-kpi-label">Variance</span><span class="mini-kpi-value balance-negative" id="postingVariance">${money(Math.max(0, -running))}</span></div>
               </div>
             </div>
 
             <div class="posting-row posting-row-name">
-              <label class="sheet-label posting-label-name" for="txName">Account Name</label>
+              <label class="sheet-label posting-label-name" for="txName">Acct Name</label>
               <div class="display-field value-wide" id="txName">—</div>
             </div>
 
             <div class="posting-row posting-row-amount">
-              <label class="sheet-label amount-primary-label" for="txAmount">Amount</label>
+              <label class="sheet-label posting-label-name" for="txAmount">Amount</label>
               <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}" />
               <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
               ${journalVisible ? '' : `<button id="txJournalAdd" class="sheet-btn secondary tiny-btn ultra-compact-btn">Generate Journal</button>`}
