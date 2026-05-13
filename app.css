@@ -12052,250 +12052,32 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   border-radius:10px !important;
 }
 
-/* ===== 2026-05-13 surgical UI polish: compact Credit/Debit modal only ===== */
-@media (min-width: 981px){
-  /* Target only the single Credit/Debit posting card and its footer meta card. */
-  .tellering-stack{
-    gap:8px !important;
-    width:fit-content !important;
-    max-width:calc(100vw - 340px) !important;
-    margin-left:auto !important;
-    margin-right:auto !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet{
-    width:760px !important;
-    max-width:760px !important;
-    min-height:0 !important;
-    padding:16px 18px 14px !important;
-    border-radius:14px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .sheet-head-row{
-    margin-bottom:16px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .sheet-super{
-    font-size:10px !important;
-    letter-spacing:.28em !important;
-    line-height:1 !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .sheet-title{
-    font-size:22px !important;
-    line-height:1.05 !important;
-    margin-top:5px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .polished-posting-modal{
-    position:relative !important;
-    gap:10px !important;
-    padding:0 !important;
-    --posting-left-column-width:520px !important;
-    --posting-kpi-strip-width:228px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-top{
-    display:flex !important;
-    justify-content:flex-start !important;
-    align-items:center !important;
-    min-height:36px !important;
-    gap:8px !important;
-    padding-right:0 !important;
-    width:520px !important;
-    max-width:520px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-top .posting-row-left{
-    width:520px !important;
-    max-width:520px !important;
-    flex:0 0 520px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-inline-group.posting-inline-account{
-    display:flex !important;
-    align-items:center !important;
-    gap:6px !important;
-    width:fit-content !important;
-    max-width:520px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-inline-group .sheet-label,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-name .sheet-label,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-amount .sheet-label{
-    flex:0 0 92px !important;
-    width:92px !important;
-    min-width:92px !important;
-    max-width:92px !important;
-    margin:0 !important;
-    font-size:10px !important;
-    line-height:1.05 !important;
-    letter-spacing:0 !important;
-    text-transform:none !important;
-    white-space:nowrap !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet #txAcc{
-    width:78px !important;
-    min-width:78px !important;
-    max-width:78px !important;
-    height:34px !important;
-    padding:5px 8px !important;
-    border-radius:10px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet #txSearch,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet #txPostSingle,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet #txJournalAdd{
-    width:auto !important;
-    min-width:0 !important;
-    max-width:none !important;
-    min-height:0 !important;
-    height:30px !important;
-    padding:5px 13px !important;
-    border-radius:999px !important;
-    font-size:12px !important;
-    line-height:1 !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet #txSearch{
-    padding-left:18px !important;
-    padding-right:18px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-name,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-amount{
-    display:flex !important;
-    align-items:center !important;
-    gap:6px !important;
-    width:520px !important;
-    max-width:520px !important;
-    padding-right:0 !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-name #txName,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-name .value-wide{
-    width:392px !important;
-    min-width:392px !important;
-    max-width:392px !important;
-    height:34px !important;
-    min-height:34px !important;
-    padding:7px 12px !important;
-    border-radius:10px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet #txAmount{
-    width:145px !important;
-    min-width:145px !important;
-    max-width:145px !important;
-    height:34px !important;
-    padding:5px 9px !important;
-    border-radius:10px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .compact-posting-kpis,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-top .posting-kpis{
-    position:absolute !important;
-    top:76px !important;
-    right:14px !important;
-    display:flex !important;
-    align-items:center !important;
-    justify-content:flex-end !important;
-    gap:6px !important;
-    width:auto !important;
-    min-width:0 !important;
-    max-width:none !important;
-    margin:0 !important;
-    flex:0 0 auto !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .compact-posting-kpis .mini-kpi.small,
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-top .posting-kpis .mini-kpi.small{
-    width:auto !important;
-    min-width:74px !important;
-    max-width:112px !important;
-    min-height:42px !important;
-    padding:7px 10px !important;
-    border-radius:14px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .compact-posting-kpis .mini-kpi-label{
-    font-size:10px !important;
-    line-height:1 !important;
-    letter-spacing:.03em !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .compact-posting-kpis .mini-kpi-value{
-    font-size:14px !important;
-    line-height:1 !important;
-    margin-top:2px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .posting-row-commission-toggle{
-    margin-top:8px !important;
-    width:fit-content !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .commission-toggle-chip{
-    font-size:12px !important;
-    gap:5px !important;
-  }
-
-  .tellering-stack > .journal-sheet.standalone-posting-sheet .commission-toggle-chip input{
-    width:13px !important;
-    height:13px !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta.tellering-entry-card{
-    width:720px !important;
-    max-width:720px !important;
-    padding:10px 12px !important;
-    border-radius:12px !important;
-    margin-left:auto !important;
-    margin-right:auto !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta .tellering-meta-line{
-    display:grid !important;
-    grid-template-columns:240px 150px 180px 220px !important;
-    gap:8px !important;
-    align-items:end !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta .field{
-    gap:3px !important;
-    min-width:0 !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta .field label{
-    font-size:10px !important;
-    line-height:1 !important;
-    margin-bottom:2px !important;
-    letter-spacing:.04em !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta .entry-input,
-  .tellering-stack > .tellering-inline-meta .display-field{
-    height:34px !important;
-    min-height:34px !important;
-    padding:6px 10px !important;
-    border-radius:10px !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta .tx-mode-toggle{
-    gap:6px !important;
-    align-items:center !important;
-    min-height:34px !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta .tx-toggle-pill{
-    padding:3px 5px !important;
-    font-size:10px !important;
-    gap:4px !important;
-  }
-
-  .tellering-stack > .tellering-inline-meta .tx-toggle-pill input{
-    width:14px !important;
-    height:14px !important;
-  }
+/* FINAL CREDIT/DEBIT KPI INLINE COMPACT PATCH */
+.polished-credit-grid{
+  grid-template-columns:130px 140px auto 1fr !important;
+  column-gap:10px !important;
+  row-gap:10px !important;
+  max-width:760px !important;
+}
+.polished-credit-grid .top-kpi-row{
+  grid-column:3 / 5 !important;
+  grid-row:1 / 2 !important;
+  display:flex !important;
+  gap:8px !important;
+  align-items:center !important;
+}
+.polished-credit-grid .value-wide{
+  grid-column:2 / 5 !important;
+}
+.tellering-inline-kpis .kpi.small{
+  padding:6px 10px !important;
+  min-height:auto !important;
+}
+.tellering-inline-kpis .kpi.small .label{
+  font-size:10px !important;
+  line-height:1.05 !important;
+}
+.tellering-inline-kpis .kpi.small .number{
+  font-size:14px !important;
+  margin-top:0 !important;
 }
