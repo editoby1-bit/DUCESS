@@ -5018,18 +5018,18 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 /* Meta card itself — tight padding so Details input isn't clipped by border-radius */
 .tellering-inline-meta.form-card{
   padding:10px 12px;
-  overflow:visible;
+  overflow:hidden;
 }
 .tellering-meta-line{
   display:grid;
-  grid-template-columns:1fr 1fr 120px 1fr;
+  grid-template-columns:1fr 1fr 1fr 1fr;
   gap:8px;
   align-items:end;
-  overflow:visible;
+  overflow:hidden;
 }
 .tellering-meta-line .field{
   min-width:0;
-  overflow:visible;
+  overflow:hidden;
 }
 .tellering-meta-line .field label{
   font-size:9px !important;
@@ -5685,7 +5685,7 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 
 /* Top posting card — tight padding, ends right after charges row */
 .posting-modal-rows.polished-posting-modal{
-  padding:12px 12px 10px;
+  padding:10px 12px 8px;
 }
 
 .posting-row{
@@ -5713,14 +5713,14 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 
 /* Account number — wide enough for 4 digits */
 .posting-acc-search-inline #txAcc{
-  width:52px;
-  min-width:52px;
-  max-width:52px;
+  width:72px;
+  min-width:72px;
+  max-width:72px;
   margin:0;
   font-size:13px;
   padding-left:6px;
   padding-right:4px;
-  letter-spacing:0.05em;
+  letter-spacing:0.02em;
 }
 
 /* Search button — tight, just wraps the label */
@@ -5815,6 +5815,19 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 
 .posting-inline-account #txJournalAdd{
   margin:0;
+}
+
+/* Override global button padding for posting search — must beat !important rule at line 6076 */
+.posting-acc-search-inline #txSearch.sheet-btn,
+.posting-acc-search-inline #txSearch{
+  padding:3px 10px !important;
+  font-size:11px !important;
+  border-radius:6px !important;
+  height:auto !important;
+  min-height:auto !important;
+  line-height:1.3 !important;
+  width:auto !important;
+  min-width:0 !important;
 }
 
 .amount-inline-label,
@@ -6073,7 +6086,8 @@ body{background:#f4f7fa;}
 
 .action-row button, .sheet-btn, button{border-radius:10px;}
 .tiny-btn,.sheet-btn.tiny-btn,.compact-action-row button,.action-row.compact-action-row button{padding:7px 12px !important;font-size:12px !important;line-height:1.1 !important;border-radius:999px !important;min-height:auto !important;}
-#lookupBtn,#searchPhotoBtn,#openStatementBtn,#txSearch,#txPostSingle,#txJournalAdd,#stmtGenerate,#stmtPrintBtn,#oeSubmit,#oaCreate,#submitOpening,.cs-inline-btn,#journalAddRow,#journalCollapseBtn,#journalCollapseTopBtn{padding:7px 12px !important;font-size:12px !important;border-radius:999px !important;min-width:auto !important;}
+#lookupBtn,#searchPhotoBtn,#openStatementBtn,#txPostSingle,#txJournalAdd,#stmtGenerate,#stmtPrintBtn,#oeSubmit,#oaCreate,#submitOpening,.cs-inline-btn,#journalAddRow,#journalCollapseBtn,#journalCollapseTopBtn{padding:7px 12px !important;font-size:12px !important;border-radius:999px !important;min-width:auto !important;}
+/* txSearch handled separately per context — see posting-acc-search-inline override */
 
 .redesigned-check-grid{grid-template-columns:140px minmax(180px,240px) 84px !important;gap:4px 8px !important;align-items:end;}
 .redesigned-check-grid .value-wide{grid-column:2 / 4 !important;}
