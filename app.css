@@ -5017,19 +5017,19 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 /* Meta card itself — tight padding so Details input isn't clipped by border-radius */
 .tellering-inline-meta.form-card{
-  padding:10px 10px 10px 12px;
+  padding:10px 16px 10px 12px;
   overflow:hidden;
 }
 .tellering-meta-line{
   display:grid;
-  grid-template-columns:1fr 1fr 1fr 1fr;
-  gap:8px;
+  grid-template-columns:1fr minmax(148px,1.2fr) 1fr 1fr;
+  gap:10px;
   align-items:end;
-  overflow:hidden;
+  overflow:visible;
 }
 .tellering-meta-line .field{
   min-width:0;
-  overflow:hidden;
+  overflow:visible;
 }
 .tellering-meta-line .field label{
   font-size:9px !important;
@@ -5696,6 +5696,9 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 .standalone-posting-sheet.form-card,
 .tellering-sheet.form-card{
   padding-bottom:0 !important;
+}
+.standalone-posting-sheet{
+  padding-bottom:6px !important;
 }
 
 .posting-row{
