@@ -5017,7 +5017,7 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 /* Meta card itself — tight padding so Details input isn't clipped by border-radius */
 .tellering-inline-meta.form-card{
-  padding:10px 12px;
+  padding:10px 10px 10px 12px;
   overflow:hidden;
 }
 .tellering-meta-line{
@@ -5049,11 +5049,16 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 .inline-mode-toggle{
   display:flex;
-  gap:10px;
+  gap:4px;
   flex-wrap:nowrap;
+  align-items:center;
 }
 .inline-mode-toggle .tx-toggle-pill{
   margin:0;
+  font-size:10px;
+}
+.inline-mode-toggle .tx-toggle-pill span{
+  font-size:10px;
 }
 .standalone-journal-pane{
   margin-top:18px;
@@ -5685,7 +5690,12 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 
 /* Top posting card — tight padding, ends right after charges row */
 .posting-modal-rows.polished-posting-modal{
-  padding:10px 12px 8px;
+  padding:10px 12px 6px;
+}
+/* The tellering-sheet form-card wrapping posting content — no extra bottom */
+.standalone-posting-sheet.form-card,
+.tellering-sheet.form-card{
+  padding-bottom:0 !important;
 }
 
 .posting-row{
@@ -6961,7 +6971,7 @@ body[data-theme="ducess-sheet"] .module-hub{
   .reactivation-card .reactivation-bottom-actions{margin-top:10px !important; justify-content:flex-start !important; gap:12px !important;}
 
   .posting-inline-account{gap:8px !important;}
-  #txAcc.short-code{width:6ch !important; max-width:6ch !important; min-width:6ch !important;}
+  #txAcc.short-code{width:68px !important; max-width:68px !important; min-width:68px !important;}
   #txSearch{margin-left:0 !important;}
 }
 
