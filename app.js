@@ -193,22 +193,27 @@
   }
 
   function seed() {
-    const s = {
-      staff: [
-        { id:'st1', name:'Daniel Johnson', role:'customer_service', active:true },
-        { id:'st2', name:'Mary Daniel', role:'teller', active:true },
-        { id:'st3', name:'Francis Etta', role:'approving_officer', active:true },
-        { id:'st4', name:'Admin Officer', role:'admin_officer', active:true }
-      ],
-      customers: [
-        { id:'c1', accountNumber:'1000', oldAccountNumber:'A-221', name:'Emma Johnson', address:'14 Palm Street', nin:'12345678901', bvn:'2200114422', phone:'08012345678', balance:32000, photo:'', active:true, createdAt:new Date().toISOString(), transactions:[
+    // In Supabase mode, seed with empty staff/customers — real data comes from Supabase sync.
+    // Demo data is only used in local (non-Supabase) mode.
+    const isSupabase = typeof gateway !== 'undefined' && gateway?.__meta?.adapter === 'supabase';
+    const demoStaff = isSupabase ? [] : [
+      { id:'st1', name:'Daniel Johnson', role:'customer_service', active:true },
+      { id:'st2', name:'Mary Daniel', role:'teller', active:true },
+      { id:'st3', name:'Francis Etta', role:'approving_officer', active:true },
+      { id:'st4', name:'Admin Officer', role:'admin_officer', active:true }
+    ];
+    const demoCustomers = isSupabase ? [] : [
+      { id:'c1', accountNumber:'1000', oldAccountNumber:'A-221', name:'Emma Johnson', address:'14 Palm Street', nin:'12345678901', bvn:'2200114422', phone:'08012345678', balance:32000, photo:'', active:true, createdAt:new Date().toISOString(), transactions:[
           txObj('credit', 15000, 'Opening contribution', 'SYSTEM', 'system', null, 'customer', today()),
           txObj('credit', 17000, 'Cash contribution', 'SYSTEM', 'system', null, 'customer', today())
         ] },
-        { id:'c2', accountNumber:'1001', oldAccountNumber:'A-222', name:'Uduak Peters', address:'Market Road', nin:'22345678901', bvn:'2200118899', phone:'08022223333', balance:6500, photo:'', active:true, createdAt:new Date().toISOString(), transactions:[
+      { id:'c2', accountNumber:'1001', oldAccountNumber:'A-222', name:'Uduak Peters', address:'Market Road', nin:'22345678901', bvn:'2200118899', phone:'08022223333', balance:6500, photo:'', active:true, createdAt:new Date().toISOString(), transactions:[
           txObj('credit', 6500, 'Savings credit', 'SYSTEM', 'system', null, 'customer', today())
         ] }
-      ],
+    ];
+    const s = {
+      staff: demoStaff,
+      customers: demoCustomers,
       approvals: [],
       audit: [],
       staffAccounts: {},
