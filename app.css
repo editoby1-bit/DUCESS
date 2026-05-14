@@ -5012,29 +5012,40 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   font-size:18px;
 }
 .tellering-inline-meta{
-  margin-top:8px;
+  margin-top:6px;
+  overflow:visible;
+}
+/* Meta card itself — tight padding so Details input isn't clipped by border-radius */
+.tellering-inline-meta.form-card{
+  padding:10px 12px;
+  overflow:visible;
 }
 .tellering-meta-line{
   display:grid;
-  grid-template-columns:minmax(140px,1fr) minmax(160px,1fr) 140px minmax(160px,1fr);
-  gap:10px;
+  grid-template-columns:1fr 1fr 120px 1fr;
+  gap:8px;
   align-items:end;
+  overflow:visible;
 }
 .tellering-meta-line .field{
   min-width:0;
+  overflow:visible;
 }
 .tellering-meta-line .field label{
-  font-size:10px !important;
+  font-size:9px !important;
   text-transform:uppercase;
   letter-spacing:0.04em;
   color:var(--muted,#888);
-  margin-bottom:3px !important;
+  margin-bottom:2px !important;
+  display:block;
 }
 .tellering-meta-line .entry-input,
 .tellering-meta-line .display-field{
-  font-size:13px;
-  padding-top:5px;
-  padding-bottom:5px;
+  font-size:12px;
+  padding-top:4px;
+  padding-bottom:4px;
+  width:100%;
+  box-sizing:border-box;
 }
 .inline-mode-toggle{
   display:flex;
@@ -5663,19 +5674,18 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 .polished-posting-modal{
   display:flex;
   flex-direction:column;
-  gap:8px;
+  gap:7px;
   padding-bottom:0;
 }
 
 .posting-row-commission-toggle.subtle-commission-toggle-row{
-  margin-top:2px;
+  margin-top:1px;
   padding-bottom:0;
 }
 
-/* Posting card ends cleanly after last content row */
-.polished-posting-modal + .form-card,
+/* Top posting card — tight padding, ends right after charges row */
 .posting-modal-rows.polished-posting-modal{
-  padding-bottom:14px;
+  padding:12px 12px 10px;
 }
 
 .posting-row{
@@ -5690,36 +5700,47 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 .posting-acc-search-inline{
   display:flex;
   align-items:center;
-  gap:8px;
-  flex-wrap:wrap;
+  gap:6px;
+  flex-wrap:nowrap;
 }
 
 .posting-acc-search-inline .sheet-label.posting-label-account{
   margin:0;
   flex:0 0 auto;
-  font-size:11px;
+  font-size:10px;
   white-space:nowrap;
 }
 
+/* Account number — wide enough for 4 digits */
 .posting-acc-search-inline #txAcc{
-  width:120px;
-  min-width:120px;
-  max-width:120px;
+  width:52px;
+  min-width:52px;
+  max-width:52px;
   margin:0;
+  font-size:13px;
+  padding-left:6px;
+  padding-right:4px;
+  letter-spacing:0.05em;
 }
 
+/* Search button — tight, just wraps the label */
 .posting-acc-search-inline #txSearch{
   margin:0;
-  width:auto;
+  padding:4px 8px;
+  font-size:11px;
+  line-height:1.2;
+  height:auto;
   min-width:0;
+  width:auto;
+  border-radius:6px;
 }
 
-/* Inline pill KPIs — compact, no box, just label+value pairs */
+/* Inline pill KPIs */
 .posting-kpis-inline{
   display:flex;
   align-items:center;
-  gap:10px;
-  margin-left:4px;
+  gap:8px;
+  margin-left:6px;
 }
 
 .mini-kpi-pill{
@@ -5730,7 +5751,7 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 
 .mini-kpi-pill-label{
-  font-size:9px;
+  font-size:8px;
   font-weight:600;
   letter-spacing:0.04em;
   color:var(--muted, #888);
@@ -5740,7 +5761,7 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 
 .mini-kpi-pill-value{
-  font-size:13px;
+  font-size:12px;
   font-weight:700;
   color:var(--text);
   line-height:1;
@@ -5751,16 +5772,16 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 .posting-row-amount{
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:6px;
 }
 
 .posting-row-name .sheet-label,
 .posting-row-amount .sheet-label{
   margin:0;
   flex:0 0 auto;
-  font-size:11px;
+  font-size:10px;
   white-space:nowrap;
-  min-width:72px;
+  min-width:62px;
 }
 
 .posting-row-name .value-wide{
@@ -5770,15 +5791,26 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   margin:0;
 }
 
+/* Amount + buttons — prevent overlap */
+.posting-row-amount{
+  flex-wrap:nowrap;
+}
+
 .posting-row-amount #txAmount{
-  width:180px;
-  min-width:140px;
-  max-width:220px;
+  width:130px;
+  min-width:100px;
+  max-width:160px;
+  flex-shrink:1;
   margin:0;
 }
 
-.posting-row-amount #txPostSingle{
+.posting-row-amount #txPostSingle,
+.posting-row-amount #txJournalAdd{
   margin:0;
+  padding:4px 8px;
+  font-size:11px;
+  white-space:nowrap;
+  flex-shrink:0;
 }
 
 .posting-inline-account #txJournalAdd{
