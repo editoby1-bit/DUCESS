@@ -981,7 +981,15 @@
     if (!isSupabaseApprovalMode() || !gateway.staff?.listStaff) return defaultResultOk(state.staff || []);
     const result = await gateway.staff.listStaff(filters);
     if (result?.ok && Array.isArray(result.data) && result.data.length) {
-      const existing = new Map((state.staff || []).map(st => [st.id, st]));
+      // In Supabase mode, staff is the authoritative source — replace local state entirely.
+      // Do NOT merge with seed staff (st1/st2/st3/st4) — those are demo-only.
+      const supabaseIds = new Set(result.data.map(item => item.id));
+      const preserveLocal = (state.staff || []).filter(st =>
+        // Keep local staff only if they came from Supabase (have a UUID-like id)
+        // and are not in the result (may be inactive/filtered). Drop seed staff (st1 etc).
+        supabaseIds.has(st.id) || (st.uuid && st.uuid !== st.id && !st.id.startsWith('st'))
+      );
+      const existing = new Map(preserveLocal.map(st => [st.id, st]));
       result.data.forEach(item => {
         existing.set(item.id, Object.assign({}, existing.get(item.id) || {}, {
           id: item.id,
@@ -990,7 +998,6 @@
           active: item.isActive !== false,
           staffId: item.staffId || item.staff_code || '',
           branchId: item.branchId || null,
-          // Preserve backend identifiers so getStaffBackendId returns a real UUID
           uuid: item.uuid || item.id || '',
           authUserId: item.authUserId || item.auth_user_id || '',
           auth_user_id: item.authUserId || item.auth_user_id || '',
@@ -1008,7 +1015,14 @@
     if (!isSupabaseApprovalMode() || !gateway.customers?.listCustomers) return defaultResultOk(state.customers || []);
     const result = await gateway.customers.listCustomers(filters);
     if (result?.ok && Array.isArray(result.data)) {
-      state.customers = result.data.map(normalizeGatewayCustomerForState).filter(Boolean);
+      // Replace customers entirely from Supabase — drop seed customers (c1, c2 etc)
+      const incoming = result.data.map(normalizeGatewayCustomerForState).filter(Boolean);
+      // Preserve any locally-created staff_wallet customers (they're not in Supabase)
+      const staffWallets = (state.customers || []).filter(c => c.accountType === 'staff_wallet');
+      state.customers = incoming;
+      // Re-add staff wallets that aren't already in incoming
+      const incomingIds = new Set(incoming.map(c => c.id));
+      staffWallets.forEach(w => { if (!incomingIds.has(w.id)) state.customers.push(w); });
       normalizeStaffWalletAccounts();
       syncAllStaffWallets();
       recalcAllCustomerBalances();
