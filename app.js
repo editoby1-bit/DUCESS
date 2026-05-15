@@ -4997,9 +4997,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           <div class="kpi"><div class="label">Remaining Balance Today</div><div class="number">${money(currentFloatAvailable(st.id, businessDate()))}</div></div>
         </div>
         <div class="form-grid three">
-          <div class="field"><label>Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number"></div>
-          <div class="field"><label>Debt Repayment Amount</label><input id="walletRepayAmt" class="entry-input my-balance-input" type="number"></div>
-          <div class="field"><label>Note</label><input id="walletNote" class="entry-input my-balance-input"></div>
+          <div class="field"><label style="font-size:9px">Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number" style="height:28px;min-height:28px;padding:4px 8px;font-size:12px"></div>
+          <div class="field"><label style="font-size:9px">Debt Repayment Amount</label><input id="walletRepayAmt" class="entry-input my-balance-input" type="number" style="height:28px;min-height:28px;padding:4px 8px;font-size:12px"></div>
+          <div class="field"><label style="font-size:9px">Note</label><input id="walletNote" class="entry-input my-balance-input" style="height:28px;min-height:28px;padding:4px 8px;font-size:12px"></div>
         </div>
       </div>
     `,[
@@ -5021,6 +5021,16 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       }},
       {label:'Close', className:'secondary', onClick: closeModal}
     ]);
+    // shrink My Balance action buttons
+    setTimeout(() => {
+      document.querySelectorAll('#modalActions button').forEach(btn => {
+        btn.style.height = '28px';
+        btn.style.minHeight = '28px';
+        btn.style.fontSize = '12px';
+        btn.style.padding = '4px 14px';
+        btn.style.lineHeight = '1';
+      });
+    }, 0);
   }
 
   function openMyCODModal(selectedDate=null) {
