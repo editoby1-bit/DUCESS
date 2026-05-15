@@ -12518,3 +12518,41 @@ label.tx-toggle-pill span { font-size: 10px !important; }
     gap: 8px !important;
   }
 }
+
+/* ===== 2026-05-15 SURGICAL PATCH B: My Balance — close KPI gaps + shrink modal + tighter buttons ===== */
+/* KPI row: tighter gap and smaller card padding so KPIs huddle together */
+#modalBack .modal[data-modal-title="My Balance"] .kpi-row {
+  gap: 5px !important;
+  margin-bottom: 8px !important;
+}
+#modalBack .modal[data-modal-title="My Balance"] .kpi {
+  padding: 7px 9px !important;
+}
+/* Modal overall width: now that inputs + KPIs are compact, the shell can shrink */
+#modalBack .modal[data-modal-title="My Balance"] {
+  width: min(560px, calc(100vw - 32px)) !important;
+  max-width: min(560px, calc(100vw - 32px)) !important;
+}
+/* modal-body vertical padding: trim top/bottom breathing room */
+#modalBack .modal[data-modal-title="My Balance"] .modal-body {
+  padding: 10px 16px !important;
+}
+/* stack gap: less vertical space between KPI row and input row */
+#modalBack .modal[data-modal-title="My Balance"] .my-balance-modal {
+  gap: 8px !important;
+}
+/* Buttons: smaller, tighter — override any earlier patches */
+#modalBack .modal[data-modal-title="My Balance"] .modal-actions,
+#modalBack .modal[data-modal-title="My Balance"] #modalActions {
+  padding: 5px 12px !important;
+  gap: 7px !important;
+}
+#modalBack .modal[data-modal-title="My Balance"] .modal-actions button,
+#modalBack .modal[data-modal-title="My Balance"] #modalActions button {
+  height: 24px !important;
+  min-height: 24px !important;
+  font-size: 11px !important;
+  padding: 0 12px !important;
+  line-height: 1 !important;
+  border-radius: 12px !important;
+}
