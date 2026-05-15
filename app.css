@@ -12485,3 +12485,36 @@ label.tx-toggle-pill span { font-size: 10px !important; }
     line-height: 1 !important;
   }
 }
+
+/* ===== 2026-05-15 SURGICAL PATCH: My Balance — smaller input boxes + labels ===== */
+/* Shrink the three input columns; inputs hold 5–6 digit amounts so they need far less width. */
+/* Only .form-grid.three inside My Balance modal is affected. Nothing else touched. */
+#modalBack .modal[data-modal-title="My Balance"] .form-grid.three {
+  grid-template-columns: 110px 130px 160px !important;
+  gap: 10px !important;
+}
+/* Tighten label text to match the narrower columns */
+#modalBack .modal[data-modal-title="My Balance"] .form-grid.three .field label {
+  font-size: 7.5px !important;
+  letter-spacing: .02em !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+/* Inputs fill their (now smaller) column but stay compact in height */
+#modalBack .modal[data-modal-title="My Balance"] .form-grid.three input {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  height: 26px !important;
+  min-height: 26px !important;
+  padding: 3px 7px !important;
+  font-size: 12px !important;
+}
+/* Mobile: collapse to a single tighter row instead of the wider three-column */
+@media (max-width: 900px) {
+  #modalBack .modal[data-modal-title="My Balance"] .form-grid.three {
+    grid-template-columns: 100px 120px 1fr !important;
+    gap: 8px !important;
+  }
+}
