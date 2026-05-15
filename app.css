@@ -8549,7 +8549,7 @@ body[data-theme="ducess-sheet"] .cs2-hint{color:#7a5030 !important;}
 
 /* Step 5C: My Balance modal polish */
 .my-balance-modal .kpi .label{
-  font-size:10px !important;
+  font-size:8px !important;
   line-height:1.15 !important;
   letter-spacing:.03em;
 }
@@ -11463,13 +11463,13 @@ body[data-theme] .modal .table th {
     min-width:0 !important;
   }
   #modalBack .modal[data-modal-title="My Balance"] .kpi .label{
-    font-size:10px !important;
+    font-size:8px !important;
     line-height:1.05 !important;
     margin:0 !important;
   }
   #modalBack .modal[data-modal-title="My Balance"] .kpi .number{
-    font-size:16px !important;
-    margin-top:5px !important;
+    font-size:12px !important;
+    margin-top:3px !important;
   }
   #modalBack .modal[data-modal-title="My Balance"] .form-grid.three{
     display:grid !important;
@@ -11481,7 +11481,7 @@ body[data-theme] .modal .table th {
   #modalBack .modal[data-modal-title="My Balance"] .field label{
     display:block !important;
     width:100% !important;
-    font-size:10px !important;
+    font-size:8px !important;
     line-height:1 !important;
     margin:0 0 4px 0 !important;
     text-align:left !important;
@@ -11501,8 +11501,9 @@ body[data-theme] .modal .table th {
   }
   #modalBack .modal[data-modal-title="My Balance"] input,
   #modalBack .modal[data-modal-title="My Balance"] .display-field{
-    min-height:38px !important;
-    padding:7px 10px !important;
+    min-height:30px !important;
+    height:30px !important;
+    padding:4px 8px !important;
     font-size:12px !important;
   }
 }
