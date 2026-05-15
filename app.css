@@ -12445,36 +12445,42 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   border-radius: 11px !important;
 }
 
-/* ── My Balance modal: compact everything ── */
-.my-balance-modal {
-  gap: 10px !important;
+/* ── My Balance modal: compact ── */
+/* Narrow the modal so KPIs don't overflow */
+#modalBack .modal[data-modal-title="My Balance"] {
+  width: min(400px, 100%) !important;
+  max-width: 400px !important;
 }
+/* KPI row: 2x2 grid so each pill is wide enough to show full label */
 .my-balance-modal .kpi-row {
-  gap: 6px !important;
-  margin-bottom: 4px !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 5px !important;
+  margin-bottom: 6px !important;
 }
 .my-balance-modal .kpi {
   padding: 5px 8px !important;
-  border-radius: 8px !important;
+  border-radius: 7px !important;
 }
 .my-balance-modal .kpi .label {
   font-size: 8px !important;
-  letter-spacing: 0.05em !important;
-  line-height: 1 !important;
+  letter-spacing: 0.06em !important;
+  line-height: 1.1 !important;
 }
 .my-balance-modal .kpi .number {
-  font-size: 13px !important;
+  font-size: 14px !important;
   font-weight: 800 !important;
   margin-top: 2px !important;
 }
+/* Input fields compact */
 .my-balance-modal .form-grid {
-  gap: 8px !important;
+  gap: 7px !important;
 }
 .my-balance-modal .field label {
-  font-size: 9px !important;
+  font-size: 8.5px !important;
   text-transform: uppercase !important;
   letter-spacing: 0.05em !important;
   margin-bottom: 3px !important;
+  display: block !important;
 }
 .my-balance-modal .my-balance-input,
 .my-balance-modal .entry-input {
@@ -12483,13 +12489,6 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   font-size: 12px !important;
   padding: 4px 9px !important;
   border-radius: 8px !important;
-}
-/* Modal itself tighter */
-#modalBack .modal {
-  max-width: 560px !important;
-  padding: 18px 20px 16px !important;
-}
-/* But only shrink for My Balance, not all modals */
-#modalBack .modal[data-modal-title="My Balance"] {
-  max-width: 520px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
