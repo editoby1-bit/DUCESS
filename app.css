@@ -5017,19 +5017,19 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 /* Meta card itself — tight padding so Details input isn't clipped by border-radius */
 .tellering-inline-meta.form-card{
-  padding:10px 16px 10px 12px;
+  padding:10px 10px 10px 12px;
   overflow:hidden;
 }
 .tellering-meta-line{
   display:grid;
-  grid-template-columns:1fr minmax(148px,1.2fr) 1fr 1fr;
-  gap:10px;
+  grid-template-columns:1fr 1fr 1fr 1fr;
+  gap:8px;
   align-items:end;
-  overflow:visible;
+  overflow:hidden;
 }
 .tellering-meta-line .field{
   min-width:0;
-  overflow:visible;
+  overflow:hidden;
 }
 .tellering-meta-line .field label{
   font-size:9px !important;
@@ -5696,9 +5696,6 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 .standalone-posting-sheet.form-card,
 .tellering-sheet.form-card{
   padding-bottom:0 !important;
-}
-.standalone-posting-sheet{
-  padding-bottom:6px !important;
 }
 
 .posting-row{
@@ -12142,7 +12139,7 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   .tellering-sheet.journal-sheet.standalone-posting-sheet{
     width: min(650px, calc(100vw - 48px)) !important;
     max-width: min(650px, calc(100vw - 48px)) !important;
-    padding: 14px 18px 15px !important;
+    padding: 14px 18px 8px !important;
   }
 
   .standalone-posting-sheet .polished-posting-modal{
@@ -12312,13 +12309,13 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   .tellering-inline-meta.tellering-entry-card{
     width: min(650px, calc(100vw - 48px)) !important;
     max-width: min(650px, calc(100vw - 48px)) !important;
-    padding: 8px 10px 9px !important;
+    padding: 8px 18px 9px 12px !important;
   }
 
   .tellering-inline-meta .tellering-meta-line.compact-fields-inline{
     display: grid !important;
-    grid-template-columns: 200px 118px 150px 200px !important;
-    gap: 6px 8px !important;
+    grid-template-columns: 190px 148px 140px 1fr !important;
+    gap: 6px 10px !important;
     align-items: end !important;
   }
 
