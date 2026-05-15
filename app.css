@@ -12453,6 +12453,27 @@ label.tx-toggle-pill span { font-size: 10px !important; }
 .my-balance-modal .kpi .number {
   font-size: 12px !important;
 }
-.my-balance-modal .field label {
+.my-balance-modal .kpi {
+  padding: 5px 8px !important;
+}
+.my-balance-modal .field label,
+.my-balance-modal .form-label {
   font-size: 9px !important;
+  margin-bottom: 3px !important;
+}
+.my-balance-modal .my-balance-input,
+.my-balance-modal .entry-input,
+.my-balance-modal input[type="number"],
+.my-balance-modal input[type="text"] {
+  height: 28px !important;
+  min-height: 28px !important;
+  font-size: 12px !important;
+  padding: 3px 8px !important;
+}
+.my-balance-modal .modal-actions button,
+.my-balance-modal ~ .modal-actions button {
+  font-size: 12px !important;
+  padding: 4px 14px !important;
+  height: 28px !important;
+  min-height: 28px !important;
 }
