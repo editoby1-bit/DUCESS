@@ -12445,58 +12445,14 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   border-radius: 11px !important;
 }
 
-/* ── My Balance modal: compact ── */
-/* Restore original modal width — just shrink what's inside */
-#modalBack .modal[data-modal-title="My Balance"] {
-  width: min(580px, 100%) !important;
-  max-width: 580px !important;
-}
-/* KPI row: keep 4 across, shrink padding and fonts */
-.my-balance-modal .kpi-row {
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  gap: 5px !important;
-  margin-bottom: 6px !important;
-}
-.my-balance-modal .kpi {
-  padding: 4px 7px !important;
-  border-radius: 7px !important;
-}
+/* ── My Balance modal: font-only reduction ── */
 .my-balance-modal .kpi .label {
-  font-size: 7.5px !important;
-  letter-spacing: 0.05em !important;
-  line-height: 1.1 !important;
-  white-space: normal !important;
+  font-size: 8px !important;
+  line-height: 1.2 !important;
 }
 .my-balance-modal .kpi .number {
   font-size: 12px !important;
-  font-weight: 800 !important;
-  margin-top: 2px !important;
-}
-/* Input fields compact */
-.my-balance-modal .form-grid {
-  gap: 7px !important;
 }
 .my-balance-modal .field label {
-  font-size: 8.5px !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
-  margin-bottom: 3px !important;
-  display: block !important;
-}
-.my-balance-modal .my-balance-input,
-.my-balance-modal .entry-input {
-  height: 30px !important;
-  min-height: 30px !important;
-  font-size: 12px !important;
-  padding: 4px 9px !important;
-  border-radius: 8px !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-}
-/* Action buttons smaller */
-#modalBack .modal[data-modal-title="My Balance"] .modal-actions button {
-  font-size: 12px !important;
-  padding: 5px 14px !important;
-  height: 30px !important;
-  min-height: 30px !important;
+  font-size: 9px !important;
 }
