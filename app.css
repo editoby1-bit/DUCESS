@@ -12474,9 +12474,11 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   font-size: 12px !important;
 }
 #modalBack .modal[data-modal-title="My Balance"] .modal-actions .btn,
-#modalBack .modal[data-modal-title="My Balance"] .modal-actions button {
+#modalBack .modal[data-modal-title="My Balance"] .modal-actions button,
+#modalBack .modal[data-modal-title="My Balance"] #modalActions button {
   font-size: 12px !important;
   padding: 4px 14px !important;
   height: 28px !important;
   min-height: 28px !important;
+  line-height: 1 !important;
 }
