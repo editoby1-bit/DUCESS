@@ -12137,13 +12137,13 @@ label.tx-toggle-pill span { font-size: 10px !important; }
    and polishes the lower Received By/Mode/Business Date/Details strip. */
 @media (min-width: 901px){
   .tellering-sheet.journal-sheet.standalone-posting-sheet{
-    width: min(650px, calc(100vw - 48px)) !important;
-    max-width: min(650px, calc(100vw - 48px)) !important;
-    padding: 14px 18px 8px !important;
+    width: min(480px, calc(100vw - 48px)) !important;
+    max-width: min(480px, calc(100vw - 48px)) !important;
+    padding: 14px 16px 8px !important;
   }
 
   .standalone-posting-sheet .polished-posting-modal{
-    max-width: 610px !important;
+    max-width: 448px !important;
     gap: 8px !important;
   }
 
@@ -12253,7 +12253,7 @@ label.tx-toggle-pill span { font-size: 10px !important; }
 
   .standalone-posting-sheet .posting-row-name{
     display: grid !important;
-    grid-template-columns: 82px 506px !important;
+    grid-template-columns: 82px 340px !important;
     gap: 4px 7px !important;
     align-items: center !important;
     width: max-content !important;
@@ -12262,8 +12262,8 @@ label.tx-toggle-pill span { font-size: 10px !important; }
 
   .standalone-posting-sheet .posting-row-name #txName,
   .standalone-posting-sheet .posting-row-name .value-wide{
-    width: 506px !important;
-    max-width: 506px !important;
+    width: 340px !important;
+    max-width: 340px !important;
     min-height: 33px !important;
     height: 33px !important;
     padding: 6px 10px !important;
@@ -12307,15 +12307,15 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   }
 
   .tellering-inline-meta.tellering-entry-card{
-    width: min(650px, calc(100vw - 48px)) !important;
-    max-width: min(650px, calc(100vw - 48px)) !important;
-    padding: 8px 18px 9px 12px !important;
+    width: min(480px, calc(100vw - 48px)) !important;
+    max-width: min(480px, calc(100vw - 48px)) !important;
+    padding: 8px 16px 9px 12px !important;
   }
 
   .tellering-inline-meta .tellering-meta-line.compact-fields-inline{
     display: grid !important;
-    grid-template-columns: 190px 148px 140px 1fr !important;
-    gap: 6px 10px !important;
+    grid-template-columns: 130px 140px 120px 1fr !important;
+    gap: 6px 8px !important;
     align-items: end !important;
   }
 
