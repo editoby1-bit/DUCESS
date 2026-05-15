@@ -2189,6 +2189,7 @@ function hideProcessing() {
               ${journalVisible ? '' : `<button id="txJournalAdd" class="sheet-btn secondary tiny-btn ultra-compact-btn">Generate Journal</button>`}
             </div>
             ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
+            <div class="posting-row posting-row-details-inline"><label class="sheet-label posting-label-name" for="txDetails">Details</label><input id="txDetails" class="entry-input" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}"></div>
           </div>
         </div>
         <div class="tellering-inline-meta form-card compact-left tellering-entry-card">
@@ -2196,7 +2197,6 @@ function hideProcessing() {
             <div class="field"><label>${kind === 'credit' ? 'Received By' : 'Paid To'}</label><input id="txCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}"></div>
             <div class="field"><label>${kind === 'credit' ? 'Mode' : 'Payout Source'}</label><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div></div>
             <div class="field"><label>Business Date</label><div class="display-field">${businessDate()}</div></div>
-            <div class="field"><label>Details</label><input id="txDetails" class="entry-input" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}"></div>
           </div>
         </div>
         ${journalVisible ? `<div class="w-full flex justify-center journal-center-wrap" id="journalPaneWrap">

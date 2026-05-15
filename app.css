@@ -12404,3 +12404,92 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   padding-top: 5px !important;
   padding-bottom: 5px !important;
 }
+
+/* ===== 2026-05-15 patch: Details inline in card, Received By wider, compact meta strip, collapse btn, My Balance ===== */
+
+/* Details row inside the main posting card — full width label+input */
+.posting-row-details-inline {
+  display: grid !important;
+  grid-template-columns: 72px 1fr !important;
+  gap: 4px 7px !important;
+  align-items: center !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+.posting-row-details-inline .sheet-label {
+  font-size: 9.5px !important;
+  white-space: nowrap !important;
+}
+.posting-row-details-inline .entry-input {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  height: 33px !important;
+  min-height: 33px !important;
+}
+
+/* Meta strip now only 3 cols — Received By gets the most room */
+@media (min-width: 901px) {
+  .tellering-inline-meta .tellering-meta-line.compact-fields-inline {
+    grid-template-columns: 1fr 148px 130px !important;
+  }
+}
+
+/* Collapse / Expand Journal buttons — smaller */
+#journalCollapseBtn,
+#journalCollapseTopBtn {
+  font-size: 10px !important;
+  padding: 3px 8px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  border-radius: 11px !important;
+}
+
+/* ── My Balance modal: compact everything ── */
+.my-balance-modal {
+  gap: 10px !important;
+}
+.my-balance-modal .kpi-row {
+  gap: 6px !important;
+  margin-bottom: 4px !important;
+}
+.my-balance-modal .kpi {
+  padding: 5px 8px !important;
+  border-radius: 8px !important;
+}
+.my-balance-modal .kpi .label {
+  font-size: 8px !important;
+  letter-spacing: 0.05em !important;
+  line-height: 1 !important;
+}
+.my-balance-modal .kpi .number {
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  margin-top: 2px !important;
+}
+.my-balance-modal .form-grid {
+  gap: 8px !important;
+}
+.my-balance-modal .field label {
+  font-size: 9px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  margin-bottom: 3px !important;
+}
+.my-balance-modal .my-balance-input,
+.my-balance-modal .entry-input {
+  height: 30px !important;
+  min-height: 30px !important;
+  font-size: 12px !important;
+  padding: 4px 9px !important;
+  border-radius: 8px !important;
+}
+/* Modal itself tighter */
+#modalBack .modal {
+  max-width: 560px !important;
+  padding: 18px 20px 16px !important;
+}
+/* But only shrink for My Balance, not all modals */
+#modalBack .modal[data-modal-title="My Balance"] {
+  max-width: 520px !important;
+}
