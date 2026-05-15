@@ -12352,3 +12352,55 @@ label.tx-toggle-pill span { font-size: 10px !important; }
     align-items: center !important;
   }
 }
+
+/* ===== 2026-05-15 surgical patch: acct name overflow, Transfer label, journal heading sizes ===== */
+
+/* Acct Name row: truly fluid, never wider than the card */
+.standalone-posting-sheet .posting-row-name,
+.standalone-posting-sheet .posting-row-amount,
+.standalone-posting-sheet .posting-row-acc-kpi {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+.standalone-posting-sheet .posting-row-name {
+  display: grid !important;
+  grid-template-columns: 72px 1fr !important;
+}
+.standalone-posting-sheet .posting-row-name #txName,
+.standalone-posting-sheet .posting-row-name .value-wide {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* Transfer label no longer clashes: give Mode column fixed minimum */
+.tellering-inline-meta .tellering-meta-line.compact-fields-inline {
+  grid-template-columns: 110px 148px 116px 1fr !important;
+}
+
+/* Journal "Journal Generated" heading — smaller */
+.journal-pane-head h3,
+.standalone-journal-pane .journal-pane-head h3 {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+}
+
+/* Journal table column headings — smaller and tighter */
+.standalone-journal-pane .journal-table th,
+.journal-pane .journal-table th {
+  font-size: 10px !important;
+  letter-spacing: 0.04em !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+/* Journal table body rows — slightly smaller */
+.standalone-journal-pane .journal-table td,
+.journal-pane .journal-table td {
+  font-size: 12px !important;
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+}

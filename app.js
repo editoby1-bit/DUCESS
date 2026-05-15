@@ -2193,10 +2193,10 @@ function hideProcessing() {
         </div>
         <div class="tellering-inline-meta form-card compact-left tellering-entry-card">
           <div class="form-grid tellering-meta-line compact-fields-inline">
-            <div class="field"><label>${kind === 'credit' ? 'Received By' : 'Paid To'}</label><input id="txCounterparty" class="entry-input"></div>
-            <div class="field"><label>${kind === 'credit' ? 'Mode' : 'Payout Source'}</label><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" checked> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer"> <span>Transfer</span></label></div></div>
+            <div class="field"><label>${kind === 'credit' ? 'Received By' : 'Paid To'}</label><input id="txCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}"></div>
+            <div class="field"><label>${kind === 'credit' ? 'Mode' : 'Payout Source'}</label><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div></div>
             <div class="field"><label>Business Date</label><div class="display-field">${businessDate()}</div></div>
-            <div class="field"><label>Details</label><input id="txDetails" class="entry-input"></div>
+            <div class="field"><label>Details</label><input id="txDetails" class="entry-input" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}"></div>
           </div>
         </div>
         ${journalVisible ? `<div class="w-full flex justify-center journal-center-wrap" id="journalPaneWrap">
@@ -3719,6 +3719,9 @@ function normalizeStaffLedgerEntryType(row) {
       ['txAcc','txAmount','txDetails','txCounterparty'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
       state.ui.txAccDraft = '';
       state.ui.txAmountDraft = '';
+      state.ui.txDetailsDraft = '';
+      state.ui.txCounterpartyDraft = '';
+      state.ui.txModeDraft = 'cash';
       telleringDraft.singleCharges = { apply: false, checked: {}, values: {} };
       if (byId('txApplyCharges')) byId('txApplyCharges').checked = false;
       CHARGE_DEFS.forEach(def => {
@@ -3905,6 +3908,17 @@ function normalizeStaffLedgerEntryType(row) {
       };
       amountInput.onchange = () => { state.ui.txAmountDraft = amountInput.value || ''; save(); restoreSingleCustomerDisplay(); };
     }
+    if (byId('txCounterparty')) {
+      byId('txCounterparty').oninput = () => { state.ui.txCounterpartyDraft = byId('txCounterparty').value || ''; };
+      byId('txCounterparty').onchange = () => { state.ui.txCounterpartyDraft = byId('txCounterparty').value || ''; };
+    }
+    if (byId('txDetails')) {
+      byId('txDetails').oninput = () => { state.ui.txDetailsDraft = byId('txDetails').value || ''; };
+      byId('txDetails').onchange = () => { state.ui.txDetailsDraft = byId('txDetails').value || ''; };
+    }
+    qq('input[name="txMode"]').forEach(radio => {
+      radio.onchange = () => { state.ui.txModeDraft = radio.value; };
+    });
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="single"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="single"]`);
