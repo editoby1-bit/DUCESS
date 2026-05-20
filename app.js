@@ -2040,33 +2040,34 @@ function hideProcessing() {
   }
 
   function renderAccountOpening() {
+    const openingDraft = state.ui.accountOpeningDraft ||= {};
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Account Opening</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Name</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="openName" class="entry-input cs2-input"></div>
+            <div class="cs2-input-wrap cs2-wide"><input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Address</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="openAddress" class="entry-input cs2-input"></div>
+            <div class="cs2-input-wrap cs2-wide"><input id="openAddress" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.address || ''))}" autocomplete="off"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Phone Number</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="openPhone" class="entry-input cs2-input digit-11-input" inputmode="numeric"></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="openPhone" class="entry-input cs2-input digit-11-input" inputmode="numeric" value="${escapeHtml(String(openingDraft.phone || ''))}" autocomplete="off"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">NIN</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="openNin" class="entry-input cs2-input digit-11-input" inputmode="numeric"></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="openNin" class="entry-input cs2-input digit-11-input" inputmode="numeric" value="${escapeHtml(String(openingDraft.nin || ''))}" autocomplete="off"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">BVN</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="openBvn" class="entry-input cs2-input digit-11-input" inputmode="numeric"></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="openBvn" class="entry-input cs2-input digit-11-input" inputmode="numeric" value="${escapeHtml(String(openingDraft.bvn || ''))}" autocomplete="off"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Old A/N</div>
-            <div class="cs2-input-wrap cs2-short"><input id="openOldAccount" class="entry-input cs2-input" maxlength="4" inputmode="numeric"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="openOldAccount" class="entry-input cs2-input" maxlength="4" inputmode="numeric" value="${escapeHtml(String(openingDraft.oldAccountNumber || ''))}" autocomplete="off"></div>
           </div>
           <div class="cs2-upload-row">
             <button id="openPhotoBtn" type="button" class="sheet-btn cs2-btn cs2-btn-ghost">Photo Upload</button>
@@ -3392,10 +3393,45 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function bindAccountOpening() {
+    state.ui.accountOpeningDraft ||= {};
+    const openingDraft = state.ui.accountOpeningDraft;
     const photoInput = byId('openPhoto');
     const photoBtn = byId('openPhotoBtn');
     const photoStatus = byId('openPhotoStatus');
+
+    const draftBindings = {
+      openName: 'name',
+      openAddress: 'address',
+      openPhone: 'phone',
+      openNin: 'nin',
+      openBvn: 'bvn',
+      openOldAccount: 'oldAccountNumber'
+    };
+
+    Object.entries(draftBindings).forEach(([id, key]) => {
+      const input = byId(id);
+      if (!input) return;
+      input.addEventListener('input', () => {
+        openingDraft[key] = input.value;
+      });
+      input.addEventListener('focus', () => {
+        state.ui.accountOpeningFocusedField = id;
+      });
+    });
+
+    const focusedField = byId(state.ui.accountOpeningFocusedField || '');
+    if (focusedField) {
+      requestAnimationFrame(() => {
+        const cursorPosition = focusedField.value.length;
+        focusedField.focus();
+        if (focusedField.setSelectionRange) focusedField.setSelectionRange(cursorPosition, cursorPosition);
+      });
+    }
     if (photoBtn && photoInput) photoBtn.onclick = () => photoInput.click();
+    if (photoInput) {
+      if (openingDraft.photo) photoInput.dataset.base64 = openingDraft.photo;
+      if (openingDraft.photoStatus && photoStatus) photoStatus.textContent = openingDraft.photoStatus;
+    }
     if (photoInput) photoInput.onchange = async (e) => {
       const f = e.target.files?.[0];
       if (!f) return;
@@ -3404,15 +3440,21 @@ function normalizeStaffLedgerEntryType(row) {
         if (estimateDataUrlBytes(base64) > CUSTOMER_PHOTO_MAX_BYTES) {
           photoInput.value = '';
           photoInput.dataset.base64 = '';
+          openingDraft.photo = '';
+          openingDraft.photoStatus = 'No photo selected';
           if (photoStatus) photoStatus.textContent = 'No photo selected';
           return showToast('Photo must be 1 MB or less after compression');
         }
         photoInput.dataset.base64 = base64;
+        openingDraft.photo = base64;
         const compressedLabel = `${formatFileSize(estimateDataUrlBytes(base64))}`;
         if (photoStatus) photoStatus.textContent = f.name.length > 18 ? `${f.name.slice(0, 15)}... • ${compressedLabel}` : `${f.name} • ${compressedLabel}`;
+        openingDraft.photoStatus = photoStatus?.textContent || 'No photo selected';
       } catch (error) {
         photoInput.value = '';
         photoInput.dataset.base64 = '';
+        openingDraft.photo = '';
+        openingDraft.photoStatus = 'No photo selected';
         if (photoStatus) photoStatus.textContent = 'No photo selected';
         showToast(error?.message || 'Unable to process selected photo');
       }
@@ -3442,6 +3484,8 @@ function normalizeStaffLedgerEntryType(row) {
   try {
     const result = await submitApprovalThroughGateway('account_opening', payload);
     if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+    state.ui.accountOpeningDraft = {};
+    state.ui.accountOpeningFocusedField = '';
     render();
     showToast('Account opening sent for approval');
   } finally {
