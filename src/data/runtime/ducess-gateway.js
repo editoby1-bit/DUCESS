@@ -1324,14 +1324,22 @@ if (inserted.error) {
         results.push(postedResult.data);
       }
 
-      const totalAmount = results.reduce((sum, item) => sum + normalizeNumber(item?.sourceAmount || item?.amount), 0);
+      // Direct customer_credit/customer_debit have no relationship with FORM at all —
+      // post the customer-side transactions only, no staff_cash_ledger entry.
+      if (type === 'customer_credit' || type === 'customer_debit') {
+        return defaultResult.ok({ posted: true, requestType: type, transactions: results, cashLedger: null, decisionNote: decisionNote || '' });
+      }
+
+      // Journals: the journal's OWN declared FORM amount (not the sum of its rows)
+      // is what draws down the staff's daily FORM, posted once per journal.
+      const journalFormAmount = normalizeNumber(payload.formAmount);
       const ledgerResult = await insertStaffCashLedgerEntry({
         approvalRequestId: requestRow.id,
         staffId: payload.staffId || payload.requestedByStaffId || requestRow.requested_by_staff_id || null,
         entryType: type,
-        amount: totalAmount,
-        delta: totalAmount ? -Math.abs(totalAmount) : 0,
-        note: payload.note || `${type} posted from approval ${requestRow.id}`,
+        amount: journalFormAmount,
+        delta: journalFormAmount ? -Math.abs(journalFormAmount) : 0,
+        note: payload.note || `${type} form posted from approval ${requestRow.id}`,
         floatDate: payload.date || payload.businessDate || null,
         createdByStaffId: requestRow.requested_by_staff_id || null,
         approvedByStaffId: approver?.staffId || null,

@@ -1315,12 +1315,15 @@ if (approvalRecord.type === 'float_topup') {
     } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries && !(payload.rows || []).some(row => row.accountType === 'staff' || row.accountType === 'staff_wallet')) {
       result = await gateway.accounts.submitJournalEntries({
         entries: (payload.rows || []).map(row => ({ accountId: row.accountType === 'staff' ? (row.staffAccountUuid || row.staffAccountId || row.accountNumber || row.customerId) : row.customerId, accountType: row.accountType || 'customer', staffAccountId: row.staffAccountId || '', staffAccountUuid: row.staffAccountUuid || '', txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown, totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount, chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId })),
+        rows: payload.rows || [],
         requestedByStaffId: getStaffBackendId(staff),
         requestedByName: staff?.name || 'System',
         businessDate: payload.date,
         staffId: payload.staffId,
         date: payload.date,
         openingFloat: payload.openingFloat,
+        formAmount: Number(payload.formAmount || 0),
+        formPaymentMode: payload.formPaymentMode || 'cash',
         fieldNote: payload.fieldNote || null
       });
     } else if (gateway.approvals?.submitApprovalRequest) {
@@ -1552,7 +1555,6 @@ if (approvalRecord.type === 'float_topup') {
           accountType: c.accountType || 'customer'
         }));
         recalcCustomerBalance(c);
-        addStaffEntry(req.payload.staffId, 'customer_credit', totalAmount, -totalAmount, `Customer credit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z`, chargeBreakdown, totalChargeAmount: totalCharges, chargeTraceId, customerCreditAmount });
         if (totalCharges > 0) {
           state.operations.entries ||= [];
           state.businessExtras ||= [];
@@ -1611,9 +1613,6 @@ if (approvalRecord.type === 'float_topup') {
           accountType: c.accountType || 'customer'
         }));
         recalcCustomerBalance(c);
-        if (req.payload.payoutSource === 'teller') {
-          addStaffEntry(req.payload.staffId, 'customer_debit', req.payload.amount, req.payload.amount, `Customer debit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z` });
-        }
         break;
       }
       case 'customer_credit_journal': {
@@ -1624,6 +1623,12 @@ if (approvalRecord.type === 'float_topup') {
           requestedByName:req.requestedByName,
           requestedBy:req.requestedBy
         }));
+        // The journal's own FORM amount (not its row totals) is what draws down
+        // the staff's daily FORM, posted once per journal.
+        const journalFormAmount = Number(req.payload.formAmount || 0);
+        if (journalFormAmount > 0 && !ensureStaffAccount(req.payload.staffId).entries.some(e => e.sourceApprovalId === req.id && e.type === 'customer_credit_journal')) {
+          addStaffEntry(req.payload.staffId, 'customer_credit_journal', journalFormAmount, -journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
+        }
         break;
       }
       case 'customer_debit_journal': {
@@ -1634,6 +1639,10 @@ if (approvalRecord.type === 'float_topup') {
           requestedByName:req.requestedByName,
           requestedBy:req.requestedBy
         }));
+        const journalFormAmount = Number(req.payload.formAmount || 0);
+        if (journalFormAmount > 0 && !ensureStaffAccount(req.payload.staffId).entries.some(e => e.sourceApprovalId === req.id && e.type === 'customer_debit_journal')) {
+          addStaffEntry(req.payload.staffId, 'customer_debit_journal', journalFormAmount, -journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
+        }
         break;
       }
       case 'operational_entry': {
@@ -2208,6 +2217,15 @@ function hideProcessing() {
             <div class="journal-pane-actions ${journalCollapsed ? "" : "journal-pane-actions-hidden"}"><button id="journalCollapseTopBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
           </div>
           <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
+            <div class="journal-entry-top row-zero journal-form-row" style="display:grid;grid-template-columns:max-content 160px max-content max-content;column-gap:10px;align-items:end;margin-bottom:10px;">
+              <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Form Amount</label>
+              <input id="journalFormAmount" class="entry-input sheet-input" type="number" style="margin:0;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}">
+              <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${(telleringDraft.journalFormMode || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${(telleringDraft.journalFormMode || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
+              <div class="posting-kpis-inline">
+                <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL BALANCE</span><span class="mini-kpi-pill-value" id="journalFormRunning">${money(0)}</span></div>
+                <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL VARIANCE</span><span class="mini-kpi-pill-value balance-negative" id="journalFormVariance">${money(0)}</span></div>
+              </div>
+            </div>
             <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Form</th><th>Amount</th><th>Remaining Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 190px;column-gap:6px;align-items:end;justify-content:start;">
@@ -2399,7 +2417,7 @@ function hideProcessing() {
     const p = a.payload || {};
     if (a.type === 'customer_credit') return `${money(p.amount)} to ${customerName(p.customerId) || p.accountNumber}${chargeSummaryText(p)}${p.details ? ' • ' + p.details : ''}`;
     if (a.type === 'customer_debit') return `${money(p.amount)} from ${customerName(p.customerId) || p.accountNumber}${p.details ? ' • ' + p.details : ''}`;
-    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') { const rows = p.rows || p.entries || []; const total = rows.reduce((s,r)=>s+Number(r.amount||0),0); const totalCharges = rows.reduce((s,r)=>s+getTotalChargeAmount(r),0); const attachmentTag = p.fieldNote ? ' • Note attached' : ''; const chargeTag = a.type === 'customer_credit_journal' && totalCharges > 0 ? ` • Total Charge ${money(totalCharges)}` : ''; return `${rows.length} item${rows.length===1?'':'s'} • Total ${money(total)}${chargeTag}${attachmentTag}`; }
+    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') { const rows = p.rows || p.entries || []; const total = rows.reduce((s,r)=>s+Number(r.amount||0),0); const totalCharges = rows.reduce((s,r)=>s+getTotalChargeAmount(r),0); const attachmentTag = p.fieldNote ? ' • Note attached' : ''; const chargeTag = a.type === 'customer_credit_journal' && totalCharges > 0 ? ` • Total Charge ${money(totalCharges)}` : ''; const formTag = ` • Form ${money(p.formAmount || 0)}`; return `${rows.length} item${rows.length===1?'':'s'} • Total ${money(total)}${formTag}${chargeTag}${attachmentTag}`; }
     if (a.type === 'wallet_fund') return `${staffName(p.staffId)} • Wallet fund • ${money(p.amount)}`;
     if (a.type === 'debt_repayment') return `${staffName(p.staffId)} • Debt repayment • ${money(p.amount)}`;
     return requestSummary(a);
@@ -2507,6 +2525,7 @@ function hideProcessing() {
         ${field('Business Date', p.date || p.businessDate || '—', 'field-date')}
         ${field('Items', rows.length, 'field-account')}
         ${field('Total Amount', money(total), 'field-account')}
+        ${field('Journal Form Amount', `${money(p.formAmount || 0)} (${p.formPaymentMode === 'transfer' ? 'Transfer' : 'Cash'})`, 'field-account')}
         ${req.type === 'customer_credit_journal' ? field('Total Charges', money(totalCharges), 'field-account') : ''}
       </div>
       <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>${req.type === 'customer_credit_journal' ? 'Received By' : 'Paid To'}</th><th>Mode</th><th>Details</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="7" class="muted">No journal entries</td></tr>'}</tbody></table></div>
@@ -3048,8 +3067,8 @@ function staffLedgerEvents(staffId) {
       const amount = Number(entry.amount || 0);
       const date = entry.formDate || entry.floatDate || String(entry.date || '').slice(0,10) || businessDate();
       if (['approved_form','approved_float'].includes(type)) addEvent({ key: entry.id || `form-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: entry.note || `Approved FORM for ${date}`, runningType: 'form' });
-      else if (['customer_credit','credit'].includes(type)) addEvent({ key: entry.id || `credit-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: entry.note || 'Customer credit', runningType: 'credit' });
-      else if (['customer_debit','debit'].includes(type)) addEvent({ key: entry.id || `debit-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: entry.note || 'Customer debit', runningType: 'debit' });
+      else if (['customer_credit_journal'].includes(type)) addEvent({ key: entry.id || `credit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Credit journal form', runningType: 'credit' });
+      else if (['customer_debit_journal'].includes(type)) addEvent({ key: entry.id || `debit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Debit journal form', runningType: 'debit' });
       else if (['debt_repayment','wallet_fund','wallet_funding'].includes(type)) addEvent({ key: entry.id || `${type}-${date}-${amount}`, date, type: type === 'debt_repayment' ? 'Debt Repayment' : 'Wallet', amount, delta: 0, details: entry.note || type.replace(/_/g,' '), runningType: 'other' });
     });
     (state.approvals || []).filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
@@ -3059,25 +3078,13 @@ function staffLedgerEvents(staffId) {
         const amount = Number(payload.amount || payload.floatAmount || 0);
         addEvent({ key: req.id || `form-approval-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: `Approved FORM for ${date}`, runningType: 'form' });
       }
-      if (req.type === 'customer_credit' && payload.staffId === staffId) {
-        const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
-      }
-      if (req.type === 'customer_debit' && payload.staffId === staffId) {
-        const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
-      }
       if (req.type === 'customer_credit_journal' && payload.staffId === staffId) {
-        (payload.rows || payload.entries || []).forEach((row, idx) => {
-          const amount = Number(row.amount || 0);
-          addEvent({ key: `${req.id || 'credit-journal'}-${idx}`, date, type: 'Credit Journal Impact', amount, delta: -amount, details: `${row.accountNumber || ''} ${row.customerName || ''} ${row.details || ''}`.trim() || 'Credit journal entry', runningType: 'credit' });
-        });
+        const formAmount = Number(payload.formAmount || 0);
+        addEvent({ key: req.id || `credit-journal-${date}`, date, type: 'Journal Form', amount: formAmount, delta: -formAmount, details: `Credit journal form (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'credit' });
       }
       if (req.type === 'customer_debit_journal' && payload.staffId === staffId) {
-        (payload.rows || payload.entries || []).forEach((row, idx) => {
-          const amount = Number(row.amount || 0);
-          addEvent({ key: `${req.id || 'debit-journal'}-${idx}`, date, type: 'Debit Journal Impact', amount, delta: -amount, details: `${row.accountNumber || ''} ${row.customerName || ''} ${row.details || ''}`.trim() || 'Debit journal entry', runningType: 'debit' });
-        });
+        const formAmount = Number(payload.formAmount || 0);
+        addEvent({ key: req.id || `debit-journal-${date}`, date, type: 'Journal Form', amount: formAmount, delta: -formAmount, details: `Debit journal form (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'debit' });
       }
     });
     (state.cod || []).filter(cod => cod.staffId === staffId).forEach(cod => {
@@ -3802,21 +3809,28 @@ function normalizeStaffLedgerEntryType(row) {
     };
 
     const recalcPreview = () => {
-      const formBase = getOpeningBalanceForDate(staff.id, businessDate());
-      const approvedBase = currentFloatAvailable(staff.id, businessDate());
-      const totalPending = pendingJournalTotal(staff.id, businessDate());
-      const thisJournalTotal = journal.reduce((acc,row)=>acc+Number(row.amount||0),0);
-      let running = approvedBase - (totalPending - thisJournalTotal);
+      // Daily FORM (staff's declared float for the day) — informational here, and
+      // reduced only by approved/pending JOURNAL form amounts (never by direct
+      // credit/debit, and never by what's inside this journal's own rows).
+      const dailyAvailable = currentFloatAvailable(staff.id, businessDate());
+      const otherPendingDraftForms = pendingJournalTotal(staff.id, businessDate());
+      const dailyRunning = dailyAvailable - otherPendingDraftForms;
+
+      // This journal's own FORM — depleted only by this journal's own rows.
+      const journalForm = Number(telleringDraft.journalFormAmount || 0);
+      let jRunning = journalForm;
       const withBalances = journal.map((row) => {
-        running -= Number(row.amount||0);
-        const remaining = running;
+        jRunning -= Number(row.amount||0);
+        const remaining = jRunning;
         const variance = Math.max(0, -remaining);
-        return { row, formBase, remaining, variance };
+        return { row, formBase: journalForm, remaining, variance };
       });
       const rows = withBalances.map(({ row, formBase, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(formBase)}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
-      ['journalRunningFloat','postingRunningFloat'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,running)); });
-      ['journalVariance','postingVariance'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,-running)); });
+      ['postingRunningFloat'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,dailyRunning)); });
+      ['postingVariance'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,-dailyRunning)); });
+      if (byId('journalFormRunning')) byId('journalFormRunning').textContent = money(Math.max(0, jRunning));
+      if (byId('journalFormVariance')) byId('journalFormVariance').textContent = money(Math.max(0, -jRunning));
       const fileNameEl = byId('journalFieldNoteName');
       if (fileNameEl) fileNameEl.textContent = attachmentState.loading ? 'Reading file…' : (attachmentState.fieldNote?.name ? `${attachmentState.fieldNote.name} (${formatFileSize(attachmentState.fieldNote.size)})` : 'No file selected');
       const inputEl = byId('journalFieldNoteInput');
@@ -4060,6 +4074,18 @@ function normalizeStaffLedgerEntryType(row) {
       save();
       updateJournalCommissionPreview();
     };
+    if (byId('journalFormAmount')) {
+      const journalFormAmountInput = byId('journalFormAmount');
+      journalFormAmountInput.oninput = () => {
+        telleringDraft.journalFormAmount = journalFormAmountInput.value || '';
+        save();
+        recalcPreview();
+      };
+      journalFormAmountInput.onchange = () => { telleringDraft.journalFormAmount = journalFormAmountInput.value || ''; save(); };
+    }
+    qq('input[name="journalFormMode"]').forEach(radio => radio.onchange = () => {
+      if (radio.checked) { telleringDraft.journalFormMode = radio.value; save(); recalcPreview(); }
+    });
     if (byId('journalAmount')) {
       const journalAmountInput = byId('journalAmount');
       const protectJournalAccountDraft = () => {
@@ -4239,6 +4265,8 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.journalAccDraft = '';
       state.ui.selectedJournalCustomerId = null;
       telleringDraft.journalAmount = '';
+      telleringDraft.journalFormAmount = '';
+      telleringDraft.journalFormMode = 'cash';
       const input = byId('journalFieldNoteInput');
       if (input) input.value = '';
       save();
@@ -4322,6 +4350,9 @@ function normalizeStaffLedgerEntryType(row) {
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
       if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
       if (!journal.length) return showToast('Generate journal first');
+      const journalFormAmount = Number(byId('journalFormAmount')?.value || telleringDraft.journalFormAmount || 0);
+      if (!(journalFormAmount > 0)) return showToast('Enter a journal form amount');
+      const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
       confirmAction(`Submit ${kind} journal for approval?`, async () => {
@@ -4334,6 +4365,8 @@ function normalizeStaffLedgerEntryType(row) {
             staffId: staff.id,
             date: businessDate(),
             openingFloat: getOpeningBalanceForDate(staff.id, businessDate()),
+            formAmount: journalFormAmount,
+            formPaymentMode: journalFormMode,
             rows: journal.map(row => ({
               customerId: row.customerId,
               customerName: row.customerName,
@@ -4360,6 +4393,8 @@ function normalizeStaffLedgerEntryType(row) {
           attachmentState.fieldNote = null;
           attachmentState.loading = false;
           state.ui.generatedJournals[visibilityKey] = false;
+          telleringDraft.journalFormAmount = '';
+          telleringDraft.journalFormMode = 'cash';
           const input = byId('journalFieldNoteInput');
           if (input) input.value = '';
           save();
@@ -4969,40 +5004,41 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function approvalModeAmount(record, mode) {
     const desiredMode = normalizePaymentMode(mode);
     if (!record || record.status !== 'approved') return 0;
+    // Direct customer_credit/customer_debit no longer have any relationship with FORM.
     if (record.type === 'customer_credit_journal' || record.type === 'customer_debit_journal') {
-      return (record.payload?.rows || []).reduce((sum, row) => sum + (normalizePaymentMode(row.paymentMode || row.payoutSource) === desiredMode ? Number(row.amount || 0) : 0), 0);
+      const journalMode = normalizePaymentMode(record.payload?.formPaymentMode);
+      return journalMode === desiredMode ? Number(record.payload?.formAmount || 0) : 0;
     }
-    const recordMode = normalizePaymentMode(record.payload?.paymentMode || record.payload?.payoutSource);
-    return recordMode === desiredMode ? Number(record.payload?.amount || 0) : 0;
+    return 0;
   }
 
   function approvedCreditTotalForDateByMode(staffId, dateStr, mode) {
     return (state.approvals||[])
-      .filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
+      .filter(r => r.type === 'customer_credit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedDebitTotalForDateByMode(staffId, dateStr, mode) {
     return (state.approvals||[])
-      .filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
+      .filter(r => r.type === 'customer_debit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedCreditTotalForDate(staffId, dateStr) {
-    return (state.approvals||[]).filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type==='customer_credit_journal' ? (r.payload.rows||[]).reduce((a,x)=>a+Number(x.amount||0),0) : Number(r.payload?.amount||0)), 0);
+    return (state.approvals||[]).filter(r => r.type === 'customer_credit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + Number(r.payload?.formAmount || 0), 0);
   }
 
   function approvedDebitTotalForDate(staffId, dateStr) {
-    return (state.approvals||[]).filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type==='customer_debit_journal' ? (r.payload.rows||[]).reduce((a,x)=>a+Number(x.amount||0),0) : Number(r.payload?.amount||0)), 0);
+    return (state.approvals||[]).filter(r => r.type === 'customer_debit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + Number(r.payload?.formAmount || 0), 0);
   }
 
   function pendingPostedFloatImpactForDate(staffId, dateStr) {
     return (state.approvals||[])
-      .filter(r => ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type)
+      .filter(r => ['customer_credit_journal','customer_debit_journal'].includes(r.type)
         && r.status === 'pending'
         && r.payload?.staffId === staffId
         && r.payload?.date === dateStr)
-      .reduce((s,r)=> s + (r.type.endsWith('_journal') ? (r.payload.rows||[]).reduce((a,x)=>a+Number(x.amount||0),0) : Number(r.payload?.amount||0)), 0);
+      .reduce((s,r)=> s + Number(r.payload?.formAmount || 0), 0);
   }
 
   function currentFloatAvailable(staffId, date = businessDate()) {
@@ -5018,11 +5054,13 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function pendingJournalTotal(staffId, date=businessDate()) {
-    const journals = state.ui?.staffJournals || {};
+    // Sum of the FORM amount on any journal currently being drafted (not yet
+    // submitted) for this staff/date — credit and debit drafts both count,
+    // since both draw down the same daily FORM once approved.
+    const drafts = state.ui?.telleringDrafts || {};
     const creditKey = `${staffId}:${date}:credit`;
     const debitKey = `${staffId}:${date}:debit`;
-    const total = (arr => (arr||[]).reduce((s,r)=>s+Number(r.amount||0),0));
-    return total(journals[creditKey]) + total(journals[debitKey]);
+    return Number(drafts[creditKey]?.journalFormAmount || 0) + Number(drafts[debitKey]?.journalFormAmount || 0);
   }
 
   function staffCODRecords(staffId) {
