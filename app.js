@@ -1555,6 +1555,12 @@ if (approvalRecord.type === 'float_topup') {
           accountType: c.accountType || 'customer'
         }));
         recalcCustomerBalance(c);
+        // Only a genuinely direct posting draws on the daily FORM here — rows
+        // dispatched from a journal (sourceRowKey !== 'direct') already get a
+        // single lump FORM deduction posted once, in the journal case below.
+        if (sourceRowKey === 'direct') {
+          addStaffEntry(req.payload.staffId, 'customer_credit', totalAmount, -totalAmount, `Customer credit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z`, chargeBreakdown, totalChargeAmount: totalCharges, chargeTraceId, customerCreditAmount });
+        }
         if (totalCharges > 0) {
           state.operations.entries ||= [];
           state.businessExtras ||= [];
@@ -1613,6 +1619,9 @@ if (approvalRecord.type === 'float_topup') {
           accountType: c.accountType || 'customer'
         }));
         recalcCustomerBalance(c);
+        if (sourceRowKey === 'direct' && req.payload.payoutSource === 'teller') {
+          addStaffEntry(req.payload.staffId, 'customer_debit', req.payload.amount, req.payload.amount, `Customer debit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z` });
+        }
         break;
       }
       case 'customer_credit_journal': {
@@ -3067,6 +3076,8 @@ function staffLedgerEvents(staffId) {
       const amount = Number(entry.amount || 0);
       const date = entry.formDate || entry.floatDate || String(entry.date || '').slice(0,10) || businessDate();
       if (['approved_form','approved_float'].includes(type)) addEvent({ key: entry.id || `form-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: entry.note || `Approved FORM for ${date}`, runningType: 'form' });
+      else if (['customer_credit'].includes(type)) addEvent({ key: entry.id || `credit-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: entry.note || 'Customer credit', runningType: 'credit' });
+      else if (['customer_debit'].includes(type)) addEvent({ key: entry.id || `debit-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: entry.note || 'Customer debit', runningType: 'debit' });
       else if (['customer_credit_journal'].includes(type)) addEvent({ key: entry.id || `credit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Credit journal form', runningType: 'credit' });
       else if (['customer_debit_journal'].includes(type)) addEvent({ key: entry.id || `debit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Debit journal form', runningType: 'debit' });
       else if (['debt_repayment','wallet_fund','wallet_funding'].includes(type)) addEvent({ key: entry.id || `${type}-${date}-${amount}`, date, type: type === 'debt_repayment' ? 'Debt Repayment' : 'Wallet', amount, delta: 0, details: entry.note || type.replace(/_/g,' '), runningType: 'other' });
@@ -3077,6 +3088,14 @@ function staffLedgerEvents(staffId) {
       if (req.type === 'float_declaration' && (payload.staffId === staffId || payload.staff_id === staffId)) {
         const amount = Number(payload.amount || payload.floatAmount || 0);
         addEvent({ key: req.id || `form-approval-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: `Approved FORM for ${date}`, runningType: 'form' });
+      }
+      if (req.type === 'customer_credit' && payload.staffId === staffId) {
+        const amount = Number(payload.amount || 0);
+        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
+      }
+      if (req.type === 'customer_debit' && payload.staffId === staffId) {
+        const amount = Number(payload.amount || 0);
+        addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
       }
       if (req.type === 'customer_credit_journal' && payload.staffId === staffId) {
         const formAmount = Number(payload.formAmount || 0);
@@ -5004,41 +5023,42 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function approvalModeAmount(record, mode) {
     const desiredMode = normalizePaymentMode(mode);
     if (!record || record.status !== 'approved') return 0;
-    // Direct customer_credit/customer_debit no longer have any relationship with FORM.
     if (record.type === 'customer_credit_journal' || record.type === 'customer_debit_journal') {
       const journalMode = normalizePaymentMode(record.payload?.formPaymentMode);
       return journalMode === desiredMode ? Number(record.payload?.formAmount || 0) : 0;
     }
-    return 0;
+    // Direct customer_credit/customer_debit draw on the daily FORM directly.
+    const recordMode = normalizePaymentMode(record.payload?.paymentMode || record.payload?.payoutSource);
+    return recordMode === desiredMode ? Number(record.payload?.amount || 0) : 0;
   }
 
   function approvedCreditTotalForDateByMode(staffId, dateStr, mode) {
     return (state.approvals||[])
-      .filter(r => r.type === 'customer_credit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
+      .filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedDebitTotalForDateByMode(staffId, dateStr, mode) {
     return (state.approvals||[])
-      .filter(r => r.type === 'customer_debit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
+      .filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedCreditTotalForDate(staffId, dateStr) {
-    return (state.approvals||[]).filter(r => r.type === 'customer_credit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + Number(r.payload?.formAmount || 0), 0);
+    return (state.approvals||[]).filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_credit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }
 
   function approvedDebitTotalForDate(staffId, dateStr) {
-    return (state.approvals||[]).filter(r => r.type === 'customer_debit_journal' && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + Number(r.payload?.formAmount || 0), 0);
+    return (state.approvals||[]).filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_debit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }
 
   function pendingPostedFloatImpactForDate(staffId, dateStr) {
     return (state.approvals||[])
-      .filter(r => ['customer_credit_journal','customer_debit_journal'].includes(r.type)
+      .filter(r => ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type)
         && r.status === 'pending'
         && r.payload?.staffId === staffId
         && r.payload?.date === dateStr)
-      .reduce((s,r)=> s + Number(r.payload?.formAmount || 0), 0);
+      .reduce((s,r)=> s + (r.type.endsWith('_journal') ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }
 
   function currentFloatAvailable(staffId, date = businessDate()) {

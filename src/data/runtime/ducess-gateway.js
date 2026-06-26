@@ -1324,22 +1324,20 @@ if (inserted.error) {
         results.push(postedResult.data);
       }
 
-      // Direct customer_credit/customer_debit have no relationship with FORM at all —
-      // post the customer-side transactions only, no staff_cash_ledger entry.
-      if (type === 'customer_credit' || type === 'customer_debit') {
-        return defaultResult.ok({ posted: true, requestType: type, transactions: results, cashLedger: null, decisionNote: decisionNote || '' });
-      }
-
-      // Journals: the journal's OWN declared FORM amount (not the sum of its rows)
-      // is what draws down the staff's daily FORM, posted once per journal.
+      // Direct customer_credit/customer_debit draw on the daily FORM directly,
+      // using the actual posted amount. Journals draw on it via their own
+      // declared FORM amount instead (not the sum of their rows).
+      const isJournal = (type === 'customer_credit_journal' || type === 'customer_debit_journal');
       const journalFormAmount = normalizeNumber(payload.formAmount);
+      const directTotalAmount = results.reduce((sum, item) => sum + normalizeNumber(item?.sourceAmount || item?.amount), 0);
+      const ledgerAmount = isJournal ? journalFormAmount : directTotalAmount;
       const ledgerResult = await insertStaffCashLedgerEntry({
         approvalRequestId: requestRow.id,
         staffId: payload.staffId || payload.requestedByStaffId || requestRow.requested_by_staff_id || null,
         entryType: type,
-        amount: journalFormAmount,
-        delta: journalFormAmount ? -Math.abs(journalFormAmount) : 0,
-        note: payload.note || `${type} form posted from approval ${requestRow.id}`,
+        amount: ledgerAmount,
+        delta: ledgerAmount ? -Math.abs(ledgerAmount) : 0,
+        note: payload.note || `${type}${isJournal ? ' form' : ''} posted from approval ${requestRow.id}`,
         floatDate: payload.date || payload.businessDate || null,
         createdByStaffId: requestRow.requested_by_staff_id || null,
         approvedByStaffId: approver?.staffId || null,
