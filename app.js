@@ -430,7 +430,7 @@
 
   function buildCodDailySnapshot(dateStr, postingStaff = []) {
     const rows = postingStaff.map(st => {
-      const formAmount = getOpeningBalanceForDate(st.id, dateStr);
+      const formAmount = getStaffOperationalBalance(st.id);
       const creditCash = approvedCreditTotalForDateByMode(st.id, dateStr, 'cash');
       const creditTransfer = approvedCreditTotalForDateByMode(st.id, dateStr, 'transfer');
       const debitCash = approvedDebitTotalForDateByMode(st.id, dateStr, 'cash');
@@ -1916,7 +1916,7 @@ function hideProcessing() {
 
   function renderModules() {
     const current = state.ui.module;
-    const moduleOrder = ['administration','balances','cash_officer','tellering','customer_service','approvals'];
+    const moduleOrder = ['customer_service','tellering','approvals','administration','balances','cash_officer'];
     byId('moduleGrid').innerHTML = `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
       const m = MODULES[key];
       const allowed = moduleAllowed(key);
@@ -2224,8 +2224,7 @@ function hideProcessing() {
   function renderJournalTool(kind) {
     const title = kind === 'credit' ? 'Credit' : 'Debit';
     const st = currentStaff();
-    const opening = getOpeningBalanceForDate(st?.id, businessDate());
-    const running = currentFloatAvailable(st?.id, businessDate());
+    const opBalance = getStaffOperationalBalance(st?.id);
     state.ui.generatedJournals ||= {};
     state.ui.collapsedJournals ||= {};
     const journalKey = `${st?.id || 'staff'}:${businessDate()}:${kind}`;
@@ -2255,9 +2254,8 @@ function hideProcessing() {
                 <input id="txAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                 <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
                 <div class="posting-kpis-inline">
-                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">FORM</span><span class="mini-kpi-pill-value">${money(opening)}</span></div>
-                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">BALANCE</span><span class="mini-kpi-pill-value" id="postingRunningFloat">${money(Math.max(0, running))}</span></div>
-                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">VARIANCE</span><span class="mini-kpi-pill-value balance-negative" id="postingVariance">${money(Math.max(0, -running))}</span></div>
+                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">OP. BALANCE</span><span class="mini-kpi-pill-value" id="postingRunningFloat">${money(Math.max(0, opBalance))}</span></div>
+                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">VARIANCE</span><span class="mini-kpi-pill-value balance-negative" id="postingVariance">${money(Math.max(0, -opBalance))}</span></div>
                 </div>
               </div>
             </div>
@@ -2463,7 +2461,7 @@ function hideProcessing() {
       const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
       const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
       const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
-      const formAmount = Number(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date));
+      const formAmount = Number(c.formAmount ?? c.openingBalance ?? getStaffOperationalBalance(c.staffId));
       const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
       const variance = Number(c.variance ?? Math.abs(remaining));
       const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
@@ -2472,7 +2470,7 @@ function hideProcessing() {
       const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || ''; return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
-    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const formAmount = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getOpeningBalanceForDate(rec.staffId, rec.date)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? codRemainingBalance(formAmount, Number(rec.totalCredits ?? ((rec.totalCreditCash||0)+(rec.totalCreditTransfer||0))), Number(rec.totalDebits ?? ((rec.totalDebitCash||0)+(rec.totalDebitTransfer||0))))) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(formAmount):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
+    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
@@ -4948,7 +4946,7 @@ function normalizeStaffLedgerEntryType(row) {
       try {
       if (isSupabaseApprovalMode() && gateway.cod?.submitCod) {
         for (const st of postingStaff) {
-          const formAmount = getOpeningBalanceForDate(st.id,businessDate());
+          const opBalance = getStaffOperationalBalance(st.id);
           const creditCash = approvedCreditTotalForDateByMode(st.id, businessDate(), 'cash');
           const creditTransfer = approvedCreditTotalForDateByMode(st.id, businessDate(), 'transfer');
           const debitCash = approvedDebitTotalForDateByMode(st.id, businessDate(), 'cash');
@@ -4956,41 +4954,40 @@ function normalizeStaffLedgerEntryType(row) {
           const credits = creditCash + creditTransfer;
           const debits = debitCash + debitTransfer;
           const netBook = credits - debits;
-          const running = codRemainingBalance(formAmount, credits, debits);
+          const remaining = opBalance;
           const note=q(`[data-cod-note="${st.id}"]`)?.value?.trim()||'';
-          const variance=Math.max(0,-running);
-          const overdraw=Math.max(0,-running);
+          const variance=Math.max(0,-remaining);
           const result = await gateway.cod.submitCod({
             staffId: st.id,
             staffUuid: getStaffBackendId(st),
             staffBackendId: getStaffBackendId(st),
             businessDate: businessDate(),
-            actualCash: running,
+            actualCash: remaining,
             note,
             submittedByStaffId: currentStaff()?.id || st.id,
             submittedByStaffUuid: getStaffBackendId(currentStaff()),
             submittedByStaffBackendId: getStaffBackendId(currentStaff()),
             metrics: {
-              openingBalance: formAmount,
+              openingBalance: opBalance,
               floatTopUps: 0,
-              effectiveOpeningBalance: formAmount,
+              effectiveOpeningBalance: opBalance,
               totalCredits: credits,
               totalDebits: debits,
               netBookBalance: netBook,
-              remainingBalance: running,
-              expectedCash: running,
-              overdraw
+              remainingBalance: remaining,
+              expectedCash: remaining,
+              variance
             }
           });
           if (result?.ok && result.data) {
             const existingIndex = (state.cod || []).findIndex(item => item.id === result.data.id);
-            const nextRow = Object.assign({}, result.data, { staffName: st.name, formAmount, openingBalance: formAmount, totalCreditCash: creditCash, totalCreditTransfer: creditTransfer, totalDebitCash: debitCash, totalDebitTransfer: debitTransfer, totalCredits: credits, totalDebits: debits, netBookBalance: netBook, actualCash: running, expectedCash: running, runningFloat: running, remainingBalance: running, variance, overdraw, note });
+            const nextRow = Object.assign({}, result.data, { staffName: st.name, formAmount: opBalance, openingBalance: opBalance, totalCreditCash: creditCash, totalCreditTransfer: creditTransfer, totalDebitCash: debitCash, totalDebitTransfer: debitTransfer, totalCredits: credits, totalDebits: debits, netBookBalance: netBook, actualCash: remaining, expectedCash: remaining, runningFloat: remaining, remainingBalance: remaining, variance, note });
             if (existingIndex >= 0) state.cod.splice(existingIndex, 1, nextRow); else state.cod.unshift(nextRow);
           } else if (result?.ok === false) { showToast(result.error?.message || 'Unable to submit close of day'); return; }
         }
       } else {
         postingStaff.forEach(st => {
-          const formAmount=getOpeningBalanceForDate(st.id,businessDate());
+          const opBalance = getStaffOperationalBalance(st.id);
           const creditCash = approvedCreditTotalForDateByMode(st.id, businessDate(), 'cash');
           const creditTransfer = approvedCreditTotalForDateByMode(st.id, businessDate(), 'transfer');
           const debitCash = approvedDebitTotalForDateByMode(st.id, businessDate(), 'cash');
@@ -4998,11 +4995,10 @@ function normalizeStaffLedgerEntryType(row) {
           const credits=creditCash+creditTransfer;
           const debits=debitCash+debitTransfer;
           const netBook=credits-debits;
-          const running=codRemainingBalance(formAmount, credits, debits);
+          const remaining=opBalance;
           const note=q(`[data-cod-note="${st.id}"]`)?.value?.trim()||'';
-          const variance=Math.abs(running);
-          const overdraw=Math.max(0,-running);
-          state.cod.unshift({id:uid('cod'), staffId:st.id, staffName:st.name, date:businessDate(), formAmount, openingBalance:formAmount, totalCreditCash:creditCash, totalCreditTransfer:creditTransfer, totalDebitCash:debitCash, totalDebitTransfer:debitTransfer, totalCredits:credits, totalDebits:debits, netBookBalance:netBook, actualCash:running, expectedCash:0, runningFloat:running, remainingBalance:running, variance, overdraw, note, fieldPapers:[], status: variance===0 ? 'balanced':'flagged', approvedAt:new Date().toISOString(), approvedBy:currentStaff()?.name||''});
+          const variance=Math.max(0,-remaining);
+          state.cod.unshift({id:uid('cod'), staffId:st.id, staffName:st.name, date:businessDate(), formAmount:opBalance, openingBalance:opBalance, totalCreditCash:creditCash, totalCreditTransfer:creditTransfer, totalDebitCash:debitCash, totalDebitTransfer:debitTransfer, totalCredits:credits, totalDebits:debits, netBookBalance:netBook, actualCash:remaining, expectedCash:0, runningFloat:remaining, remainingBalance:remaining, variance, note, fieldPapers:[], status: variance===0 ? 'balanced':'flagged', approvedAt:new Date().toISOString(), approvedBy:currentStaff()?.name||''});
         });
       }
       const closingDate = businessDate();
@@ -5383,12 +5379,11 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const totalCredits = c ? Number(c.totalCredits ?? (totalCreditCash + totalCreditTransfer)) : 0;
     const totalDebits = c ? Number(c.totalDebits ?? (totalDebitCash + totalDebitTransfer)) : 0;
     const netBook = c ? Number(c.netBookBalance ?? (totalCredits - totalDebits)) : 0;
-    const remainingBalance = c ? Number(c.remainingBalance ?? c.runningFloat ?? currentFloatAvailable(c.staffId, c.date)) : 0;
+    const remainingBalance = c ? Number(c.remainingBalance ?? c.runningFloat ?? getStaffOperationalBalance((st||{}).id)) : 0;
     const varianceValue = c ? Number(c.variance ?? Math.max(0, -remainingBalance)) : 0;
-    const overdrawValue = c ? Number(c.overdraw ?? Math.max(0, -remainingBalance)) : 0;
     const summary = c ? `
       <div class="kpi-row wrap cod-summary-grid">
-        <div class="kpi"><div class="label">Form</div><div class="number">${money(c.formAmount ?? c.openingBalance ?? getOpeningBalanceForDate(c.staffId, c.date))}</div></div>
+        <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(c.formAmount ?? c.openingBalance ?? getStaffOperationalBalance((st||{}).id))}</div></div>
         <div class="kpi"><div class="label">Credit Cash</div><div class="number">${money(totalCreditCash)}</div></div>
         <div class="kpi"><div class="label">Credit Transfer</div><div class="number">${money(totalCreditTransfer)}</div></div>
         <div class="kpi"><div class="label">Total Credits</div><div class="number">${money(totalCredits)}</div></div>
@@ -5398,9 +5393,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <div class="kpi"><div class="label">Net Balance</div><div class="number ${netBook<0?'balance-negative':''}">${money(netBook)}</div></div>
         <div class="kpi"><div class="label">Remaining Balance</div><div class="number ${remainingBalance<0?'balance-negative':''}">${money(remainingBalance)}</div></div>
         <div class="kpi"><div class="label">Variance</div><div class="number ${varianceValue>0?'balance-negative':''}">${money(varianceValue)}</div></div>
-        <div class="kpi"><div class="label">Overdraw</div><div class="number ${overdrawValue>0?'balance-negative':''}">${money(overdrawValue)}</div></div>
       </div>
-      <div class="note">Form is the approved opening money collected from the field. Net Balance is Total Credits minus Total Debits. Remaining Balance, Variance, and Overdraw reflect how the form was used.</div>
+      <div class="note">Operational Balance is the total funded by Cash Officer. Net Balance is Total Credits minus Total Debits. Remaining Balance reflects unaccounted funds.</div>
       <div class="note"><strong>Status:</strong> ${c.status || 'balanced'} • <strong>Manager Note:</strong> ${c.resolutionNote || c.note || '—'}</div>` : `<div class="note">No close-of-day record for selected date.</div>`;
     openModal('My Close of Day', `<div class="modal-sheet my-close-day-sheet"><div class="stack"><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="myCodDate" value="${state.ui.myCodDate}"></div></div>${summary}</div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const picker = byId('myCodDate');
@@ -5444,7 +5438,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       String(c.cod_submission_id || '') === String(codId || '')
     );
     if (!cod) return showToast('COD record not found. Please refresh and try again.');
-    const formAmount = Number(cod.formAmount ?? cod.openingBalance ?? getOpeningBalanceForDate(cod.staffId, cod.date));
+    const formAmount = Number(cod.formAmount ?? cod.openingBalance ?? getStaffOperationalBalance(cod.staffId));
     const totalCreditCash = Number(cod.totalCreditCash ?? approvedCreditTotalForDateByMode(cod.staffId, cod.date, 'cash'));
     const totalCreditTransfer = Number(cod.totalCreditTransfer ?? approvedCreditTotalForDateByMode(cod.staffId, cod.date, 'transfer'));
     const totalDebitCash = Number(cod.totalDebitCash ?? approvedDebitTotalForDateByMode(cod.staffId, cod.date, 'cash'));
@@ -5452,10 +5446,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const totalCredits = Number(cod.totalCredits ?? (totalCreditCash + totalCreditTransfer));
     const totalDebits = Number(cod.totalDebits ?? (totalDebitCash + totalDebitTransfer));
     const currentNetBookBalance = Number(cod.netBookBalance ?? (totalCredits - totalDebits));
-    const currentRemainingBalance = codRemainingBalance(formAmount, totalCredits, totalDebits);
-    // Always recompute variance and overdraw from live remaining balance.
-    // cod.variance stored by Supabase gateway can be 0 (actualCash - expectedCash)
-    // which differs from the DUCESS definition: any unreconciled remaining balance = variance.
+    const currentRemainingBalance = formAmount - totalCredits - totalDebits;
     const currentVariance = Math.abs(currentRemainingBalance);
     const currentOverdraw = Math.max(0, -currentRemainingBalance);
     const defaultDebt = Math.max(currentOverdraw, Number(cod.debtAmount || 0));

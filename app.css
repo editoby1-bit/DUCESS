@@ -6871,12 +6871,13 @@ body[data-theme="ducess-sheet"] .module-hub{
   .module-grid{
     display:grid !important;
     grid-template-columns: 1fr 1fr 220px 1fr 1fr !important;
-    grid-template-rows: auto 1fr 1fr 1fr !important;
+    grid-template-rows: auto 1fr 1fr 1fr 1fr !important;
     grid-template-areas:
       '. . dash . .'
       'cs . hub . tell'
       '. approval hub admin .'
-      '. . balances . .' !important;
+      '. . balances . .'
+      '. . cash . .' !important;
     align-items:center !important;
     justify-items:center !important;
     gap:18px 26px !important;
@@ -6887,11 +6888,12 @@ body[data-theme="ducess-sheet"] .module-hub{
   .module-hub{grid-area:hub !important; width:220px !important; height:220px !important; border-radius:50% !important; display:flex !important; align-items:center !important; justify-content:center !important; background:rgba(255,255,255,.28) !important; border:1px solid rgba(102,139,172,.22) !important; box-shadow:none !important; overflow:hidden !important;}
   .module-hub-logo{width:88% !important; height:88% !important; object-fit:contain !important; border-radius:50% !important; display:block !important;}
   .module-grid > .module-card{grid-column:auto !important; width:max-content !important; min-width:0 !important; min-height:0 !important; padding:4px 8px !important; border:none !important; box-shadow:none !important; background:transparent !important; border-radius:0 !important; display:flex !important; align-items:center !important; gap:12px !important;}
-  .module-grid > .module-card:nth-child(3){grid-area:cs !important; justify-self:end !important; align-self:end !important;}
+  .module-grid > .module-card:nth-child(3){grid-area:cs !important; justify-self:center !important; align-self:end !important;}
   .module-grid > .module-card:nth-child(4){grid-area:tell !important; justify-self:start !important; align-self:end !important;}
   .module-grid > .module-card:nth-child(5){grid-area:approval !important; justify-self:end !important;}
   .module-grid > .module-card:nth-child(6){grid-area:admin !important; justify-self:start !important;}
   .module-grid > .module-card:nth-child(7){grid-area:balances !important; justify-self:center !important; align-self:start !important;}
+  .module-grid > .module-card:nth-child(8){grid-area:cash !important; justify-self:center !important; align-self:start !important;}
   .module-card .module-icon{width:42px !important; height:42px !important; border-radius:12px !important; margin:0 !important;}
   .module-card .module-title{margin:0 !important; font-size:11px !important; line-height:1.05 !important;}
   .module-card .module-desc{display:none !important;}
@@ -6985,12 +6987,13 @@ body[data-theme="ducess-sheet"] .module-hub{
     position:relative !important;
     display:grid !important;
     grid-template-columns: minmax(200px,1fr) minmax(180px,220px) minmax(180px,220px) minmax(200px,1fr) !important;
-    grid-template-rows: auto 130px 120px 120px !important;
+    grid-template-rows: auto 130px 120px 120px 100px !important;
     grid-template-areas:
       '. dash dash .'
       'cs hub hub tell'
       '. approval admin .'
-      '. balances balances .' !important;
+      '. balances balances .'
+      '. cash cash .' !important;
     align-items:center !important;
     justify-items:center !important;
     gap: 10px 18px !important;
@@ -7033,6 +7036,7 @@ body[data-theme="ducess-sheet"] .module-hub{
   .module-grid > .module-card:nth-child(5){grid-area:approval !important; justify-self:end !important; align-self:center !important;}
   .module-grid > .module-card:nth-child(6){grid-area:admin !important; justify-self:start !important; align-self:center !important;}
   .module-grid > .module-card:nth-child(7){grid-area:balances !important; justify-self:center !important; align-self:start !important;}
+  .module-grid > .module-card:nth-child(8){grid-area:cash !important; justify-self:center !important; align-self:center !important;}
   .module-card .module-icon{
     width:44px !important;
     height:44px !important;
