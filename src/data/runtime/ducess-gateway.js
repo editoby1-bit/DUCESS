@@ -1141,48 +1141,35 @@ function subscribeRealtime() {
   const payload = requestRow?.payload || {};
 
   if (type === 'account_opening') {
+  const acctType = payload.accountType || 'customer';
   const fullName = payload.fullName || payload.name || '';
   const phone = payload.phone || '';
 
-  const existing = await client
-    .from(customersTable)
-    .select(customersSelect)
-    .eq('full_name', fullName)
-    .eq('phone', phone)
-    .limit(1)
-    .maybeSingle();
-
-  if (existing.error) {
-    return defaultResult.err(
-      'CUSTOMER_LOOKUP_FAILED',
-      'Could not verify existing customer before posting approval.',
-      existing.error
-    );
+  // For system-assigned account types, generate account number now at approval time
+  let generatedAccountNumber = String(payload.generatedAccountNumber || '').trim();
+  if (acctType === 'staff_operational' && !generatedAccountNumber) {
+    const { data: seqData } = await client.rpc('generate_staff_operational_account_number');
+    generatedAccountNumber = seqData || '';
+  } else if (acctType === 'expense' && !generatedAccountNumber) {
+    const { data: seqData } = await client.rpc('generate_expense_account_number');
+    generatedAccountNumber = seqData || '';
+  } else if (acctType === 'income' && !generatedAccountNumber) {
+    const { data: seqData } = await client.rpc('generate_income_account_number');
+    generatedAccountNumber = seqData || '';
   }
 
-  if (existing.data) {
-    return defaultResult.ok({
-      posted: true,
-      requestType: type,
-      transactions: [],
-      cashLedger: null,
-      customer: existing.data,
-      decisionNote: decisionNote || '',
-      alreadyPosted: true
-    });
+  if (!generatedAccountNumber) {
+    return defaultResult.err('ACCOUNT_NUMBER_REQUIRED', acctType === 'customer' ? 'Account number must be entered before approving account opening.' : 'Failed to generate system account number.');
   }
 
-  const generatedAccountNumber = String(payload.generatedAccountNumber || '').trim();
-
-if (!generatedAccountNumber) {
-  return defaultResult.err(
-    'ACCOUNT_NUMBER_REQUIRED',
-    'Account number must be entered before approving account opening.'
-  );
-}
+  // For customer accounts, check for duplicates by name+phone
+  if (acctType === 'customer') {
+    const existing = await client.from(customersTable).select(customersSelect).eq('full_name', fullName).eq('phone', phone).limit(1).maybeSingle();
+    if (existing.error) return defaultResult.err('CUSTOMER_LOOKUP_FAILED', 'Could not verify existing customer before posting approval.', existing.error);
+    if (existing.data) return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, customer: existing.data, decisionNote: decisionNote || '', alreadyPosted: true });
+  }
 
   const customerRow = {
-    customer_number: null,
     account_number: generatedAccountNumber,
     old_account_number: payload.oldAccountNumber || payload.old_account_number || '',
     full_name: fullName,
@@ -1192,8 +1179,10 @@ if (!generatedAccountNumber) {
     phone: phone,
     photo_path: payload.photo || payload.photoRef || payload.photo_path || '',
     status: 'active',
-    linked_staff_id: requestRow.requested_by_staff_id || null,
-    account_type: 'customer',
+    account_type: acctType,
+    display_name: payload.name || fullName,
+    linked_staff_id: payload.linkedStaffId || null,
+    system_assigned: acctType !== 'customer',
     created_at: new Date().toISOString(),
     is_active: true
   };
@@ -1230,7 +1219,6 @@ if (inserted.error) {
   );
 }
 
-
   return defaultResult.ok({
     posted: true,
     requestType: type,
@@ -1241,6 +1229,39 @@ if (inserted.error) {
   });
 }
 
+      // Cash receipt: Cash Officer self-credit to own operational account
+      if (type === 'cash_receipt') {
+        const ledgerResult = await insertStaffCashLedgerEntry({
+          approvalRequestId: requestRow.id,
+          staffId: payload.staffId || null,
+          entryType: 'cash_receipt',
+          amount: normalizeNumber(payload.amount),
+          delta: normalizeNumber(payload.amount),
+          note: payload.note || `Cash receipt by ${payload.staffName || 'Cash Officer'} (${payload.paymentMode || 'cash'})`,
+          floatDate: payload.date || null,
+          createdByStaffId: requestRow.requested_by_staff_id || null,
+          approvedByStaffId: approver?.staffId || null,
+        });
+        if (!ledgerResult.ok) return ledgerResult;
+        return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: ledgerResult.data, decisionNote: decisionNote || '' });
+      }
+
+      // Inter-staff credit: Cash Officer credits a Teller's operational account
+      if (type === 'inter_staff_credit') {
+        const ledgerResult = await insertStaffCashLedgerEntry({
+          approvalRequestId: requestRow.id,
+          staffId: payload.staffId || null,
+          entryType: 'inter_staff_credit',
+          amount: normalizeNumber(payload.amount),
+          delta: normalizeNumber(payload.amount),
+          note: payload.note || `Operational credit from ${payload.staffName || 'Cash Officer'} to ${payload.targetAccountName || payload.targetAccountNumber || 'teller account'} (${payload.paymentMode || 'cash'})`,
+          floatDate: payload.date || null,
+          createdByStaffId: requestRow.requested_by_staff_id || null,
+          approvedByStaffId: approver?.staffId || null,
+        });
+        if (!ledgerResult.ok) return ledgerResult;
+        return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: ledgerResult.data, decisionNote: decisionNote || '' });
+      }
 
       const postable = ['customer_credit', 'customer_debit', 'customer_credit_journal', 'customer_debit_journal', 'float_topup', 'float_declaration', 'debt_repayment'];
       if (!postable.includes(type)) {
@@ -2169,7 +2190,34 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           if (resp.ok && json.id) {
             authUserId = json.id;
           } else {
-            return defaultResult.err('AUTH_USER_CREATE_FAILED', json.error || 'Edge Function failed to create auth user', json);
+            // If the auth user already exists (orphaned from a previous failed attempt),
+            // recover its ID from the Edge Function response or from any existing
+            // staff profile row, then continue to the profile insert rather than bailing.
+            const alreadyRegistered = (json.error || '').toLowerCase().includes('already') ||
+              (json.error || '').toLowerCase().includes('registered') ||
+              (json.error || '').toLowerCase().includes('email address');
+            if (alreadyRegistered) {
+              // Try to get the auth_user_id from the Edge Function's recovery field first
+              if (json.userId || json.user_id || json.auth_user_id) {
+                authUserId = json.userId || json.user_id || json.auth_user_id;
+              } else {
+                // Fall back: check if a staff profile already exists with this email —
+                // if so, that's a true duplicate staff, not an orphan, and we should stop.
+                const { data: existingProfile } = await client
+                  .from(staffTable)
+                  .select('id, staff_code, auth_user_id')
+                  .eq('staff_code', staffCode)
+                  .maybeSingle();
+                if (existingProfile) {
+                  return defaultResult.err('STAFF_ALREADY_EXISTS', `A staff member with code ${staffCode} already exists.`, existingProfile);
+                }
+                // No profile row exists — this is a genuine orphan.
+                // Leave authUserId null and proceed; profile will be created
+                // without an auth_user_id link (admin can re-link manually if needed).
+              }
+            } else {
+              return defaultResult.err('AUTH_USER_CREATE_FAILED', json.error || 'Edge Function failed to create auth user', json);
+            }
           }
         } catch (err) {
           return defaultResult.err('EDGE_FN_ERROR', 'Could not reach create-staff-user Edge Function', err);

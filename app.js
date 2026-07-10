@@ -97,6 +97,7 @@
   const ROLE_LABELS = {
     customer_service: 'Customer Service Officer',
     teller: 'Teller',
+    cash_officer: 'Cash Officer',
     approving_officer: 'Approving Officer',
     admin_officer: 'Administrative Officer',
     report_officer: 'Report Officer'
@@ -109,11 +110,17 @@
       icon: '👤',
       tools: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','operational_accounts']
     },
+    cash_officer: {
+      title: 'Cash Office',
+      desc: 'Receive cash, credit staff operational accounts, and manage cash flow.',
+      icon: '💰',
+      tools: ['check_balance','cash_receipt','staff_credit','account_statement','my_balance','my_close_day']
+    },
     tellering: {
       title: 'Tellering',
-      desc: 'Credit and debit customers through a journal workflow with approved float control.',
+      desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','credit','debit','operational_accounts','my_balance','opening_balance','my_close_day']
+      tools: ['check_balance','credit','debit','account_statement','my_balance','my_close_day']
     },
     approvals: {
       title: 'Approval',
@@ -141,10 +148,11 @@
     account_maintenance: 'Account Maintenance',
     account_reactivation: 'Account Reactivation',
     account_statement: 'Account Statement',
+    cash_receipt: 'Cash Receipt',
+    staff_credit: 'Credit Staff Account',
     credit: 'Credit',
     debit: 'Debit',
     my_balance: 'My Balance',
-    opening_balance: 'Form',
     my_close_day: 'My Close of Day',
     central_close_day: 'Central Close of Day',
     approval_queue: 'Approval Queue',
@@ -163,9 +171,10 @@
 
   const DEFAULT_PERMS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','operational_accounts'],
-    teller: ['check_balance','account_statement','credit','debit','operational_accounts','my_balance','opening_balance','my_close_day'],
-    approving_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','credit','debit','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','business_balance','operational_balance','operational_accounts','my_balance','opening_balance','my_close_day'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','credit','debit','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','permissions','operational_accounts','operational_posting','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','opening_balance','my_close_day'],
+    cash_officer: ['check_balance','cash_receipt','staff_credit','account_statement','my_balance','my_close_day'],
+    teller: ['check_balance','account_statement','credit','debit','my_balance','my_close_day'],
+    approving_officer: ['central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','permissions','operational_accounts','operational_posting','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts']
   };
 
@@ -1500,6 +1509,17 @@ if (approvalRecord.type === 'float_topup') {
         if (c) { c.active = true; c.frozen = false; }
         break;
       }
+      case 'cash_receipt': {
+        // Credit Cash Officer's own operational account balance — recorded in staff_cash_ledger
+        // The frontend getStaffOperationalBalance reads from state.approvals directly,
+        // so no separate ledger entry needed in local mode.
+        break;
+      }
+      case 'inter_staff_credit': {
+        // Cash Officer credits a Teller's operational account.
+        // getStaffOperationalBalance reads from state.approvals directly, so no ledger entry needed in local mode.
+        break;
+      }
       case 'float_declaration': {
         if (!hasBaseOpeningBalanceForDate(req.payload.staffId, req.payload.date)) {
           addStaffEntry(
@@ -1514,7 +1534,7 @@ if (approvalRecord.type === 'float_topup') {
         break;
       }
       case 'float_topup': {
-        // Form system: top-up disabled
+        // Legacy — no-op
         break;
       }
       case 'customer_credit': {
@@ -1897,7 +1917,7 @@ function hideProcessing() {
 
   function renderModules() {
     const current = state.ui.module;
-    const moduleOrder = ['administration','balances','tellering','customer_service','approvals'];
+    const moduleOrder = ['administration','balances','cash_officer','tellering','customer_service','approvals'];
     byId('moduleGrid').innerHTML = `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
       const m = MODULES[key];
       const allowed = moduleAllowed(key);
@@ -1942,15 +1962,26 @@ function hideProcessing() {
           ${toolBtn('check_balance')}
           ${toolBtn('credit')}
           ${toolBtn('debit')}
+          ${toolBtn('account_statement')}
           ${toolBtn('my_balance')}
-          ${toolBtn('opening_balance')}
           ${toolBtn('my_close_day')}
-          ${toolBtn('operational_accounts')}
+        </div>`;
+      }
+      if (state.ui.module === 'cash_officer') {
+        const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
+        return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
+          <div class="tool-column-title tellering-tools-only-title">Cash Office Tools</div>
+          ${toolBtn('check_balance')}
+          ${toolBtn('cash_receipt')}
+          ${toolBtn('staff_credit')}
+          ${toolBtn('account_statement')}
+          ${toolBtn('my_balance')}
+          ${toolBtn('my_close_day')}
         </div>`;
       }
       return module.tools.map(t => `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>`).join('');
     };
-    const tabs = `<div class="workspace-switcher"><div class="tool-tabs vertical-tool-tabs ${state.ui.module==='tellering'?'tellering-tool-tabs':''}">${renderToolButtons()}</div><div class="workspace-tool-body">${state.ui.tool ? renderTool(state.ui.tool) : `<div class="tool-empty-state"><div class="tool-empty-title">${module.title}</div><div class="tool-empty-note">Select a heading to open that work area.</div></div>`}</div></div>`;
+    const tabs = `<div class="workspace-switcher"><div class="tool-tabs vertical-tool-tabs ${(state.ui.module==='tellering'||state.ui.module==='cash_officer')?'tellering-tool-tabs':''}">${renderToolButtons()}</div><div class="workspace-tool-body">${state.ui.tool ? renderTool(state.ui.tool) : `<div class="tool-empty-state"><div class="tool-empty-title">${module.title}</div><div class="tool-empty-note">Select a heading to open that work area.</div></div>`}</div></div>`;
     byId('workspace').innerHTML = tabs;
     qq('.tool-tab').forEach(btn => btn.onclick = () => {
       const nextTool = btn.dataset.tool;
@@ -1978,14 +2009,14 @@ function hideProcessing() {
         if (nextTool === 'approval_others') state.ui.approvalsSection = 'others';
       }
       if (state.ui.tool === 'check_balance') state.ui.checkBalanceLoaded = false;
-      state.ui.modalToggleTool = state.ui.tool && ['my_balance','opening_balance','my_close_day','central_close_day'].includes(state.ui.tool) ? state.ui.tool : null;
+      state.ui.modalToggleTool = state.ui.tool && ['my_balance','my_close_day','central_close_day'].includes(state.ui.tool) ? state.ui.tool : null;
       save();
       renderWorkspace();
       if (nextTool === 'my_balance' && state.ui.tool === 'my_balance') openMyBalanceModal();
-      if (nextTool === 'opening_balance' && state.ui.tool === 'opening_balance') openFloatModal();
+      if (nextTool === 'cash_receipt' && state.ui.tool === 'cash_receipt') openCashReceiptModal();
       if (nextTool === 'my_close_day' && state.ui.tool === 'my_close_day') openMyCODModal();
       if (nextTool === 'central_close_day' && state.ui.tool === 'central_close_day') openCODModal();
-      if (['my_balance','opening_balance','my_close_day','central_close_day'].includes(nextTool)) return;
+      if (['my_balance','my_close_day','central_close_day'].includes(nextTool)) return;
       if (['approval_customer_service','approval_tellering','approval_others'].includes(nextTool) && state.ui.tool === nextTool) {
         smoothScrollToOpenedSegment('#approvalsSectionTabs');
         return;
@@ -2002,10 +2033,11 @@ function hideProcessing() {
       case 'account_maintenance': return renderAccountMaintenance();
       case 'account_reactivation': return renderAccountReactivation();
       case 'account_statement': return renderAccountStatement();
+      case 'cash_receipt': return `<div class="tool-empty-state"><div class="tool-empty-title">Cash Receipt</div><div class="tool-empty-note">Cash Receipt opens in a modal. Click the heading again to open it.</div></div>`;
+      case 'staff_credit': return renderStaffCredit();
       case 'credit': return renderJournalTool('credit');
       case 'debit': return renderJournalTool('debit');
       case 'my_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">My Balance</div><div class="tool-empty-note">Balance details open in a modal when this heading is selected.</div></div>`;
-      case 'opening_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">Form</div><div class="tool-empty-note">Form opens in a modal when this heading is selected.</div></div>`;
       case 'my_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">My Close of Day</div><div class="tool-empty-note">Close-of-day details open in a modal when this heading is selected.</div></div>`;
       case 'central_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">Central Close of Day</div><div class="tool-empty-note">Central close-of-day opens in a modal when this heading is selected.</div></div>`;
       case 'approval_customer_service':
@@ -2059,13 +2091,47 @@ function hideProcessing() {
 
   function renderAccountOpening() {
     const openingDraft = state.ui.accountOpeningDraft ||= {};
+    const acctType = openingDraft.accountType || 'customer';
+    const isCustomer = acctType === 'customer';
+    const isStaffOp = acctType === 'staff_operational';
+    const isSystemAssigned = acctType !== 'customer';
+    // Build staff list for linking staff_operational accounts
+    const staffOptions = (state.staff || []).filter(s => s.is_active !== false).map(s =>
+      `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${s.name} (${ROLE_LABELS[s.role] || s.role})</option>`
+    ).join('');
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Account Opening</div>
         <div class="cs2-stack">
           <div class="cs2-row">
-            <div class="cs2-label">Account Name</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off"></div>
+            <div class="cs2-label">Account Type</div>
+            <div class="cs2-input-wrap cs2-wide">
+              <select id="openAccountType" class="entry-input cs2-input">
+                <option value="customer" ${acctType==='customer'?'selected':''}>Customer Account</option>
+                <option value="staff_operational" ${acctType==='staff_operational'?'selected':''}>Staff Operational Account</option>
+                <option value="expense" ${acctType==='expense'?'selected':''}>Expense Account</option>
+                <option value="income" ${acctType==='income'?'selected':''}>Income Account</option>
+              </select>
+            </div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">${isStaffOp ? 'Account Display Name' : 'Account Name'}</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off" placeholder="${isStaffOp ? 'e.g. Teller — John Doe' : ''}"></div>
+          </div>
+          ${isStaffOp ? `
+          <div class="cs2-row">
+            <div class="cs2-label">Link to Staff</div>
+            <div class="cs2-input-wrap cs2-wide">
+              <select id="openLinkedStaff" class="entry-input cs2-input">
+                <option value="">— Select Staff Member —</option>
+                ${staffOptions}
+              </select>
+            </div>
+          </div>` : ''}
+          ${isCustomer ? `
+          <div class="cs2-row">
+            <div class="cs2-label">Account Number</div>
+            <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Address</div>
@@ -2091,8 +2157,9 @@ function hideProcessing() {
             <button id="openPhotoBtn" type="button" class="sheet-btn cs2-btn cs2-btn-ghost">Photo Upload</button>
             <input id="openPhoto" class="entry-input cs-sheet-input hidden-photo-input" type="file" accept="image/*">
             <div id="openPhotoStatus" class="cs2-note-box">No photo selected</div>
-            
-          </div>
+          </div>` : `
+          <div class="cs2-note-box">Account number will be system-assigned on approval${isStaffOp ? ' (4-digit starting with 2)' : acctType==='expense' ? ' (Exp prefix)' : ' (Inc prefix)'}.</div>
+          `}
           <div class="cs2-button-row">
             <button id="submitOpening" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
           </div>
@@ -2353,7 +2420,7 @@ function hideProcessing() {
     }
     state.ui.selectedApprovalIds ||= [];
     cleanupApprovalReviewLocks();
-    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','float_declaration'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
+    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
     reconcileBusinessDateFromClosures();
     const openDate = businessDate();
     const currentSection = state.ui.approvalsSection || 'tellering';
@@ -2435,14 +2502,15 @@ function hideProcessing() {
   function prettyApprovalType(type) {
     return {
       account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation',
-      customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', float_declaration:'Form', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
+      customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', cash_receipt:'Cash Receipt', inter_staff_credit:'Staff Account Credit', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
       create_operational_account:'Operational Account', close_of_day:'Close of Day', temp_grant:'Temporary Grant', wallet_fund:'Wallet Funding', debt_repayment:'Debt Repayment'
     }[type] || type;
   }
 
   function requestSummary(a) {
     const p = a.payload || {};
-    if (a.type === 'float_declaration') return `${money(p.amount)} for ${p.date}`;
+    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${p.staffName || 'Cash Officer'} • ${p.paymentMode || 'cash'} • ${p.date}`;
+    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${p.targetAccountName || p.targetAccountNumber || 'staff account'} • ${p.paymentMode || 'cash'} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${p.staffName || 'staff'} for ${p.date}`;
     if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${p.accountNumber} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
     if (a.type === 'account_opening') return `${p.name} • Phone ${p.phone || '—'} • NIN ${p.nin || '—'} • BVN ${p.bvn || '—'}`;
@@ -2484,18 +2552,25 @@ function hideProcessing() {
   let html = '';
 
   if (req.type === 'account_opening') {
-    const assignBlock = req.status === 'pending'
-      ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Enter account number before approval"></div>`
-      : field('Assigned Account Number', p.generatedAccountNumber || '', 'field-account');
+    const acctType = p.accountType || 'customer';
+    const isCustomer = acctType === 'customer';
+    const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Staff Operational Account', expense: 'Expense Account', income: 'Income Account' };
+    const assignBlock = isCustomer
+      ? (req.status === 'pending'
+          ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Enter account number before approval"></div>`
+          : field('Assigned Account Number', p.generatedAccountNumber || '—', 'field-account'))
+      : field('Account Number', req.status === 'pending' ? 'System-assigned on approval' : (p.generatedAccountNumber || 'System-assigned'), 'field-account');
 
     html = `<div class="stack approval-opening-linear">
-      ${field('Name', p.fullName || p.name, 'field-wide')}
-      ${field('Phone', p.phone, 'field-phone')}
-      ${field('Address', p.address, 'field-wide')}
-      ${field('NIN', p.nin, 'field-id')}
-      ${field('BVN', p.bvn, 'field-bvn')}
+      ${field('Account Type', acctTypeLabels[acctType] || acctType, 'field-wide')}
+      ${field('Name / Display Name', p.fullName || p.name, 'field-wide')}
+      ${isCustomer ? field('Phone', p.phone, 'field-phone') : ''}
+      ${isCustomer ? field('Address', p.address, 'field-wide') : ''}
+      ${isCustomer ? field('NIN', p.nin, 'field-id') : ''}
+      ${isCustomer ? field('BVN', p.bvn, 'field-bvn') : ''}
+      ${acctType === 'staff_operational' ? field('Linked Staff', p.linkedStaffName || p.linkedStaffId || '—', 'field-wide') : ''}
       ${assignBlock}
-      ${photoBlock}
+      ${isCustomer ? photoBlock : ''}
     </div>`;
   } else if (req.type === 'account_maintenance') {
     const patch = p.patch || {};
@@ -2547,6 +2622,23 @@ function hideProcessing() {
       ${field('Current Status', customerStatusLabel(customer), 'field-status')}
       ${field('Requested Action', 'Reactivate Account', 'field-submit')}
     </div>${photoBlock}</div>`;
+  } else if (req.type === 'cash_receipt') {
+    html = `<div class="stack"><div class="form-grid three modal-cs-grid">
+      ${field('Cash Officer', p.staffName || '—', 'field-wide')}
+      ${field('Date', p.date || '—', 'field-date')}
+      ${field('Amount', money(p.amount || 0), 'field-account')}
+      ${field('Payment Mode', p.paymentMode || 'cash', 'field-account')}
+      ${p.note ? field('Note', p.note, 'field-wide') : ''}
+    </div></div>`;
+  } else if (req.type === 'inter_staff_credit') {
+    html = `<div class="stack"><div class="form-grid three modal-cs-grid">
+      ${field('From (Cash Officer)', p.staffName || '—', 'field-wide')}
+      ${field('To (Account)', `${p.targetAccountName || '—'} (${p.targetAccountNumber || '—'})`, 'field-wide')}
+      ${field('Date', p.date || '—', 'field-date')}
+      ${field('Amount', money(p.amount || 0), 'field-account')}
+      ${field('Payment Mode', p.paymentMode || 'cash', 'field-account')}
+      ${p.note ? field('Note', p.note, 'field-wide') : ''}
+    </div></div>`;
   } else {
     html = `<pre>${esc(JSON.stringify(p, null, 2))}</pre>`;
   }
@@ -2586,10 +2678,13 @@ function hideProcessing() {
       className: 'success',
       onClick: async () => {
         if (req.type === 'account_opening') {
-          const assignInput = byId('approvalAssignAccount');
-          if (assignInput) {
-            req.payload.generatedAccountNumber = assignInput.value.trim();
+          const acctType = req.payload?.accountType || 'customer';
+          if (acctType === 'customer') {
+            const assignInput = byId('approvalAssignAccount');
+            if (assignInput) req.payload.generatedAccountNumber = assignInput.value.trim();
           }
+          // For staff_operational, expense, income — account number is generated
+          // server-side via RPC at approval time; no input needed here.
         }
 
         closeModal();
@@ -3085,30 +3180,43 @@ function staffLedgerEvents(staffId) {
     (state.approvals || []).filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
       const payload = req.payload || {};
       const date = payload.date || payload.float_date || String(req.approvedAt || req.requestedAt || '').slice(0,10) || businessDate();
+      // Cash receipt: Cash Officer funded their own operational account
+      if (req.type === 'cash_receipt' && payload.staffId === staffId) {
+        const amount = Number(payload.amount || 0);
+        addEvent({ key: req.id || `cash-receipt-${date}-${amount}`, date, type: 'Cash Receipt', amount, delta: amount, details: `Cash received • ${payload.paymentMode || 'cash'}`, runningType: 'form' });
+      }
+      // Inter-staff credit: operational account topped up by Cash Officer
+      if (req.type === 'inter_staff_credit') {
+        const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId);
+        if (opAccount && (payload.targetAccountId === opAccount.id || payload.operationalAccountId === opAccount.id)) {
+          const amount = Number(payload.amount || 0);
+          addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Cash Officer'} • ${payload.paymentMode || 'cash'}`, runningType: 'form' });
+        }
+      }
       if (req.type === 'float_declaration' && (payload.staffId === staffId || payload.staff_id === staffId)) {
         const amount = Number(payload.amount || payload.floatAmount || 0);
         addEvent({ key: req.id || `form-approval-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: `Approved FORM for ${date}`, runningType: 'form' });
       }
       if (req.type === 'customer_credit' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
+        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
       }
       if (req.type === 'customer_debit' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
+        addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Debit', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
       }
       if (req.type === 'customer_credit_journal' && payload.staffId === staffId) {
         const formAmount = Number(payload.formAmount || 0);
-        addEvent({ key: req.id || `credit-journal-${date}`, date, type: 'Journal Form', amount: formAmount, delta: -formAmount, details: `Credit journal form (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'credit' });
+        addEvent({ key: req.id || `credit-journal-${date}`, date, type: 'Credit Journal', amount: formAmount, delta: -formAmount, details: `Credit journal (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'credit' });
       }
       if (req.type === 'customer_debit_journal' && payload.staffId === staffId) {
         const formAmount = Number(payload.formAmount || 0);
-        addEvent({ key: req.id || `debit-journal-${date}`, date, type: 'Journal Form', amount: formAmount, delta: -formAmount, details: `Debit journal form (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'debit' });
+        addEvent({ key: req.id || `debit-journal-${date}`, date, type: 'Debit Journal', amount: formAmount, delta: -formAmount, details: `Debit journal (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'debit' });
       }
     });
     (state.cod || []).filter(cod => cod.staffId === staffId).forEach(cod => {
       const date = cod.date || String(cod.submittedAt || cod.resolvedAt || '').slice(0,10) || businessDate();
-      addEvent({ key: cod.id || `cod-${date}`, date, type: `COD ${String(cod.status || 'Submitted').toUpperCase()}`, amount: Number(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0), delta: 0, details: `FORM ${money(cod.formAmount ?? cod.openingBalance ?? getOpeningBalanceForDate(staffId, date))} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? currentFloatAvailable(staffId, date))} • Variance ${money(cod.variance || 0)}`, runningType: 'cod' });
+      addEvent({ key: cod.id || `cod-${date}`, date, type: `COD ${String(cod.status || 'Submitted').toUpperCase()}`, amount: Number(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0), delta: 0, details: `Op. Balance ${money(getStaffOperationalBalance(staffId))} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? 0)} • Variance ${money(cod.variance || 0)}`, runningType: 'cod' });
     });
     let running = 0;
     return events.sort((a,b)=> new Date(`${a.date}T12:00:00Z`) - new Date(`${b.date}T12:00:00Z`)).map(event => {
@@ -3153,8 +3261,7 @@ function staffLedgerEvents(staffId) {
           <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(staffName)}</div></div>
           <div class="kpi"><div class="label">Office</div><div class="number">${escapeHtml(staffRole)}</div></div>
           <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(acc.accountNumber || '—')}</div></div>
-          <div class="kpi"><div class="label">FORM Today</div><div class="number">${money(getOpeningBalanceForDate(staffId, businessDate()))}</div></div>
-          <div class="kpi"><div class="label">Remaining</div><div class="number">${money(currentFloatAvailable(staffId, businessDate()))}</div></div>
+          <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(getStaffOperationalBalance(staffId))}</div></div>
           <div class="kpi"><div class="label">Debt</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">${money(acc.debtBalance||0)}</div></div>
         </div>
         ${cod ? `<div class="note">Latest COD: <strong>${fmtDate(`${cod.date || cod.submittedAt}T12:00:00.000Z`)}</strong> • ${escapeHtml(cod.status || 'submitted')} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0)}</div>` : '<div class="note">No COD record yet for this staff.</div>'}
@@ -3322,6 +3429,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'account_maintenance': bindMaintenance('maintenance'); break;
       case 'account_reactivation': bindMaintenance('reactivation'); break;
       case 'account_statement': bindStatement(); break;
+      case 'staff_credit': bindStaffCredit(); break;
       case 'credit': bindJournal('credit'); break;
       case 'debit': bindJournal('debit'); break;
       case 'central_close_day':
@@ -3421,6 +3529,18 @@ function normalizeStaffLedgerEntryType(row) {
   function bindAccountOpening() {
     state.ui.accountOpeningDraft ||= {};
     const openingDraft = state.ui.accountOpeningDraft;
+
+    // Re-render when account type changes
+    const typeSelect = byId('openAccountType');
+    if (typeSelect) typeSelect.onchange = () => {
+      openingDraft.accountType = typeSelect.value;
+      openingDraft.name = '';
+      openingDraft.linkedStaffId = '';
+      openingDraft.accountNumber = '';
+      save();
+      renderWorkspace();
+    };
+
     const photoInput = byId('openPhoto');
     const photoBtn = byId('openPhotoBtn');
     const photoStatus = byId('openPhotoStatus');
@@ -3431,19 +3551,21 @@ function normalizeStaffLedgerEntryType(row) {
       openPhone: 'phone',
       openNin: 'nin',
       openBvn: 'bvn',
-      openOldAccount: 'oldAccountNumber'
+      openOldAccount: 'oldAccountNumber',
+      openAccountNumber: 'accountNumber'
     };
 
     Object.entries(draftBindings).forEach(([id, key]) => {
       const input = byId(id);
       if (!input) return;
-      input.addEventListener('input', () => {
-        openingDraft[key] = input.value;
-      });
-      input.addEventListener('focus', () => {
-        state.ui.accountOpeningFocusedField = id;
-      });
+      input.addEventListener('input', () => { openingDraft[key] = input.value; });
+      input.addEventListener('focus', () => { state.ui.accountOpeningFocusedField = id; });
     });
+
+    const linkedStaffSelect = byId('openLinkedStaff');
+    if (linkedStaffSelect) linkedStaffSelect.onchange = () => {
+      openingDraft.linkedStaffId = linkedStaffSelect.value;
+    };
 
     const focusedField = byId(state.ui.accountOpeningFocusedField || '');
     if (focusedField) {
@@ -3464,63 +3586,109 @@ function normalizeStaffLedgerEntryType(row) {
       try {
         const base64 = await toBase64(f);
         if (estimateDataUrlBytes(base64) > CUSTOMER_PHOTO_MAX_BYTES) {
-          photoInput.value = '';
-          photoInput.dataset.base64 = '';
-          openingDraft.photo = '';
-          openingDraft.photoStatus = 'No photo selected';
+          photoInput.value = ''; photoInput.dataset.base64 = '';
+          openingDraft.photo = ''; openingDraft.photoStatus = 'No photo selected';
           if (photoStatus) photoStatus.textContent = 'No photo selected';
           return showToast('Photo must be 1 MB or less after compression');
         }
         photoInput.dataset.base64 = base64;
         openingDraft.photo = base64;
         const compressedLabel = `${formatFileSize(estimateDataUrlBytes(base64))}`;
-        if (photoStatus) photoStatus.textContent = f.name.length > 18 ? `${f.name.slice(0, 15)}... • ${compressedLabel}` : `${f.name} • ${compressedLabel}`;
+        if (photoStatus) photoStatus.textContent = f.name.length > 18 ? `${f.name.slice(0,15)}... • ${compressedLabel}` : `${f.name} • ${compressedLabel}`;
         openingDraft.photoStatus = photoStatus?.textContent || 'No photo selected';
       } catch (error) {
-        photoInput.value = '';
-        photoInput.dataset.base64 = '';
-        openingDraft.photo = '';
-        openingDraft.photoStatus = 'No photo selected';
+        photoInput.value = ''; photoInput.dataset.base64 = '';
+        openingDraft.photo = ''; openingDraft.photoStatus = 'No photo selected';
         if (photoStatus) photoStatus.textContent = 'No photo selected';
         showToast(error?.message || 'Unable to process selected photo');
       }
     };
+
     byId('submitOpening').onclick = async (e) => {
-  const btn = e.currentTarget;
+      const acctType = openingDraft.accountType || 'customer';
+      const isCustomer = acctType === 'customer';
+      const name = (byId('openName')?.value || '').trim();
+      if (!name) return showToast('Account name is required');
 
-  const payload = {
-    name: byId('openName').value.trim(),
-    address: byId('openAddress').value.trim(),
-    phone: byId('openPhone').value.trim(),
-    nin: byId('openNin').value.trim(),
-    bvn: byId('openBvn').value.trim(),
-    oldAccountNumber: byId('openOldAccount').value.trim(),
-    generatedAccountNumber: '',
-    photo: byId('openPhoto').dataset.base64 || ''
-  };
+      let payload;
+      if (isCustomer) {
+        const address = (byId('openAddress')?.value || '').trim();
+        const phone = (byId('openPhone')?.value || '').trim();
+        const nin = (byId('openNin')?.value || '').trim();
+        const bvn = (byId('openBvn')?.value || '').trim();
+        const accountNumber = (byId('openAccountNumber')?.value || '').trim();
+        if (!address || !phone || !nin || !bvn || !accountNumber) return showToast('Complete all required fields');
+        payload = {
+          accountType: 'customer', name, address, phone, nin, bvn,
+          accountNumber,
+          oldAccountNumber: (byId('openOldAccount')?.value || '').trim(),
+          generatedAccountNumber: accountNumber,
+          photo: byId('openPhoto')?.dataset?.base64 || ''
+        };
+      } else if (acctType === 'staff_operational') {
+        const linkedStaffId = (byId('openLinkedStaff')?.value || '').trim();
+        if (!linkedStaffId) return showToast('Select a staff member to link this account to');
+        const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffId);
+        payload = {
+          accountType: 'staff_operational', name,
+          linkedStaffId, linkedStaffName: linkedStaff?.name || '',
+          systemAssigned: true, generatedAccountNumber: ''
+        };
+      } else {
+        // expense or income — fully system-assigned, name only
+        payload = { accountType: acctType, name, systemAssigned: true, generatedAccountNumber: '' };
+      }
 
-  if (!payload.name || !payload.address || !payload.phone || !payload.nin || !payload.bvn) {
-    return showToast('Complete all required fields');
+      confirmAction(`Submit ${acctType.replace('_',' ')} account opening request?`, async () => {
+        showProcessing('Sending request...'); await nextPaint();
+        try {
+          const result = await submitApprovalThroughGateway('account_opening', payload);
+          if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+          state.ui.accountOpeningDraft = {};
+          state.ui.accountOpeningFocusedField = '';
+          render();
+          showToast('Account opening sent for approval');
+        } finally { hideProcessing(); }
+      });
+    };
   }
 
-  confirmAction('Submit account opening request?', async () => {
-  showProcessing('Sending request...');
-  await nextPaint();
-
-  try {
-    const result = await submitApprovalThroughGateway('account_opening', payload);
-    if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
-    state.ui.accountOpeningDraft = {};
-    state.ui.accountOpeningFocusedField = '';
-    render();
-    showToast('Account opening sent for approval');
-  } finally {
-    hideProcessing();
-  }
-});
-
-};
-
+  function bindStaffCredit() {
+    const draft = state.ui.staffCreditDraft ||= {};
+    const amtInput = byId('staffCreditAmount');
+    const noteInput = byId('staffCreditNote');
+    if (amtInput) amtInput.oninput = () => { draft.amount = amtInput.value; };
+    if (noteInput) noteInput.oninput = () => { draft.note = noteInput.value; };
+    qq('input[name="staffCreditMode"]').forEach(r => r.onchange = () => { if (r.checked) draft.mode = r.value; });
+    const submitBtn = byId('submitStaffCredit');
+    if (!submitBtn) return;
+    submitBtn.onclick = async () => {
+      const accountId = byId('staffCreditAccount')?.value;
+      if (!accountId) return showToast('Select a staff account');
+      const amount = Number(byId('staffCreditAmount')?.value || 0);
+      if (!(amount > 0)) return showToast('Enter a valid amount');
+      if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
+      const paymentMode = q('input[name="staffCreditMode"]:checked')?.value || 'cash';
+      const note = (byId('staffCreditNote')?.value || '').trim();
+      const targetAccount = (state.customers || []).find(c => c.id === accountId);
+      const st = currentStaff();
+      confirmAction(`Credit ${targetAccount?.name || 'staff account'} ${money(amount)}?`, async () => {
+        showProcessing('Sending for approval...'); await nextPaint();
+        try {
+          const result = await submitApprovalThroughGateway('inter_staff_credit', {
+            staffId: st.id, staffName: st.name,
+            targetAccountId: accountId,
+            targetAccountNumber: targetAccount?.accountNumber || targetAccount?.account_number,
+            targetAccountName: targetAccount?.name || targetAccount?.displayName || targetAccount?.display_name,
+            amount, paymentMode, date: businessDate(), note
+          });
+          if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit');
+          state.ui.staffCreditDraft = {};
+          render();
+          showToast('Staff credit sent for approval');
+        } finally { hideProcessing(); }
+      });
+    };
   }
 
   function bindMaintenance(prefix) {
@@ -3693,6 +3861,25 @@ function normalizeStaffLedgerEntryType(row) {
     };
   }
 
+  function getStaffOperationalBalance(staffId) {
+    // Sum of all approved credits to this staff's operational account,
+    // minus all approved debits and journal form amounts drawn from it.
+    const opAccount = (state.customers || []).find(c =>
+      c.accountType === 'staff_operational' && c.linkedStaffId === staffId
+    );
+    if (!opAccount) return 0;
+    const credits = (state.approvals || [])
+      .filter(r => r.status === 'approved' &&
+        (r.type === 'cash_receipt' || r.type === 'inter_staff_credit') &&
+        (r.payload?.operationalAccountId === opAccount.id || r.payload?.targetAccountId === opAccount.id))
+      .reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
+    const debits = (state.approvals || [])
+      .filter(r => r.status === 'approved' && r.payload?.staffId === staffId &&
+        ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type))
+      .reduce((s, r) => s + (r.type.endsWith('_journal') ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
+    return credits - debits;
+  }
+
   function hasApprovedFloat(staffId, dateStr) {
     return openingBalanceOnlyForDate(staffId, dateStr) > 0 || hasBaseOpeningBalanceForDate(staffId, dateStr);
   }
@@ -3828,14 +4015,12 @@ function normalizeStaffLedgerEntryType(row) {
     };
 
     const recalcPreview = () => {
-      // Daily FORM (staff's declared float for the day) — informational here, and
-      // reduced only by approved/pending JOURNAL form amounts (never by direct
-      // credit/debit, and never by what's inside this journal's own rows).
-      const dailyAvailable = currentFloatAvailable(staff.id, businessDate());
+      // Staff operational balance — funded by Cash Officer credits, drawn by all postings.
+      const opBalance = getStaffOperationalBalance(staff.id);
       const otherPendingDraftForms = pendingJournalTotal(staff.id, businessDate());
-      const dailyRunning = dailyAvailable - otherPendingDraftForms;
+      const dailyRunning = opBalance - otherPendingDraftForms;
 
-      // This journal's own FORM — depleted only by this journal's own rows.
+      // This journal's own FORM — entered at journal creation, depleted only by this journal's own rows.
       const journalForm = Number(telleringDraft.journalFormAmount || 0);
       let jRunning = journalForm;
       const withBalances = journal.map((row) => {
@@ -4295,7 +4480,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('txPostSingle')) byId('txPostSingle').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
+      if (getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance — request a credit from Cash Officer first');
       const accountNumberInput = String(byId('txAcc')?.value || '').trim();
       const customer = getCustomerByAccountNo(accountNumberInput);
       if (!accountNumberInput || !customer) return showToast('Search for customer first');
@@ -4367,10 +4552,22 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('journalSubmit')) byId('journalSubmit').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (!hasApprovedFloat(staff.id, businessDate())) return showToast('Approved form required before posting');
+      if (getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance — request a credit from Cash Officer first');
+      const alreadySubmitted = (state.approvals || []).some(r =>
+        r.type === (kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal') &&
+        r.payload?.staffId === staff.id && r.payload?.date === businessDate() &&
+        (r.status === 'pending' || r.status === 'approved')
+      );
+      if (alreadySubmitted) return showToast(`A ${kind} journal has already been submitted for today. Use direct ${kind} for any additions.`);
       if (!journal.length) return showToast('Generate journal first');
       const journalFormAmount = Number(byId('journalFormAmount')?.value || telleringDraft.journalFormAmount || 0);
       if (!(journalFormAmount > 0)) return showToast('Enter a journal form amount');
+      // Journal must balance: sum of rows must exactly equal the journal form amount
+      const rowTotal = journal.reduce((s, r) => s + Number(r.amount || 0), 0);
+      if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal journal form amount ${money(journalFormAmount)}`);
+      // Journal form amount must not exceed remaining operational balance
+      const opBalance = getStaffOperationalBalance(staff.id);
+      if (journalFormAmount > opBalance + 0.01) return showToast(`Journal form amount ${money(journalFormAmount)} exceeds your operational balance ${money(opBalance)}`);
       const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
@@ -4383,7 +4580,6 @@ function normalizeStaffLedgerEntryType(row) {
           const result = await submitApprovalThroughGateway(kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal', {
             staffId: staff.id,
             date: businessDate(),
-            openingFloat: getOpeningBalanceForDate(staff.id, businessDate()),
             formAmount: journalFormAmount,
             formPaymentMode: journalFormMode,
             rows: journal.map(row => ({
@@ -4630,59 +4826,103 @@ function normalizeStaffLedgerEntryType(row) {
     };
   }
 
-  function openFloatModal() {
+  function openCashReceiptModal() {
     const st = currentStaff();
-    const requiresFloat = hasPermission('credit') || hasPermission('debit');
-    if (!requiresFloat) return showToast('Current staff does not need posting form');
-
-    openModal('Form', `
+    if (!hasPermission('cash_receipt')) return showToast('No access to cash receipt');
+    // Cash Officer's own staff operational account
+    const myOpAccount = (state.customers || []).find(c =>
+      c.accountType === 'staff_operational' && c.linkedStaffId === st.id
+    );
+    openModal('Cash Receipt', `
       <div class="form-grid three compact-modal-grid">
-        <div class="field"><label>Staff</label><div class="display-field">${st.name}</div></div>
+        <div class="field"><label>Cash Officer</label><div class="display-field">${st.name}</div></div>
         <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
-        <div class="field"><label>Amount</label><input id="floatAmount" class="entry-input" type="number"></div>
+        <div class="field"><label>Amount Received</label><input id="cashReceiptAmount" class="entry-input" type="number"></div>
       </div>
-      <div class="note">Posting cannot begin until this form is approved.</div>
+      <div class="form-grid two compact-modal-grid" style="margin-top:8px">
+        <div class="field"><label>Payment Mode</label>
+          <div class="tx-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="cashReceiptMode" value="cash" checked> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="cashReceiptMode" value="transfer"> <span>Transfer</span></label></div>
+        </div>
+        <div class="field"><label>Note (optional)</label><input id="cashReceiptNote" class="entry-input" type="text"></div>
+      </div>
+      ${myOpAccount ? `<div class="note">This will credit your operational account: <strong>${myOpAccount.name || myOpAccount.account_number || 'your account'}</strong></div>` : '<div class="note warning-note">No operational account linked to your staff profile. Ask admin to open one.</div>'}
     `, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       {
-        label: 'Submit',
+        label: 'Submit for Approval',
         onClick: async () => {
-          const amount = Number(byId('floatAmount')?.value || 0);
-          if (!(amount > 0)) return showToast('Enter valid form');
+          const amount = Number(byId('cashReceiptAmount')?.value || 0);
+          if (!(amount > 0)) return showToast('Enter a valid amount');
+          if (!myOpAccount) return showToast('No operational account found — contact admin');
           if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-          if (hasFloatDeclaredOrPending(st.id, businessDate())) return showToast('Form already declared for today');
-
+          const paymentMode = q('input[name="cashReceiptMode"]:checked')?.value || 'cash';
+          const note = byId('cashReceiptNote')?.value?.trim() || '';
           closeModal();
-          showProcessing('Sending form for approval...');
+          showProcessing('Sending cash receipt for approval...');
           await nextPaint();
-
           try {
-            const result = await submitApprovalThroughGateway('float_declaration', {
-  staffId: st.id,              // keep for frontend
-requestedByStaffId: getStaffBackendId(st),   // 👈 add this
-  amount,
-  date: businessDate(),
-
-  // 👇 ADD THIS (BACKWARD COMPATIBILITY)
-  floatAmount: amount,
-  float_date: businessDate(),
-  type: 'float_declaration'
-});
-
-            if (result?.ok === false) {
-              showToast(result?.error?.message || 'Unable to submit form');
-              return;
-            }
-
+            const result = await submitApprovalThroughGateway('cash_receipt', {
+              staffId: st.id,
+              staffName: st.name,
+              operationalAccountId: myOpAccount.id,
+              operationalAccountNumber: myOpAccount.accountNumber || myOpAccount.account_number,
+              amount,
+              paymentMode,
+              date: businessDate(),
+              note
+            });
+            if (result?.ok === false) return showToast(result?.error?.message || 'Unable to submit cash receipt');
             render();
-            showToast('Form sent for approval');
-          } finally {
-            hideProcessing();
-          }
+            showToast('Cash receipt sent for approval');
+          } finally { hideProcessing(); }
         }
       }
     ]);
   }
+
+  function renderStaffCredit() {
+    // Cash Officer credits a Teller's staff operational account
+    const staffOpAccounts = (state.customers || []).filter(c => c.accountType === 'staff_operational');
+    const accountOptions = staffOpAccounts.map(a =>
+      `<option value="${a.id}">${a.name || a.displayName || a.display_name} (${a.accountNumber || a.account_number})</option>`
+    ).join('');
+    const draft = state.ui.staffCreditDraft ||= {};
+    return `
+      <div class="form-card cs2-card opening-card">
+        <div class="cs2-title">Credit Staff Operational Account</div>
+        <div class="cs2-stack">
+          <div class="cs2-row">
+            <div class="cs2-label">Staff Account</div>
+            <div class="cs2-input-wrap cs2-wide">
+              <select id="staffCreditAccount" class="entry-input cs2-input">
+                <option value="">— Select Account —</option>
+                ${accountOptions}
+              </select>
+            </div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Amount</div>
+            <div class="cs2-input-wrap cs2-medium"><input id="staffCreditAmount" class="entry-input cs2-input" type="number" value="${escapeHtml(String(draft.amount || ''))}"></div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Payment Mode</div>
+            <div class="tx-mode-toggle">
+              <label class="tx-toggle-pill"><input type="radio" name="staffCreditMode" value="cash" ${(draft.mode||'cash')==='cash'?'checked':''}> <span>Cash</span></label>
+              <label class="tx-toggle-pill"><input type="radio" name="staffCreditMode" value="transfer" ${(draft.mode||'')==='transfer'?'checked':''}> <span>Transfer</span></label>
+            </div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Note</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="staffCreditNote" class="entry-input cs2-input" value="${escapeHtml(String(draft.note || ''))}"></div>
+          </div>
+          <div class="cs2-button-row">
+            <button id="submitStaffCredit" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+
 
   function openCODModal() {
     reconcileBusinessDateFromClosures();
@@ -4690,7 +4930,7 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
     if (isBusinessDateClosed(businessDate())) return showToast(`Business date ${businessDate()} is already closed`);
     const postingStaff = state.staff.filter(st => hasPermission('credit', st) || hasPermission('debit', st));
     const rows = postingStaff.map(st => {
-      const formAmount = getOpeningBalanceForDate(st.id, businessDate());
+      const opBalance = getStaffOperationalBalance(st.id);
       const creditCash = approvedCreditTotalForDateByMode(st.id, businessDate(), 'cash');
       const creditTransfer = approvedCreditTotalForDateByMode(st.id, businessDate(), 'transfer');
       const debitCash = approvedDebitTotalForDateByMode(st.id, businessDate(), 'cash');
@@ -4698,12 +4938,11 @@ requestedByStaffId: getStaffBackendId(st),   // 👈 add this
       const credits = creditCash + creditTransfer;
       const debits = debitCash + debitTransfer;
       const netBook = credits - debits;
-      const running = currentFloatAvailable(st.id, businessDate());
-      const variance = Math.max(0, -running);
-      const overdraw = Math.max(0, -running);
-      return `<tr><td>${st.name}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${running<0?'balance-negative':''}">${money(running)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td class="${overdraw>0?'balance-negative':''}">${money(overdraw)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
+      const remaining = opBalance;
+      const variance = Math.max(0, -remaining);
+      return `<tr><td>${st.name}</td><td>${money(opBalance)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
-    openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Form is the approved opening money collected from the field. Remaining Balance reduces as staff use the form. Net Balance is Total Credits minus Total Debits. Variance and Overdraw are derived from how the form is used.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
+    openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Operational Balance is the total funded by Cash Officer. Remaining Balance reduces as staff disburse funds. Net Balance is Total Credits minus Total Debits.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Op. Balance</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining</th><th>Variance</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
       closeModal();
       showProcessing('Closing business day...');
       await nextPaint();
@@ -5095,8 +5334,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <div class="kpi-row">
           <div class="kpi"><div class="label">Wallet Balance</div><div class="number">${money(acc.walletBalance||0)}</div></div>
           <div class="kpi"><div class="label">Debt Balance</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</div></div>
-          <div class="kpi"><div class="label">Form</div><div class="number">${money(getOpeningBalanceForDate(st.id, businessDate()))}</div></div>
-          <div class="kpi"><div class="label">Remaining Balance Today</div><div class="number">${money(currentFloatAvailable(st.id, businessDate()))}</div></div>
+          <div class="kpi"><div class="label">Operational Balance</div><div class="number">${money(getStaffOperationalBalance(st.id))}</div></div>
         </div>
         <div class="form-grid three">
           <div class="field"><label style="font-size:9px">Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number" style="height:28px;min-height:28px;padding:4px 8px;font-size:12px"></div>
