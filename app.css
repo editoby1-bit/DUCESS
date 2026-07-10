@@ -12560,3 +12560,41 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   line-height: 1 !important;
   border-radius: 12px !important;
 }
+
+/* ===== CASH OFFICER MODULE TILE — master override ===== */
+/* Positions cash_officer at the bottom center of the circle,
+   directly opposite customer_service (top center).
+   This rule comes last so it wins over all earlier patches.   */
+@media (min-width: 981px) {
+  /* Extend the grid/module-grid height to accommodate the extra tile */
+  .module-grid {
+    min-height: 620px !important;
+    height: 620px !important;
+  }
+  /* Extend the background circle and ring proportionally */
+  .module-grid::before {
+    top: 48% !important;
+    width: 480px !important;
+    height: 480px !important;
+  }
+  .module-grid::after {
+    top: 48% !important;
+    width: 356px !important;
+    height: 356px !important;
+  }
+  .module-hub {
+    top: 48% !important;
+  }
+  /* Cash Officer: bottom center, mirror of customer_service */
+  .module-card[data-module-key="cash_officer"] {
+    left: 50% !important;
+    top: 530px !important;
+    transform: translate(-50%, -50%) !important;
+  }
+  /* Shift the other 5 tiles slightly upward to keep the circle balanced */
+  .module-card[data-module-key="customer_service"] { top: 120px !important; }
+  .module-card[data-module-key="tellering"]        { top: 270px !important; }
+  .module-card[data-module-key="approvals"]        { top: 270px !important; }
+  .module-card[data-module-key="balances"]         { top: 420px !important; }
+  .module-card[data-module-key="administration"]   { top: 420px !important; }
+}
