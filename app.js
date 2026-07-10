@@ -1843,7 +1843,6 @@ if (approvalRecord.type === 'float_topup') {
     const roleEl = byId('staffRoleDisplay');
     if (nameEl) nameEl.textContent = activeStaff?.name || '';
     if (roleEl) roleEl.textContent = ROLE_LABELS[activeStaff?.role] || activeStaff?.role || '';
-    byId('btnTodayFloat').onclick = openFloatModal;
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
     if (byId('btnLogout') && isSupabaseApprovalMode()) {
