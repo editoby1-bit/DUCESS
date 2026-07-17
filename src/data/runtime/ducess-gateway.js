@@ -1145,10 +1145,13 @@ function subscribeRealtime() {
   const fullName = payload.fullName || payload.name || '';
   const phone = payload.phone || '';
 
-  // For system-assigned account types, generate account number now at approval time
+  // Generate system account number at approval time for non-customer types
   let generatedAccountNumber = String(payload.generatedAccountNumber || '').trim();
   if (acctType === 'staff_operational' && !generatedAccountNumber) {
     const { data: seqData } = await client.rpc('generate_staff_operational_account_number');
+    generatedAccountNumber = seqData || '';
+  } else if (acctType === 'staff_salary' && !generatedAccountNumber) {
+    const { data: seqData } = await client.rpc('generate_staff_salary_account_number');
     generatedAccountNumber = seqData || '';
   } else if (acctType === 'expense' && !generatedAccountNumber) {
     const { data: seqData } = await client.rpc('generate_expense_account_number');
@@ -1159,10 +1162,13 @@ function subscribeRealtime() {
   }
 
   if (!generatedAccountNumber) {
-    return defaultResult.err('ACCOUNT_NUMBER_REQUIRED', acctType === 'customer' ? 'Account number must be entered before approving account opening.' : 'Failed to generate system account number.');
+    return defaultResult.err('ACCOUNT_NUMBER_REQUIRED',
+      acctType === 'customer'
+        ? 'Account number must be entered before approving account opening.'
+        : 'Failed to generate system account number — check database sequences.');
   }
 
-  // For customer accounts, check for duplicates by name+phone
+  // For customer accounts check for duplicates
   if (acctType === 'customer') {
     const existing = await client.from(customersTable).select(customersSelect).eq('full_name', fullName).eq('phone', phone).limit(1).maybeSingle();
     if (existing.error) return defaultResult.err('CUSTOMER_LOOKUP_FAILED', 'Could not verify existing customer before posting approval.', existing.error);

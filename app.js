@@ -2093,11 +2093,18 @@ function hideProcessing() {
     const acctType = openingDraft.accountType || 'customer';
     const isCustomer = acctType === 'customer';
     const isStaffOp = acctType === 'staff_operational';
+    const isStaffSalary = acctType === 'staff_salary';
+    const needsStaffLink = isStaffOp || isStaffSalary;
     const isSystemAssigned = acctType !== 'customer';
-    // Build staff list for linking staff_operational accounts
     const staffOptions = (state.staff || []).filter(s => s.is_active !== false).map(s =>
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${s.name} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
+    const systemNote = {
+      staff_operational: '4-digit number starting with 2 (system-assigned on approval)',
+      staff_salary:      '4-digit number starting with 2 (system-assigned on approval)',
+      expense:           'EXP-3xxx format (system-assigned on approval)',
+      income:            'INC-3xxx format (system-assigned on approval)'
+    }[acctType] || '';
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Account Opening</div>
@@ -2106,20 +2113,24 @@ function hideProcessing() {
             <div class="cs2-label">Account Type</div>
             <div class="cs2-input-wrap cs2-wide">
               <select id="openAccountType" class="entry-input cs2-input">
-                <option value="customer" ${acctType==='customer'?'selected':''}>Customer Account</option>
-                <option value="staff_operational" ${acctType==='staff_operational'?'selected':''}>Staff Operational Account</option>
-                <option value="expense" ${acctType==='expense'?'selected':''}>Expense Account</option>
-                <option value="income" ${acctType==='income'?'selected':''}>Income Account</option>
+                <option value="customer"          ${acctType==='customer'          ?'selected':''}>Customer Account</option>
+                <option value="staff_operational" ${acctType==='staff_operational' ?'selected':''}>Staff Operational Account</option>
+                <option value="staff_salary"      ${acctType==='staff_salary'      ?'selected':''}>Staff Salary Account</option>
+                <option value="expense"           ${acctType==='expense'           ?'selected':''}>Expense Account</option>
+                <option value="income"            ${acctType==='income'            ?'selected':''}>Income Account</option>
               </select>
             </div>
           </div>
           <div class="cs2-row">
-            <div class="cs2-label">${isStaffOp ? 'Account Display Name' : 'Account Name'}</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off" placeholder="${isStaffOp ? 'e.g. Teller — John Doe' : ''}"></div>
+            <div class="cs2-label">${needsStaffLink ? 'Account Display Name' : 'Account Name'}</div>
+            <div class="cs2-input-wrap cs2-wide">
+              <input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off"
+                placeholder="${isStaffOp ? 'e.g. Teller — John Doe' : isStaffSalary ? 'e.g. John Doe Salary' : ''}">
+            </div>
           </div>
-          ${isStaffOp ? `
+          ${needsStaffLink ? `
           <div class="cs2-row">
-            <div class="cs2-label">Link to Staff</div>
+            <div class="cs2-label">Link to Staff Member</div>
             <div class="cs2-input-wrap cs2-wide">
               <select id="openLinkedStaff" class="entry-input cs2-input">
                 <option value="">— Select Staff Member —</option>
@@ -2156,9 +2167,7 @@ function hideProcessing() {
             <button id="openPhotoBtn" type="button" class="sheet-btn cs2-btn cs2-btn-ghost">Photo Upload</button>
             <input id="openPhoto" class="entry-input cs-sheet-input hidden-photo-input" type="file" accept="image/*">
             <div id="openPhotoStatus" class="cs2-note-box">No photo selected</div>
-          </div>` : `
-          <div class="cs2-note-box">Account number will be system-assigned on approval${isStaffOp ? ' (4-digit starting with 2)' : acctType==='expense' ? ' (Exp prefix)' : ' (Inc prefix)'}.</div>
-          `}
+          </div>` : `<div class="cs2-note-box">${systemNote}</div>`}
           <div class="cs2-button-row">
             <button id="submitOpening" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
           </div>
@@ -2551,7 +2560,7 @@ function hideProcessing() {
   if (req.type === 'account_opening') {
     const acctType = p.accountType || 'customer';
     const isCustomer = acctType === 'customer';
-    const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Staff Operational Account', expense: 'Expense Account', income: 'Income Account' };
+    const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Staff Operational Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
     const assignBlock = isCustomer
       ? (req.status === 'pending'
           ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Enter account number before approval"></div>`
@@ -2680,8 +2689,7 @@ function hideProcessing() {
             const assignInput = byId('approvalAssignAccount');
             if (assignInput) req.payload.generatedAccountNumber = assignInput.value.trim();
           }
-          // For staff_operational, expense, income — account number is generated
-          // server-side via RPC at approval time; no input needed here.
+          // staff_operational, staff_salary, expense, income — system-assigned via RPC
         }
 
         closeModal();
@@ -3622,12 +3630,12 @@ function normalizeStaffLedgerEntryType(row) {
           generatedAccountNumber: accountNumber,
           photo: byId('openPhoto')?.dataset?.base64 || ''
         };
-      } else if (acctType === 'staff_operational') {
+      } else if (acctType === 'staff_operational' || acctType === 'staff_salary') {
         const linkedStaffId = (byId('openLinkedStaff')?.value || '').trim();
         if (!linkedStaffId) return showToast('Select a staff member to link this account to');
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffId);
         payload = {
-          accountType: 'staff_operational', name,
+          accountType: acctType, name,
           linkedStaffId, linkedStaffName: linkedStaff?.name || '',
           systemAssigned: true, generatedAccountNumber: ''
         };
