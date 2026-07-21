@@ -1235,6 +1235,28 @@ if (inserted.error) {
   });
 }
 
+      // Intra-bank transfer: debit source, credit destination, non-cash
+      if (type === 'intra_bank_transfer') {
+        const amount = normalizeNumber(payload.amount);
+        // Debit source customer
+        const debitResult = await postSingleCustomerTransaction(requestRow, {
+          customerId: payload.sourceAccountId, accountNumber: payload.sourceAccountNumber,
+          customerName: payload.sourceAccountName, amount, txType: 'debit',
+          details: payload.details || `Transfer to ${payload.destAccountName || payload.destAccountNumber}`,
+          paymentMode: 'transfer', payoutSource: 'transfer'
+        }, 'debit', approver, { skipExistingCheck: true });
+        if (!debitResult.ok) return debitResult;
+        // Credit destination customer
+        const creditResult = await postSingleCustomerTransaction(requestRow, {
+          customerId: payload.destAccountId, accountNumber: payload.destAccountNumber,
+          customerName: payload.destAccountName, amount, txType: 'credit',
+          details: payload.details || `Transfer from ${payload.sourceAccountName || payload.sourceAccountNumber}`,
+          paymentMode: 'transfer'
+        }, 'credit', approver, { skipExistingCheck: true });
+        if (!creditResult.ok) return creditResult;
+        return defaultResult.ok({ posted: true, requestType: type, transactions: [debitResult.data, creditResult.data], cashLedger: null, decisionNote: decisionNote || '' });
+      }
+
       // Cash receipt: Cash Officer self-credit to own operational account
       if (type === 'cash_receipt') {
         const ledgerResult = await insertStaffCashLedgerEntry({

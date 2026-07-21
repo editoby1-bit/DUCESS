@@ -120,7 +120,7 @@
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','credit','debit','account_statement','my_balance','my_close_day']
+      tools: ['check_balance','credit','debit','intra_transfer','account_statement','my_balance','my_close_day']
     },
     approvals: {
       title: 'Approval',
@@ -132,7 +132,7 @@
       title: 'Administration',
       desc: 'Manage working tools, operational postings, temporary grants, and staff settings.',
       icon: '🛠️',
-      tools: ['operational_posting','operational_accounts','permissions','staff_directory','customer_directory']
+      tools: ['operational_posting','operational_accounts','permissions','staff_directory','customer_directory','transaction_summary']
     },
     balances: {
       title: 'Balances',
@@ -152,6 +152,7 @@
     staff_credit: 'Credit Staff Account',
     credit: 'Credit',
     debit: 'Debit',
+    intra_transfer: 'Transfer',
     my_balance: 'My Balance',
     my_close_day: 'My Close of Day',
     central_close_day: 'Central Close of Day',
@@ -166,15 +167,15 @@
     customer_directory: 'Customer Directory',
     business_balance: 'Business Balance',
     operational_balance: 'Operational Balance',
-    teller_balances: 'Teller Balances'
+    transaction_summary: 'Transaction Summary'
   };
 
   const DEFAULT_PERMS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','operational_accounts'],
     cash_officer: ['check_balance','cash_receipt','staff_credit','account_statement','my_balance','my_close_day'],
-    teller: ['check_balance','account_statement','credit','debit','my_balance','my_close_day'],
+    teller: ['check_balance','account_statement','credit','debit','intra_transfer','my_balance','my_close_day'],
     approving_officer: ['central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','permissions','operational_accounts','operational_posting','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','permissions','operational_accounts','operational_posting','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts']
   };
 
@@ -1509,6 +1510,21 @@ if (approvalRecord.type === 'float_topup') {
         if (c) { c.active = true; c.frozen = false; }
         break;
       }
+      case 'intra_bank_transfer': {
+        // Debit source account
+        const src = (state.customers || []).find(c => c.id === req.payload.sourceAccountId || c.accountNumber === req.payload.sourceAccountNumber);
+        const dst = (state.customers || []).find(c => c.id === req.payload.destAccountId || c.accountNumber === req.payload.destAccountNumber);
+        if (src) {
+          const srcAcc = ensureCustomerAccount(src.id);
+          srcAcc.balance = (Number(srcAcc.balance) || 0) - Number(req.payload.amount || 0);
+        }
+        // Credit destination account
+        if (dst) {
+          const dstAcc = ensureCustomerAccount(dst.id);
+          dstAcc.balance = (Number(dstAcc.balance) || 0) + Number(req.payload.amount || 0);
+        }
+        break;
+      }
       case 'cash_receipt': {
         // Credit Cash Officer's own operational account balance — recorded in staff_cash_ledger
         // The frontend getStaffOperationalBalance reads from state.approvals directly,
@@ -1961,6 +1977,7 @@ function hideProcessing() {
           ${toolBtn('check_balance')}
           ${toolBtn('credit')}
           ${toolBtn('debit')}
+          ${toolBtn('intra_transfer')}
           ${toolBtn('account_statement')}
           ${toolBtn('my_balance')}
           ${toolBtn('my_close_day')}
@@ -2036,6 +2053,8 @@ function hideProcessing() {
       case 'staff_credit': return renderStaffCredit();
       case 'credit': return renderJournalTool('credit');
       case 'debit': return renderJournalTool('debit');
+      case 'intra_transfer': return renderIntraTransfer();
+      case 'transaction_summary': return renderTransactionSummary();
       case 'my_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">My Balance</div><div class="tool-empty-note">Balance details open in a modal when this heading is selected.</div></div>`;
       case 'my_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">My Close of Day</div><div class="tool-empty-note">Close-of-day details open in a modal when this heading is selected.</div></div>`;
       case 'central_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">Central Close of Day</div><div class="tool-empty-note">Central close-of-day opens in a modal when this heading is selected.</div></div>`;
@@ -2094,14 +2113,14 @@ function hideProcessing() {
     const isCustomer = acctType === 'customer';
     const isStaffOp = acctType === 'staff_operational';
     const isStaffSalary = acctType === 'staff_salary';
-    const needsStaffLink = isStaffOp || isStaffSalary;
+    const needsStaffLink = isStaffOp; // salary no longer linked to staff
     const isSystemAssigned = acctType !== 'customer';
     const staffOptions = (state.staff || []).filter(s => s.is_active !== false).map(s =>
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${s.name} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '4-digit number starting with 2 (system-assigned on approval)',
-      staff_salary:      '4-digit number starting with 2 (system-assigned on approval)',
+      staff_operational: '4-digit number starting with 2 (system-assigned on approval). Must be linked to a staff member.',
+      staff_salary:      '4-digit number starting with 2 (system-assigned on approval).',
       expense:           'EXP-3xxx format (system-assigned on approval)',
       income:            'INC-3xxx format (system-assigned on approval)'
     }[acctType] || '';
@@ -2426,7 +2445,7 @@ function hideProcessing() {
     }
     state.ui.selectedApprovalIds ||= [];
     cleanupApprovalReviewLocks();
-    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
+    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
     reconcileBusinessDateFromClosures();
     const openDate = businessDate();
     const currentSection = state.ui.approvalsSection || 'tellering';
@@ -2508,13 +2527,14 @@ function hideProcessing() {
   function prettyApprovalType(type) {
     return {
       account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation',
-      customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', cash_receipt:'Cash Receipt', inter_staff_credit:'Staff Account Credit', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
+      customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', cash_receipt:'Cash Receipt', inter_staff_credit:'Staff Account Credit', intra_bank_transfer:'Intra-Bank Transfer', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
       create_operational_account:'Operational Account', close_of_day:'Close of Day', temp_grant:'Temporary Grant', wallet_fund:'Wallet Funding', debt_repayment:'Debt Repayment'
     }[type] || type;
   }
 
   function requestSummary(a) {
     const p = a.payload || {};
+    if (a.type === 'intra_bank_transfer') return `${money(p.amount)} from ${p.sourceAccountName||p.sourceAccountNumber||'—'} → ${p.destAccountName||p.destAccountNumber||'—'} • ${p.date}`;
     if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${p.staffName || 'Cash Officer'} • ${p.paymentMode || 'cash'} • ${p.date}`;
     if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${p.targetAccountName || p.targetAccountNumber || 'staff account'} • ${p.paymentMode || 'cash'} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${p.staffName || 'staff'} for ${p.date}`;
@@ -2628,6 +2648,15 @@ function hideProcessing() {
       ${field('Current Status', customerStatusLabel(customer), 'field-status')}
       ${field('Requested Action', 'Reactivate Account', 'field-submit')}
     </div>${photoBlock}</div>`;
+  } else if (req.type === 'intra_bank_transfer') {
+    html = `<div class="stack"><div class="form-grid three modal-cs-grid">
+      ${field('Teller', p.staffName || '—', 'field-wide')}
+      ${field('Date', p.date || '—', 'field-date')}
+      ${field('Amount', money(p.amount || 0), 'field-account')}
+      ${field('From (Debit)', `${p.sourceAccountName || '—'} (${p.sourceAccountNumber || '—'})`, 'field-wide')}
+      ${field('To (Credit)', `${p.destAccountName || '—'} (${p.destAccountNumber || '—'})`, 'field-wide')}
+      ${p.details ? field('Narration', p.details, 'field-wide') : ''}
+    </div></div>`;
   } else if (req.type === 'cash_receipt') {
     html = `<div class="stack"><div class="form-grid three modal-cs-grid">
       ${field('Cash Officer', p.staffName || '—', 'field-wide')}
@@ -2867,7 +2896,7 @@ function nextPaint() {
             ${Object.keys(ROLE_LABELS).map(role => `<option value="${role}" ${staffRoleFilter===role?'selected':''}>${ROLE_LABELS[role]}</option>`).join('')}
           </select>
         </div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff Code</th><th>Name</th><th>Role</th><th>Status</th><th>Wallet</th><th>Debt</th><th>Float</th><th>Action</th></tr></thead><tbody>${filteredStaff.map((s,i)=>{
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff ID</th><th>Name</th><th>Role</th><th>Status</th><th>Wallet</th><th>Debt</th><th>Float</th><th>Action</th></tr></thead><tbody>${filteredStaff.map((s,i)=>{
           const acc = ensureStaffAccount(s.id);
           const staffCode = s.staffCode || s.staff_code || s.id || '—';
           const staffName = s.name || s.full_name || '—';
@@ -3435,6 +3464,8 @@ function normalizeStaffLedgerEntryType(row) {
       case 'account_reactivation': bindMaintenance('reactivation'); break;
       case 'account_statement': bindStatement(); break;
       case 'staff_credit': bindStaffCredit(); break;
+      case 'intra_transfer': bindIntraTransfer(); break;
+      case 'transaction_summary': bindTransactionSummary(); break;
       case 'credit': bindJournal('credit'); break;
       case 'debit': bindJournal('debit'); break;
       case 'central_close_day':
@@ -3630,13 +3661,22 @@ function normalizeStaffLedgerEntryType(row) {
           generatedAccountNumber: accountNumber,
           photo: byId('openPhoto')?.dataset?.base64 || ''
         };
-      } else if (acctType === 'staff_operational' || acctType === 'staff_salary') {
+      } else if (acctType === 'staff_operational') {
         const linkedStaffId = (byId('openLinkedStaff')?.value || '').trim();
         if (!linkedStaffId) return showToast('Select a staff member to link this account to');
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffId);
         payload = {
-          accountType: acctType, name,
+          accountType: 'staff_operational', name,
           linkedStaffId, linkedStaffName: linkedStaff?.name || '',
+          systemAssigned: true, generatedAccountNumber: ''
+        };
+      } else if (acctType === 'staff_salary') {
+        // No staff link — opens like a regular account with system-assigned number
+        const address = (byId('openAddress')?.value || '').trim();
+        const phone = (byId('openPhone')?.value || '').trim();
+        payload = {
+          accountType: 'staff_salary', name,
+          address, phone,
           systemAssigned: true, generatedAccountNumber: ''
         };
       } else {
@@ -3694,6 +3734,171 @@ function normalizeStaffLedgerEntryType(row) {
         } finally { hideProcessing(); }
       });
     };
+  }
+
+  function renderIntraTransfer() {
+    const draft = state.ui.intraTransferDraft ||= {};
+    return `
+      <div class="form-card cs2-card opening-card">
+        <div class="cs2-title">Intra-Bank Transfer</div>
+        <div class="cs2-stack">
+          <div class="cs2-row">
+            <div class="cs2-label">Source Account</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off"></div>
+            <button id="itrLookupSource" class="sheet-btn secondary tiny-btn">Look Up</button>
+          </div>
+          <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
+          <div class="cs2-row">
+            <div class="cs2-label">Destination Account</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrDestAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number to credit" autocomplete="off"></div>
+            <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Look Up</button>
+          </div>
+          <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
+          <div class="cs2-row">
+            <div class="cs2-label">Amount</div>
+            <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="number" value="${escapeHtml(String(draft.amount || ''))}"></div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Details / Narration</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
+          </div>
+          <div class="cs2-button-row">
+            <button id="submitIntraTransfer" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function bindIntraTransfer() {
+    const draft = state.ui.intraTransferDraft ||= {};
+    const sourceInput = byId('itrSourceAcct');
+    const destInput = byId('itrDestAcct');
+    const amtInput = byId('itrAmount');
+    const detailsInput = byId('itrDetails');
+    if (sourceInput) sourceInput.oninput = () => { draft.sourceAcct = sourceInput.value; draft.sourceName = ''; draft.sourceId = ''; };
+    if (destInput) destInput.oninput = () => { draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; };
+    if (amtInput) amtInput.oninput = () => { draft.amount = amtInput.value; };
+    if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
+
+    const lookupAcct = async (acctNum, nameElId, idKey, nameKey) => {
+      const match = (state.customers || []).find(c => c.accountNumber === acctNum || c.account_number === acctNum);
+      if (match) {
+        draft[idKey] = match.id;
+        draft[nameKey] = match.name || match.full_name || match.display_name || acctNum;
+        if (byId(nameElId)) byId(nameElId).innerHTML = `<strong>${escapeHtml(draft[nameKey])}</strong>`;
+      } else {
+        if (byId(nameElId)) byId(nameElId).innerHTML = `<span style="color:var(--accent-red)">Account not found</span>`;
+      }
+    };
+
+    if (byId('itrLookupSource')) byId('itrLookupSource').onclick = () => lookupAcct((byId('itrSourceAcct')?.value||'').trim(), 'itrSourceName', 'sourceId', 'sourceName');
+    if (byId('itrLookupDest')) byId('itrLookupDest').onclick = () => lookupAcct((byId('itrDestAcct')?.value||'').trim(), 'itrDestName', 'destId', 'destName');
+
+    if (byId('submitIntraTransfer')) byId('submitIntraTransfer').onclick = async () => {
+      const amount = Number(byId('itrAmount')?.value || 0);
+      if (!draft.sourceId) return showToast('Look up the source account first');
+      if (!draft.destId) return showToast('Look up the destination account first');
+      if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
+      if (!(amount > 0)) return showToast('Enter a valid amount');
+      if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
+      const st = currentStaff();
+      confirmAction(`Transfer ${money(amount)} from ${draft.sourceName} to ${draft.destName}?`, async () => {
+        showProcessing('Submitting transfer...'); await nextPaint();
+        try {
+          const result = await submitApprovalThroughGateway('intra_bank_transfer', {
+            staffId: st.id, staffName: st.name, date: businessDate(),
+            sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
+            destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
+            amount, details: (byId('itrDetails')?.value||'').trim()
+          });
+          if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit transfer');
+          state.ui.intraTransferDraft = {};
+          render();
+          showToast('Transfer sent for approval');
+        } finally { hideProcessing(); }
+      });
+    };
+  }
+
+  function renderTransactionSummary() {
+    const filter = state.ui.txSummaryFilter ||= { date: businessDate(), period: 'day' };
+    const categories = [
+      { key: 'teller', label: 'Teller Transactions', icon: '💳', types: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer'] },
+      { key: 'customer', label: 'Customer Transactions', icon: '🧾', types: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','account_opening','account_maintenance','account_reactivation'] },
+      { key: 'cash_officer', label: 'Cash Officer Transactions', icon: '💰', types: ['cash_receipt','inter_staff_credit'] },
+      { key: 'salary', label: 'Staff Salary Account Transactions', icon: '👤', types: ['account_opening'], acctType: 'staff_salary' },
+      { key: 'income', label: 'Income Account Transactions', icon: '📈', types: ['operational_entry'], acctType: 'income' },
+      { key: 'expense', label: 'Expense Account Transactions', icon: '📉', types: ['operational_entry'], acctType: 'expense' },
+    ];
+    const approvals = state.approvals || [];
+    const activeKey = filter.activeKey || null;
+    const filterDate = filter.date || businessDate();
+
+    // Get filtered approvals for the selected category
+    let detailRows = '';
+    let detailTitle = '';
+    if (activeKey) {
+      const cat = categories.find(c => c.key === activeKey);
+      detailTitle = cat?.label || '';
+      const filtered = approvals.filter(r => {
+        if (r.status !== 'approved') return false;
+        const d = r.payload?.date || String(r.approvedAt||'').slice(0,10);
+        if (d !== filterDate) return false;
+        return cat?.types?.includes(r.type);
+      });
+      if (filtered.length === 0) {
+        detailRows = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No transactions for this date</td></tr>`;
+      } else {
+        detailRows = filtered.map((r,i) => {
+          const p = r.payload || {};
+          const d = r.payload?.date || String(r.approvedAt||'').slice(0,10);
+          const amount = p.amount || p.formAmount || (p.rows||[]).reduce((s,x)=>s+Number(x.amount||0),0) || 0;
+          const from = p.staffName || p.sourceAccountName || p.sourceName || '—';
+          const to = p.customerName || p.destAccountName || p.targetAccountName || '—';
+          return `<tr><td>${i+1}</td><td>${r.type.replace(/_/g,' ')}</td><td>${escapeHtml(String(from))}</td><td>${escapeHtml(String(to))}</td><td>${money(amount)}</td><td>${d||'—'}</td></tr>`;
+        }).join('');
+      }
+    }
+
+    const catCards = categories.map(c => {
+      const count = approvals.filter(r => r.status==='approved' && c.types.includes(r.type) && (r.payload?.date||String(r.approvedAt||'').slice(0,10)) === filterDate).length;
+      return `<div class="summary-cat-card ${filter.activeKey===c.key?'active':''}" data-cat="${c.key}" style="cursor:pointer;padding:14px 18px;border-radius:10px;border:1.5px solid ${filter.activeKey===c.key?'var(--accent-blue)':'var(--border)'};background:${filter.activeKey===c.key?'var(--accent-blue-light, #eff6ff)':'var(--surface)'};display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <span style="font-size:1.6em">${c.icon}</span>
+        <div style="flex:1"><div style="font-weight:700;font-size:0.95em">${c.label}</div><div style="font-size:0.82em;color:var(--text-muted)">${count} transaction${count===1?'':'s'} on ${filterDate}</div></div>
+        <span style="font-size:1.2em;color:var(--text-muted)">›</span>
+      </div>`;
+    }).join('');
+
+    return `
+      <div class="form-card cs2-card" style="max-width:860px">
+        <div class="cs2-title">Transaction Summary</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+          <label style="font-size:0.88em;font-weight:600">Date</label>
+          <input id="txSummaryDate" type="date" class="entry-input" value="${filterDate}" style="width:160px">
+          <button id="txSummaryToday" class="sheet-btn secondary tiny-btn">Today</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr ${activeKey?'1.4fr':''}; gap:16px">
+          <div>${catCards}</div>
+          ${activeKey ? `
+          <div>
+            <div style="font-weight:700;font-size:0.95em;margin-bottom:10px">${escapeHtml(detailTitle)} — ${filterDate}</div>
+            <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Date</th></tr></thead><tbody>${detailRows}</tbody></table></div>
+          </div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function bindTransactionSummary() {
+    const filter = state.ui.txSummaryFilter ||= { date: businessDate() };
+    const dateInput = byId('txSummaryDate');
+    if (dateInput) dateInput.onchange = () => { filter.date = dateInput.value; filter.activeKey = null; save(); renderWorkspace(); };
+    if (byId('txSummaryToday')) byId('txSummaryToday').onclick = () => { filter.date = businessDate(); filter.activeKey = null; save(); renderWorkspace(); };
+    qq('.summary-cat-card').forEach(card => {
+      card.onclick = () => {
+        filter.activeKey = filter.activeKey === card.dataset.cat ? null : card.dataset.cat;
+        save(); renderWorkspace();
+      };
+    });
   }
 
   function bindMaintenance(prefix) {
@@ -5926,7 +6131,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       <div style="max-width:520px">
         <p style="margin:0 0 10px;font-size:0.86em">Reset password for <strong>${escapeHtml(target.name || target.full_name || staffCode)}</strong>.</p>
         <div class="form-grid two" style="gap:10px">
-          <div class="field"><label>Staff Code</label><div class="display-field">${escapeHtml(String(staffCode))}</div></div>
+          <div class="field"><label>Staff ID</label><div class="display-field">${escapeHtml(String(staffCode))}</div></div>
           <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="adminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'adminTempPassword')}</div>
           <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="adminTempPasswordConfirm" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'adminTempPasswordConfirm')}</div>
         </div>
@@ -6041,12 +6246,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       openModal('Onboard New Staff', `
       <div class="form-grid two" style="gap:12px">
         <div class="field"><label>Full Name <span style="color:red">*</span></label><input id="newStaffName" class="entry-input" placeholder="e.g. Amaka Obi"></div>
-        <div class="field"><label>Staff Code / Login ID <span style="color:red">*</span></label><input id="newStaffCode" class="entry-input" placeholder="e.g. AMK001" style="text-transform:uppercase"></div>
+        <div class="field"><label>Staff ID / Login ID <span style="color:red">*</span></label><input id="newStaffCode" class="entry-input" placeholder="e.g. TLR001" style="text-transform:uppercase" maxlength="10"></div>
         <div class="field"><label>Role <span style="color:red">*</span></label><select id="newStaffRole" class="entry-input">${Object.keys(ROLE_LABELS).map(k=>`<option value="${k}">${ROLE_LABELS[k]}</option>`).join('')}</select></div>
         <div class="field"><label>Temporary Password <span style="color:red">*</span></label>${passwordInputRow('<input id="newStaffPassword" class="entry-input" type="password" placeholder="Minimum 6 characters">', 'newStaffPassword')}</div>
         <div class="field" style="grid-column:1/-1"><label>Branch (optional)</label><input id="newStaffBranch" class="entry-input" placeholder="e.g. Main Branch"></div>
       </div>
-      <p style="margin:10px 0 0;font-size:0.82em;color:var(--text-muted)">Staff will log in using their Staff Code and this password. They can change their password after first login.</p>
+      <p style="margin:10px 0 0;font-size:0.82em;color:var(--text-muted)">Staff will log in using their Staff ID and this password. Keep it short and memorable — e.g. TLR001, CSO002. They can change their password after first login.</p>
     `,[
       {label:'Cancel', className:'secondary', onClick: closeModal},
       {label:'Create Staff Account', onClick: async () => {
@@ -6058,10 +6263,11 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         const branch = byId('newStaffBranch')?.value?.trim() || null;
 
         if (!name) return showToast('Enter staff full name');
-        if (!staffCode) return showToast('Enter a staff code / login ID');
+        if (!staffCode) return showToast('Enter a Staff ID / login ID');
+        if (staffCode.length > 10) return showToast('Staff ID must be 10 characters or fewer');
         if (!password || password.length < 6) return showToast('Password must be at least 6 characters');
         if (state.staff.some(s => (s.staffCode || s.staff_code || s.id || '').toUpperCase() === staffCode)) {
-          return showToast(`Staff code "${staffCode}" already exists`);
+          return showToast(`Staff ID "${staffCode}" already exists`);
         }
 
         const submitBtn = document.querySelector('.modal-actions button:last-child');
