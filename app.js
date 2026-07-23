@@ -152,7 +152,7 @@
     staff_credit: 'Credit Staff Account',
     credit: 'Credit',
     debit: 'Debit',
-    intra_transfer: 'Transfer',
+    intra_transfer: 'Non Cash',
     my_balance: 'My Balance',
     my_close_day: 'My Close of Day',
     central_close_day: 'Central Close of Day',
@@ -2233,17 +2233,26 @@ function hideProcessing() {
   }
 
   function renderAccountStatement() {
-
     return `
       <div class="stack">
         <div class="form-card">
           <h3>Account Statement</h3>
           <div class="form-grid three account-statement-filter-grid polished-statement-grid">
-            <div class="field stmt-field stmt-acc-field"><label>Account Number</label><input id="stmtAcc" class="entry-input stmt-acc-input" inputmode="numeric" maxlength="4"></div>
+            <div class="field stmt-field stmt-acc-field">
+              <label>Account Number</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input id="stmtAcc" class="entry-input stmt-acc-input" inputmode="numeric" maxlength="6" placeholder="A/N">
+                <button id="stmtSearch" class="sheet-btn secondary tiny-btn">Search</button>
+              </div>
+              <div id="stmtAccName" style="margin-top:4px;font-size:0.83em;color:var(--text-muted);min-height:16px"></div>
+            </div>
             <div class="field stmt-field stmt-date-field"><label>From Date</label><input id="stmtFrom" class="entry-input stmt-date-input polished-date-input" type="date"></div>
             <div class="field stmt-field stmt-date-field"><label>To Date</label><input id="stmtTo" class="entry-input stmt-date-input polished-date-input" type="date"></div>
           </div>
-          <div class="action-row compact-action-row"><button id="stmtGenerate" class="tiny-btn">Generate Statement</button><button class="secondary tiny-btn" id="stmtPrintBtn">Print Statement</button></div>
+          <div class="action-row compact-action-row">
+            <button id="stmtGenerate" class="tiny-btn">Generate Statement</button>
+            <button class="secondary tiny-btn" id="stmtPrintBtn">Print Statement</button>
+          </div>
         </div>
         <div id="statementArea"></div>
       </div>`;
@@ -2527,14 +2536,14 @@ function hideProcessing() {
   function prettyApprovalType(type) {
     return {
       account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation',
-      customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', cash_receipt:'Cash Receipt', inter_staff_credit:'Staff Account Credit', intra_bank_transfer:'Intra-Bank Transfer', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
+      customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', cash_receipt:'Cash Receipt', inter_staff_credit:'Staff Account Credit', intra_bank_transfer:'Non Cash Transaction', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
       create_operational_account:'Operational Account', close_of_day:'Close of Day', temp_grant:'Temporary Grant', wallet_fund:'Wallet Funding', debt_repayment:'Debt Repayment'
     }[type] || type;
   }
 
   function requestSummary(a) {
     const p = a.payload || {};
-    if (a.type === 'intra_bank_transfer') return `${money(p.amount)} from ${p.sourceAccountName||p.sourceAccountNumber||'—'} → ${p.destAccountName||p.destAccountNumber||'—'} • ${p.date}`;
+    if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${p.sourceAccountName||p.sourceAccountNumber||'—'} → ${p.destAccountName||p.destAccountNumber||'—'} • ${p.date}`;
     if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${p.staffName || 'Cash Officer'} • ${p.paymentMode || 'cash'} • ${p.date}`;
     if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${p.targetAccountName || p.targetAccountNumber || 'staff account'} • ${p.paymentMode || 'cash'} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${p.staffName || 'staff'} for ${p.date}`;
@@ -2653,8 +2662,8 @@ function hideProcessing() {
       ${field('Teller', p.staffName || '—', 'field-wide')}
       ${field('Date', p.date || '—', 'field-date')}
       ${field('Amount', money(p.amount || 0), 'field-account')}
-      ${field('From (Debit)', `${p.sourceAccountName || '—'} (${p.sourceAccountNumber || '—'})`, 'field-wide')}
-      ${field('To (Credit)', `${p.destAccountName || '—'} (${p.destAccountNumber || '—'})`, 'field-wide')}
+      ${field('From — Debit', `${p.sourceAccountName || '—'} (${p.sourceAccountNumber || '—'})`, 'field-wide')}
+      ${field('To — Credit', `${p.destAccountName || '—'} (${p.destAccountNumber || '—'})`, 'field-wide')}
       ${p.details ? field('Narration', p.details, 'field-wide') : ''}
     </div></div>`;
   } else if (req.type === 'cash_receipt') {
@@ -3740,7 +3749,7 @@ function normalizeStaffLedgerEntryType(row) {
     const draft = state.ui.intraTransferDraft ||= {};
     return `
       <div class="form-card cs2-card opening-card">
-        <div class="cs2-title">Intra-Bank Transfer</div>
+        <div class="cs2-title">Non Cash Transaction</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Source Account</div>
@@ -3802,8 +3811,8 @@ function normalizeStaffLedgerEntryType(row) {
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
       const st = currentStaff();
-      confirmAction(`Transfer ${money(amount)} from ${draft.sourceName} to ${draft.destName}?`, async () => {
-        showProcessing('Submitting transfer...'); await nextPaint();
+      confirmAction(`Non cash transaction: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
+        showProcessing('Submitting non cash transaction...'); await nextPaint();
         try {
           const result = await submitApprovalThroughGateway('intra_bank_transfer', {
             staffId: st.id, staffName: st.name, date: businessDate(),
@@ -3811,10 +3820,10 @@ function normalizeStaffLedgerEntryType(row) {
             destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
             amount, details: (byId('itrDetails')?.value||'').trim()
           });
-          if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit transfer');
+          if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
           state.ui.intraTransferDraft = {};
           render();
-          showToast('Transfer sent for approval');
+          showToast('Non cash transaction sent for approval');
         } finally { hideProcessing(); }
       });
     };
@@ -3846,8 +3855,66 @@ function normalizeStaffLedgerEntryType(row) {
         if (d !== filterDate) return false;
         return cat?.types?.includes(r.type);
       });
+
       if (filtered.length === 0) {
-        detailRows = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No transactions for this date</td></tr>`;
+        detailRows = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No transactions for this date</td></tr>`;
+      } else if (activeKey === 'customer') {
+        // For customer view: compute running balance per account
+        // Build a map of all approved transactions per account (all time, sorted by date)
+        const allApproved = approvals.filter(r => r.status === 'approved');
+        const balanceMap = {}; // accountId -> running balance up to (not including) filterDate
+        const todayTxMap = {}; // accountId -> [{amount, type, date, req}] for filterDate
+
+        const affectsAccount = (r) => ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer'].includes(r.type);
+
+        allApproved.filter(affectsAccount).forEach(r => {
+          const p = r.payload || {};
+          const d = p.date || String(r.approvedAt||'').slice(0,10);
+          const processEntry = (accountId, amount, isCreditForAccount) => {
+            if (!accountId) return;
+            if (d < filterDate) {
+              balanceMap[accountId] = (balanceMap[accountId] || 0) + (isCreditForAccount ? amount : -amount);
+            } else if (d === filterDate) {
+              todayTxMap[accountId] = todayTxMap[accountId] || [];
+              todayTxMap[accountId].push({ amount, isCredit: isCreditForAccount, type: r.type, req: r, date: d });
+            }
+          };
+          if (r.type === 'intra_bank_transfer') {
+            processEntry(p.sourceAccountId, Number(p.amount||0), false);
+            processEntry(p.destAccountId, Number(p.amount||0), true);
+          } else if (r.type === 'customer_credit' || r.type === 'customer_credit_journal') {
+            const rows = r.type.endsWith('_journal') ? (p.rows||[]) : [p];
+            rows.forEach(row => processEntry(row.customerId || p.customerId, Number(row.amount||p.amount||0), true));
+          } else if (r.type === 'customer_debit' || r.type === 'customer_debit_journal') {
+            const rows = r.type.endsWith('_journal') ? (p.rows||[]) : [p];
+            rows.forEach(row => processEntry(row.customerId || p.customerId, Number(row.amount||p.amount||0), false));
+          }
+        });
+
+        // Now render today's transactions with running balance
+        const rows = [];
+        Object.entries(todayTxMap).forEach(([accountId, txList]) => {
+          const customer = (state.customers||[]).find(c => c.id === accountId);
+          const acctNum = customer?.accountNumber || customer?.account_number || accountId;
+          const acctName = customer?.name || customer?.full_name || customer?.display_name || '—';
+          let running = balanceMap[accountId] || 0;
+          txList.forEach((tx, idx) => {
+            running += tx.isCredit ? tx.amount : -tx.amount;
+            rows.push(`<tr>
+              <td>${acctNum}</td>
+              <td>${escapeHtml(acctName)}</td>
+              <td>${tx.type.replace(/_/g,' ')}</td>
+              <td class="${tx.isCredit?'':'balance-negative'}">${tx.isCredit?'+':'-'}${money(tx.amount)}</td>
+              <td class="${running<0?'balance-negative':''}">${money(running)}</td>
+              <td>${tx.date}</td>
+            </tr>`);
+          });
+        });
+        detailRows = rows.length ? rows.join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No customer transactions for this date</td></tr>`;
+        // Override table header for customer view
+        const tableHeader = `<thead><tr><th>A/N</th><th>Customer</th><th>Type</th><th>Amount</th><th>Running Balance</th><th>Date</th></tr></thead>`;
+        // Wrap in special marker for template below
+        detailRows = `__CUSTOMER_TABLE__${tableHeader}<tbody>${detailRows}</tbody>`;
       } else {
         detailRows = filtered.map((r,i) => {
           const p = r.payload || {};
@@ -3882,7 +3949,12 @@ function normalizeStaffLedgerEntryType(row) {
           ${activeKey ? `
           <div>
             <div style="font-weight:700;font-size:0.95em;margin-bottom:10px">${escapeHtml(detailTitle)} — ${filterDate}</div>
-            <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Date</th></tr></thead><tbody>${detailRows}</tbody></table></div>
+            <div class="table-wrap">
+              ${detailRows.startsWith('__CUSTOMER_TABLE__')
+                ? `<table class="table">${detailRows.replace('__CUSTOMER_TABLE__','')}</table>`
+                : `<table class="table"><thead><tr><th>#</th><th>Type</th><th>Posted By</th><th>Account</th><th>Amount</th><th>Date</th></tr></thead><tbody>${detailRows}</tbody></table>`
+              }
+            </div>
           </div>` : ''}
         </div>
       </div>`;
@@ -4024,22 +4096,48 @@ function normalizeStaffLedgerEntryType(row) {
 
   function bindStatement() {
     const stmtAcc = byId('stmtAcc');
-    const autoSelect = (quiet=false) => {
+    const stmtAccName = byId('stmtAccName');
+
+    const lookupByAcct = (quiet = false) => {
       const val = (stmtAcc?.value || '').trim();
       if (!val) return;
       const c = getCustomerByAccountNo(val);
-      if (!c) { if (!quiet) showToast('Customer not found. Use name search.'); return; }
+      if (!c) {
+        if (stmtAccName) stmtAccName.textContent = '';
+        if (!quiet) showToast('Account not found');
+        return;
+      }
       state.ui.selectedCustomerId = c.id;
+      if (stmtAccName) stmtAccName.textContent = c.name || c.full_name || c.display_name || '';
       save();
     };
+
     if (stmtAcc) {
-      stmtAcc.oninput = () => { const v = (stmtAcc.value || '').trim(); if (/^\d{4}$/.test(v)) autoSelect(true); };
-      stmtAcc.onchange = () => autoSelect(true);
-      stmtAcc.onkeyup = (e) => { if (e.key === 'Enter') autoSelect(false); };
+      stmtAcc.oninput = () => {
+        const v = (stmtAcc.value || '').trim();
+        if (stmtAccName) stmtAccName.textContent = '';
+        if (/^\d{4,6}$/.test(v)) lookupByAcct(true);
+      };
+      stmtAcc.onkeyup = (e) => { if (e.key === 'Enter') lookupByAcct(false); };
     }
+
+    // Search button — same as Credit/Debit search
+    if (byId('stmtSearch')) byId('stmtSearch').onclick = () => {
+      lookupByAcct(false);
+      // Also open customer search modal if no account number typed
+      if (!(stmtAcc?.value || '').trim()) {
+        openCustomerSearchModal(c => {
+          if (stmtAcc) stmtAcc.value = c.accountNumber || c.account_number || '';
+          if (stmtAccName) stmtAccName.textContent = c.name || c.full_name || c.display_name || '';
+          state.ui.selectedCustomerId = c.id;
+          save();
+        });
+      }
+    };
+
     byId('stmtGenerate').onclick = () => {
-      const c = getCustomerByAccountNo(byId('stmtAcc').value);
-      if (!c) return showToast('Customer not found');
+      const c = getCustomerByAccountNo((byId('stmtAcc')?.value || '').trim());
+      if (!c) return showToast('Account not found — search first');
       const from = byId('stmtFrom').value;
       const to = byId('stmtTo').value;
       const rows = (c.transactions || []).filter(tx => {
@@ -4047,26 +4145,41 @@ function normalizeStaffLedgerEntryType(row) {
         if (from && d < from) return false;
         if (to && d > to) return false;
         return true;
-      }).map((tx, i) => `<tr><td>${i+1}</td><td>${fmtDate(tx.date)}</td><td>${tx.details || ''}</td><td>${tx.type==='debit'?money(tx.amount):''}</td><td>${tx.type==='credit'?money(tx.amount):''}</td><td>${money(tx.balanceAfter)}</td><td>${tx.receivedOrPaidBy || '—'}</td><td>${tx.postedBy || tx.postedById || '—'}</td><td>${tx.approvedBy || '—'}</td></tr>`).join('');
+      }).map((tx, i) => `<tr>
+        <td>${i+1}</td>
+        <td>${fmtDate(tx.date)}</td>
+        <td>${tx.details || ''}</td>
+        <td>${tx.type==='debit'?money(tx.amount):''}</td>
+        <td>${tx.type==='credit'?money(tx.amount):''}</td>
+        <td>${tx.receivedOrPaidBy || '—'}</td>
+        <td>${tx.postedBy || tx.postedById || '—'}</td>
+        <td>${tx.approvedBy || '—'}</td>
+        <td>${money(tx.balanceAfter)}</td>
+      </tr>`).join('');
       byId('statementArea').innerHTML = `
         <div class="record-card statement-record-minimal">
           <div class="lookup-card statement-lookup-minimal">
             <div class="stack">
               <div class="info-grid">
-                <div class="info-item"><div class="k">A/C Name</div><div class="v">${c.name}</div></div>
-                <div class="info-item"><div class="k">Phone No</div><div class="v">${c.phone}</div></div>
-                <div class="info-item"><div class="k">Address</div><div class="v">${c.address}</div></div>
+                <div class="info-item"><div class="k">A/C Name</div><div class="v">${c.name || c.full_name || c.display_name}</div></div>
+                <div class="info-item"><div class="k">Phone No</div><div class="v">${c.phone || '—'}</div></div>
+                <div class="info-item"><div class="k">Address</div><div class="v">${c.address || '—'}</div></div>
                 <div class="info-item"><div class="k">Available Balance</div><div class="v">${money(c.balance)}</div></div>
               </div>
             </div>
           </div>
-          <div class="table-wrap" style="margin-top:16px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}</tbody></table></div>
+          <div class="table-wrap" style="margin-top:16px">
+            <table class="table">
+              <thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th><th>Balance</th></tr></thead>
+              <tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>`;
     };
 
     byId('stmtPrintBtn').onclick = () => {
-      const area = byId('statementArea').innerHTML;
-      if (!area.trim()) return showToast('Generate statement first');
+      const area = byId('statementArea')?.innerHTML;
+      if (!area?.trim()) return showToast('Generate statement first');
       printHtml(`<h2>Customer Statement</h2>${area}</div>`);
     };
   }
