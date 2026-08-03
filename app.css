@@ -4735,6 +4735,12 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
   font-size: 11px;
 }
 
+.tx-toggle-pill:has(input:checked) {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
 .tx-toggle-pill input {
   width: auto;
   margin: 0;
@@ -12722,4 +12728,73 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   .workspace-tool-body{
     max-width: none !important;
   }
+}
+
+/* ===== Round 2 dashboard fixes =====
+   1) Pull tellering/approvals/administration to the SAME radius as
+      customer_service/treasury (which were already correct) — using
+      fixed pixel offsets via calc() instead of left:% so the radius
+      doesn't scale with container width and drift off from the
+      vertical (pure-px) icons. */
+@media (min-width: 981px){
+  .module-card[data-module-key="tellering"]{
+    left: calc(50% - 126px) !important;
+    top: 264px !important;
+    transform: translate(-50%,-50%) !important;
+  }
+  .module-card[data-module-key="approvals"]{
+    left: calc(50% + 126px) !important;
+    top: 264px !important;
+    transform: translate(-50%,-50%) !important;
+  }
+  .module-card[data-module-key="administration"]{
+    left: calc(50% + 84px) !important;
+    top: 397px !important;
+    transform: translate(-50%,-50%) !important;
+  }
+}
+
+/* 2) Bulletproof logo containment — higher-specificity selector so it wins
+   regardless of source order, sized so the logo's bounding box always
+   fits fully inside the hub's inscribed circle (no forced/deliberate
+   cropping). If the source image itself is naturally larger than the
+   circle at this size, the circle's own edge may still soften its
+   corners — that's acceptable per spec, just never a forced crop. */
+.module-hub .module-hub-logo,
+#moduleGrid .module-hub-logo{
+  width: 72% !important;
+  height: 72% !important;
+  object-fit: contain !important;
+  object-position: center !important;
+  border-radius: 0 !important;
+}
+
+/* 3) Bring the left tool panel and the tool body it opens close together,
+   instead of spreading them across the full centered width. */
+@media (min-width: 981px){
+  .workspace-switcher{
+    max-width: 620px !important;
+    grid-template-columns: 190px minmax(0, 1fr) !important;
+    column-gap: 14px !important;
+  }
+}
+
+/* 4) Remove the enclosing translucent backdrop panel around the tool
+   list + tool body so they sit bare on the page background. */
+.workspace-card{
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* 5) Center the sheet header (e.g. "TELLERING / Non Cash") so it sits
+   directly above the now-centered form content instead of hugging the
+   left edge of its own card. */
+.sheet-head-row.single-head{
+  justify-content: center !important;
+  text-align: center !important;
+}
+.sheet-head-row.single-head > div{
+  text-align: center !important;
+  width: 100%;
 }

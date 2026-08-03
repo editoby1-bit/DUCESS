@@ -108,7 +108,7 @@
       title: 'Customer Service',
       desc: 'Check balance, open, maintain, reactivate accounts and print statements.',
       icon: '👤',
-      tools: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement']
+      tools: ['check_balance','account_opening','account_maintenance','account_reactivation']
     },
     cash_officer: {
       title: 'Treasury',
@@ -132,7 +132,7 @@
       title: 'Administration',
       desc: 'Manage working tools, operational postings, temporary grants, staff settings, and central close of day.',
       icon: '🛠️',
-      tools: ['central_close_day','operational_posting','operational_accounts','permissions','staff_directory','customer_directory','transaction_summary','teller_balances','overall_balance']
+      tools: ['central_close_day','operational_posting','operational_accounts','staff_directory','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
     },
     balances: {
       title: 'Balances',
@@ -175,7 +175,7 @@
   };
 
   const DEFAULT_PERMS = {
-    customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','operational_accounts'],
+    customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
