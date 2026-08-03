@@ -12798,3 +12798,25 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   text-align: center !important;
   width: 100%;
 }
+
+/* ===== Round 3: center the page-level workspace header (the
+   "TELLERING / Tellering Tools" block above the tool panel) so it sits
+   directly above the now-centered tool panel + body, instead of
+   hugging the far-left edge of the page. ===== */
+@media (min-width: 981px){
+  .workspace-head{
+    max-width: 620px !important;
+    margin: 0 auto 10px !important;
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+  .workspace-head > div:first-child{
+    text-align: center !important;
+    width: 100%;
+  }
+  .workspace-head .workspace-right{
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+}

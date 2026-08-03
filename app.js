@@ -179,7 +179,7 @@
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts']
   };
 
@@ -192,7 +192,7 @@
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
   if (state.ui.module && !MODULES[state.ui.module]) state.ui.module = null;
-  if (state.ui.module && state.ui.tool && !(MODULES[state.ui.module]?.tools || []).includes(state.ui.tool)) state.ui.tool = null;
+  if (state.ui.module && state.ui.tool && !hasPermission(state.ui.tool)) state.ui.tool = null;
   ensureState();
   resetJournalUiState();
   if (isSupabaseApprovalMode()) {
@@ -4297,6 +4297,7 @@ function normalizeStaffLedgerEntryType(row) {
     const lookupByAcct = (quiet = false) => {
       const val = (stmtAcc?.value || '').trim();
       if (!val) return;
+      if (!(state.customers || []).length) { if (!quiet) showToast('Customer data still loading — try again in a moment'); return; }
       const c = getCustomerByAccountNo(val);
       if (!c) {
         if (stmtAccName) stmtAccName.textContent = '';
@@ -4332,6 +4333,7 @@ function normalizeStaffLedgerEntryType(row) {
     };
 
     byId('stmtGenerate').onclick = () => {
+      if (!(state.customers || []).length) return showToast('Customer data still loading — try again in a moment');
       const c = getCustomerByAccountNo((byId('stmtAcc')?.value || '').trim());
       if (!c) return showToast('Account not found — search first');
       const from = byId('stmtFrom').value;
