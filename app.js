@@ -97,7 +97,7 @@
   const ROLE_LABELS = {
     customer_service: 'Customer Service Officer',
     teller: 'Teller',
-    cash_officer: 'Cash Officer',
+    cash_officer: 'Treasury',
     approving_officer: 'Approving Officer',
     admin_officer: 'Administrative Officer',
     report_officer: 'Report Officer'
@@ -111,28 +111,28 @@
       tools: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','operational_accounts']
     },
     cash_officer: {
-      title: 'Cash Office',
+      title: 'Treasury',
       desc: 'Receive cash, credit staff operational accounts, and manage cash flow.',
       icon: '💰',
-      tools: ['check_balance','cash_receipt','staff_credit','account_statement','my_balance','my_close_day']
+      tools: ['check_balance','cash_receipt','staff_credit','intra_transfer','account_statement','my_balance','my_close_day']
     },
     tellering: {
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','credit','debit','intra_transfer','account_statement','my_balance','my_close_day']
+      tools: ['check_balance','credit','debit','intra_transfer','account_statement','my_balance']
     },
     approvals: {
       title: 'Approval',
-      desc: 'Approve or reject submitted requests and review close-of-day activity.',
+      desc: 'Approve or reject submitted requests and review approval history.',
       icon: '✅',
-      tools: ['central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others']
+      tools: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history']
     },
     administration: {
       title: 'Administration',
-      desc: 'Manage working tools, operational postings, temporary grants, and staff settings.',
+      desc: 'Manage working tools, operational postings, temporary grants, staff settings, and central close of day.',
       icon: '🛠️',
-      tools: ['operational_posting','operational_accounts','permissions','staff_directory','customer_directory','transaction_summary']
+      tools: ['central_close_day','operational_posting','operational_accounts','permissions','staff_directory','customer_directory','overall_balance','business_balance','operational_balance','teller_balances','transaction_summary']
     },
     balances: {
       title: 'Balances',
@@ -160,22 +160,24 @@
     approval_customer_service: 'Customer Service',
     approval_tellering: 'Teller',
     approval_others: 'Others',
+    approval_history: 'Approval History',
     permissions: 'Permissions Matrix',
     operational_posting: 'Income & Expense Posting',
-    operational_accounts: 'Income & Expense Accounts',
-    staff_directory: 'Staff Directory',
-    customer_directory: 'Customer Directory',
+    operational_accounts: 'Income & Expense Balance',
+    staff_directory: 'All Staff Balance',
+    customer_directory: "All Customers' Balance",
     business_balance: 'Business Balance',
     operational_balance: 'Operational Balance',
+    overall_balance: 'Overall Balance',
     transaction_summary: 'Transaction Summary'
   };
 
   const DEFAULT_PERMS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','operational_accounts'],
-    cash_officer: ['check_balance','cash_receipt','staff_credit','account_statement','my_balance','my_close_day'],
-    teller: ['check_balance','account_statement','credit','debit','intra_transfer','my_balance','my_close_day'],
-    approving_officer: ['central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','permissions','operational_accounts','operational_posting','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
+    cash_officer: ['check_balance','cash_receipt','staff_credit','intra_transfer','account_statement','my_balance','my_close_day'],
+    teller: ['check_balance','account_statement','credit','debit','intra_transfer','my_balance'],
+    approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts']
   };
 
@@ -1932,7 +1934,7 @@ function hideProcessing() {
 
   function renderModules() {
     const current = state.ui.module;
-    const moduleOrder = ['customer_service','tellering','approvals','administration','balances','cash_officer'];
+    const moduleOrder = ['customer_service','tellering','approvals','administration','cash_officer'];
     byId('moduleGrid').innerHTML = `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
       const m = MODULES[key];
       const allowed = moduleAllowed(key);
@@ -1972,6 +1974,9 @@ function hideProcessing() {
     const renderToolButtons = () => {
       if (state.ui.module === 'tellering') {
         const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
+        const journalKindActive = ['credit','debit'].includes(state.ui.tool);
+        const journalKey = journalKindActive ? `${currentStaff()?.id || 'staff'}:${businessDate()}:${state.ui.tool}` : '';
+        const journalAlreadyOpen = journalKindActive && !!(state.ui.generatedJournals || {})[journalKey];
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Tellering Tools</div>
           ${toolBtn('check_balance')}
@@ -1980,16 +1985,17 @@ function hideProcessing() {
           ${toolBtn('intra_transfer')}
           ${toolBtn('account_statement')}
           ${toolBtn('my_balance')}
-          ${toolBtn('my_close_day')}
+          <button id="genJournalPanelBtn" class="tool-tab" ${(!journalKindActive || journalAlreadyOpen) ? 'disabled' : ''} title="${journalKindActive ? '' : 'Open Credit or Debit first'}">Generate Journal</button>
         </div>`;
       }
       if (state.ui.module === 'cash_officer') {
         const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
-          <div class="tool-column-title tellering-tools-only-title">Cash Office Tools</div>
+          <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
           ${toolBtn('check_balance')}
           ${toolBtn('cash_receipt')}
           ${toolBtn('staff_credit')}
+          ${toolBtn('intra_transfer')}
           ${toolBtn('account_statement')}
           ${toolBtn('my_balance')}
           ${toolBtn('my_close_day')}
@@ -2039,6 +2045,21 @@ function hideProcessing() {
       }
       if (state.ui.tool === nextTool) smoothScrollToOpenedSegment('.workspace-tool-body');
     });
+    const genJournalBtn = byId('genJournalPanelBtn');
+    if (genJournalBtn) genJournalBtn.onclick = () => {
+      if (!['credit','debit'].includes(state.ui.tool)) return;
+      state.ui.generatedJournals ||= {};
+      state.ui.collapsedJournals ||= {};
+      const journalKey = `${currentStaff()?.id || 'staff'}:${businessDate()}:${state.ui.tool}`;
+      state.ui.generatedJournals[journalKey] = true;
+      state.ui.collapsedJournals[journalKey] = false;
+      save();
+      renderWorkspace();
+      requestAnimationFrame(() => {
+        const pane = byId('journalPane') || byId('journalPaneWrap');
+        if (pane && pane.scrollIntoView) pane.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    };
     if (state.ui.tool) bindToolHandlers();
   }
 
@@ -2062,6 +2083,7 @@ function hideProcessing() {
       case 'approval_tellering':
       case 'approval_others':
       case 'approval_queue': return renderApprovals();
+      case 'approval_history': return renderApprovalHistory();
       case 'permissions': return renderPermissions();
       case 'operational_posting': return renderOperationalPosting();
       case 'operational_accounts': return renderOperationalAccounts();
@@ -2069,6 +2091,7 @@ function hideProcessing() {
       case 'customer_directory': return renderCustomerDirectory();
       case 'business_balance': return renderBusinessBalance();
       case 'operational_balance': return renderOperationalBalance();
+      case 'overall_balance': return renderOverallBalance();
       case 'teller_balances': return renderTellerBalances();
       default: return '<div class="note">Tool not found.</div>';
     }
@@ -2115,12 +2138,15 @@ function hideProcessing() {
     const isStaffSalary = acctType === 'staff_salary';
     const needsStaffLink = isStaffOp; // salary no longer linked to staff
     const isSystemAssigned = acctType !== 'customer';
-    const staffOptions = (state.staff || []).filter(s => s.is_active !== false).map(s =>
+    const staffOptions = (state.staff || [])
+      .filter(s => s.is_active !== false)
+      .filter(s => !isStaffOp || s.role === 'teller')
+      .map(s =>
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${s.name} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '4-digit number starting with 2 (system-assigned on approval). Must be linked to a staff member.',
-      staff_salary:      '4-digit number starting with 2 (system-assigned on approval).',
+      staff_operational: '"T" + 4-digit number (system-assigned on approval). Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
+      staff_salary:      '4-digit number starting with 0 (system-assigned on approval).',
       expense:           'EXP-3xxx format (system-assigned on approval)',
       income:            'INC-3xxx format (system-assigned on approval)'
     }[acctType] || '';
@@ -2143,8 +2169,10 @@ function hideProcessing() {
           <div class="cs2-row">
             <div class="cs2-label">${needsStaffLink ? 'Account Display Name' : 'Account Name'}</div>
             <div class="cs2-input-wrap cs2-wide">
-              <input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off"
-                placeholder="${isStaffOp ? 'e.g. Teller — John Doe' : isStaffSalary ? 'e.g. John Doe Salary' : ''}">
+              ${isStaffOp
+                ? `<div class="display-field" id="openNameDisplay">${escapeHtml(String(openingDraft.name || 'Select a teller below'))}</div><input type="hidden" id="openName" value="${escapeHtml(String(openingDraft.name || ''))}">`
+                : `<input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off"
+                placeholder="${isStaffSalary ? 'e.g. John Doe Salary' : ''}">`}
             </div>
           </div>
           ${needsStaffLink ? `
@@ -2261,7 +2289,7 @@ function hideProcessing() {
   function renderJournalTool(kind) {
     const title = kind === 'credit' ? 'Credit' : 'Debit';
     const st = currentStaff();
-    const opBalance = getStaffOperationalBalance(st?.id);
+    const opBreakdown = getStaffOperationalBreakdown(st?.id);
     state.ui.generatedJournals ||= {};
     state.ui.collapsedJournals ||= {};
     const journalKey = `${st?.id || 'staff'}:${businessDate()}:${kind}`;
@@ -2290,26 +2318,29 @@ function hideProcessing() {
                 <label class="sheet-label posting-label-account" for="txAcc">Acct No.</label>
                 <input id="txAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                 <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
-                <div class="posting-kpis-inline">
-                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">OP. BALANCE</span><span class="mini-kpi-pill-value" id="postingRunningFloat">${money(Math.max(0, opBalance))}</span></div>
-                  <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">VARIANCE</span><span class="mini-kpi-pill-value balance-negative" id="postingVariance">${money(Math.max(0, -opBalance))}</span></div>
-                </div>
               </div>
             </div>
 
             <div class="posting-row posting-row-name">
               <label class="sheet-label posting-label-name" for="txName">Acct Name</label>
               <div class="display-field value-wide" id="txName">—</div>
+              <label class="sheet-label posting-label-name" for="txBalance">Balance</label>
+              <div class="display-field" id="txBalance">—</div>
             </div>
 
             <div class="posting-row posting-row-amount">
               <label class="sheet-label posting-label-name" for="txAmount">Amount</label>
               <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}" />
               <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
-              ${journalVisible ? '' : `<button id="txJournalAdd" class="sheet-btn secondary tiny-btn ultra-compact-btn">Generate Journal</button>`}
             </div>
             ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
-            <div class="posting-row posting-row-details-inline"><label class="sheet-label posting-label-name" for="txDetails">Details</label><input id="txDetails" class="entry-input" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}"></div>
+            <div class="posting-row posting-row-opbox">
+              <div class="op-breakdown-box" id="txOpBreakdown">
+                <div class="op-breakdown-cell"><span class="op-breakdown-label">Cash</span><span class="op-breakdown-value" id="postingCashFunded">${money(opBreakdown.cash)}</span></div>
+                <div class="op-breakdown-cell"><span class="op-breakdown-label">Posting Cash</span><span class="op-breakdown-value" id="postingCashDrawn">${money(opBreakdown.postingCash)}</span></div>
+                <div class="op-breakdown-cell"><span class="op-breakdown-label">Variance</span><span class="op-breakdown-value ${opBreakdown.variance < 0 ? 'balance-negative' : ''}" id="postingCashVariance">${money(opBreakdown.variance)}</span></div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="tellering-inline-meta form-card compact-left tellering-entry-card">
@@ -2460,6 +2491,7 @@ function hideProcessing() {
     const currentSection = state.ui.approvalsSection || 'tellering';
     const allRows = state.approvals.filter(a => {
       if (!categories[currentSection].includes(a.type)) return false;
+      if (a.status !== 'pending') return false; // decided items live in Approval History now
       const reqDate = approvalBusinessDate(a.type, a.payload || {});
       // Approval Queue belongs to the CURRENT OPEN business date only.
       // Closed dates belong to COD Resolution/history and must not remain
@@ -2476,9 +2508,12 @@ function hideProcessing() {
       const actionDisabled = lockedByOther ? 'disabled' : '';
       const pendingActions = a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success" ${actionDisabled}>Approve</button><button type="button" data-reject="${a.id}" class="danger" ${actionDisabled}>Reject</button></div>` : '';
       const journalActions = a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${pendingActions}</div>` : '';
-      const csActions = ['account_opening','account_maintenance','account_reactivation'].includes(a.type) ? `<button type="button" data-inspect-request="${a.id}" class="secondary">View</button> ` : '';
       const normalActions = !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
-      return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${approvalDetails(a)}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${csActions}${normalActions}</td></tr>`;
+      // View removed: the open account's own headings are shown inline below instead of a separate modal.
+      const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
+        ? approvalAccountHeadingsInline(a)
+        : approvalDetails(a);
+      return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${approvalReviewIndicator(a)}</td><td>${journalActions}${normalActions}</td></tr>`;
     }).join('');
     state.ui.codResolutionLimit ||= 10;
     const codRows=(state.cod||[]).filter(c=>{
@@ -2504,14 +2539,35 @@ function hideProcessing() {
       const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
       const recomputedVariance = Math.abs(remaining);
       const recomputedOverdraw = Math.max(0, -remaining);
-      const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || ''; return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
+      const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || '';
+      const isAnomaly = remaining < 0;
+      const statusBadge = isAnomaly
+        ? `<span class="badge flagged">Anomaly</span>`
+        : (recomputedVariance > 0 ? `<span class="badge">Variance</span>` : `<span class="badge balanced">Balanced</span>`);
+      return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
-    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Flagged':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
+    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="action-row approvals-central-cod-row">${hasPermission('central_close_day')?'<button id="approvalsCentralCloseDayBtn">Central Close of Day</button>':''}</div><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Review</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+  }
+
+  function renderApprovalHistory() {
+    const allTypes = ['account_opening','account_maintenance','account_reactivation','cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'];
+    const decided = (state.approvals || [])
+      .filter(a => allTypes.includes(a.type) && a.status !== 'pending')
+      .sort((a, b) => new Date(approvalDisplayDate(b) || 0) - new Date(approvalDisplayDate(a) || 0));
+    const limit = state.ui.approvalHistoryLimit || 30;
+    const rows = decided.slice(0, limit).map((a, i) => {
+      const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
+        ? approvalAccountHeadingsInline(a)
+        : approvalDetails(a);
+      return `<tr><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${a.approvedBy || a.approvedByName || '—'}</td></tr>`;
+    }).join('');
+    const moreLess = `<div class="action-row">${decided.length > limit ? `<button id="approvalHistoryMore" class="secondary">Show More</button>`:''}${limit > 30 ? `<button id="approvalHistoryLess" class="secondary">Show Less</button>`:''}</div>`;
+    return `<div class="stack"><div class="table-card"><h3>Approval History</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Decided By</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No decided requests yet</td></tr>'}</tbody></table></div>${moreLess}</div></div>`;
   }
 
   function approvalSubmittedBy(a) {
@@ -2533,6 +2589,53 @@ function hideProcessing() {
     return requestSummary(a);
   }
 
+  function approvalAccountHeadingsInline(a) {
+    const p = a.payload || {};
+    const esc = (v) => String(v ?? '—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const line = (label, value) => value ? `<span class="approval-heading-item"><strong>${label}:</strong> ${esc(value)}</span>` : '';
+    if (a.type === 'account_opening') {
+      const acctType = p.accountType || 'customer';
+      const isCustomer = acctType === 'customer';
+      const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Staff Operational Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
+      const assignInput = (isCustomer && a.status === 'pending')
+        ? `<span class="approval-heading-item approval-assign-inline"><strong>Account Number:</strong> <input id="assignAcc-${a.id}" class="entry-input approval-assign-input-inline" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Assign before approving"></span>`
+        : line('Account Number', isCustomer ? (p.generatedAccountNumber || 'Not yet assigned') : (a.status === 'pending' ? 'System-assigned on approval' : (p.generatedAccountNumber || 'System-assigned')));
+      return `<div class="approval-heading-inline">
+        ${line('Type', acctTypeLabels[acctType] || acctType)}
+        ${line('Name', p.fullName || p.name)}
+        ${isCustomer ? line('Phone', p.phone) : ''}
+        ${isCustomer ? line('Address', p.address) : ''}
+        ${isCustomer ? line('NIN', p.nin) : ''}
+        ${isCustomer ? line('BVN', p.bvn) : ''}
+        ${acctType === 'staff_operational' ? line('Linked Staff', p.linkedStaffName || p.linkedStaffId) : ''}
+        ${assignInput}
+      </div>`;
+    }
+    if (a.type === 'account_maintenance') {
+      const patch = p.patch || {};
+      const customer = state.customers.find(c => c.id === p.customerId);
+      return `<div class="approval-heading-inline">
+        ${line('Account Number', p.accountNumber)}
+        ${line('Current Name', customer?.name)}
+        ${line('Updated Name', patch.name)}
+        ${line('Updated Phone', patch.phone)}
+        ${line('Updated Address', patch.address)}
+        ${line('Updated NIN', patch.nin)}
+        ${line('Updated BVN', patch.bvn)}
+        ${line('Old A/N', patch.oldAccountNumber)}
+      </div>`;
+    }
+    if (a.type === 'account_reactivation') {
+      const customer = state.customers.find(c => c.id === p.customerId);
+      return `<div class="approval-heading-inline">
+        ${line('Account Number', p.accountNumber)}
+        ${line('Name', customer?.name)}
+        ${line('Current Status', customerStatusLabel(customer))}
+      </div>`;
+    }
+    return approvalDetails(a);
+  }
+
   function prettyApprovalType(type) {
     return {
       account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation',
@@ -2544,7 +2647,7 @@ function hideProcessing() {
   function requestSummary(a) {
     const p = a.payload || {};
     if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${p.sourceAccountName||p.sourceAccountNumber||'—'} → ${p.destAccountName||p.destAccountNumber||'—'} • ${p.date}`;
-    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${p.staffName || 'Cash Officer'} • ${p.paymentMode || 'cash'} • ${p.date}`;
+    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${p.staffName || 'Treasury'} • ${p.paymentMode || 'cash'} • ${p.date}`;
     if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${p.targetAccountName || p.targetAccountNumber || 'staff account'} • ${p.paymentMode || 'cash'} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${p.staffName || 'staff'} for ${p.date}`;
     if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${p.accountNumber} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
@@ -2668,7 +2771,7 @@ function hideProcessing() {
     </div></div>`;
   } else if (req.type === 'cash_receipt') {
     html = `<div class="stack"><div class="form-grid three modal-cs-grid">
-      ${field('Cash Officer', p.staffName || '—', 'field-wide')}
+      ${field('Treasury', p.staffName || '—', 'field-wide')}
       ${field('Date', p.date || '—', 'field-date')}
       ${field('Amount', money(p.amount || 0), 'field-account')}
       ${field('Payment Mode', p.paymentMode || 'cash', 'field-account')}
@@ -2676,7 +2779,7 @@ function hideProcessing() {
     </div></div>`;
   } else if (req.type === 'inter_staff_credit') {
     html = `<div class="stack"><div class="form-grid three modal-cs-grid">
-      ${field('From (Cash Officer)', p.staffName || '—', 'field-wide')}
+      ${field('From (Treasury)', p.staffName || '—', 'field-wide')}
       ${field('To (Account)', `${p.targetAccountName || '—'} (${p.targetAccountNumber || '—'})`, 'field-wide')}
       ${field('Date', p.date || '—', 'field-date')}
       ${field('Amount', money(p.amount || 0), 'field-account')}
@@ -2811,6 +2914,24 @@ function nextPaint() {
       </div>`;
   }
 
+  function operationalAccountTotals(a) {
+    const entries = state.operations.entries.filter(e => e.accountId === a.id);
+    const totalCredit = entries.filter(e => e.kind === 'income').reduce((s,e)=>s+Number(e.amount||0),0);
+    const totalDebit = entries.filter(e => e.kind === 'expense').reduce((s,e)=>s+Number(e.amount||0),0);
+    return { totalDebit, totalCredit, balance: totalCredit - totalDebit };
+  }
+
+  function operationalBalanceTable(title, accounts) {
+    const sorted = [...accounts].sort((a,b)=> String(a.accountNumber||'').localeCompare(String(b.accountNumber||''), undefined, {numeric:true}));
+    let grandBalance = 0, grandDebit = 0, grandCredit = 0;
+    const rows = sorted.map((a,i) => {
+      const t = operationalAccountTotals(a);
+      grandDebit += t.totalDebit; grandCredit += t.totalCredit; grandBalance += t.balance;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(a.name)}</td><td>${money(t.totalDebit)}</td><td>${money(t.totalCredit)}</td><td>${money(t.balance)}</td><td>${fmtDate(a.createdAt)}</td></tr>`;
+    }).join('');
+    return `<div class="table-card"><h3>${title}</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th><th>Start Date</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No accounts</td></tr>`}<tr class="total-row"><td colspan="2"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td><td></td></tr></tbody></table></div></div>`;
+  }
+
   function renderOperationalAccounts() {
     const allAccts = [
       ...state.operations.incomeAccounts.map(a=>({...a,category:'income'})),
@@ -2840,10 +2961,8 @@ function nextPaint() {
             <div class="action-row compact-action-row"><button id="oeSubmit" class="tiny-btn">Submit for Approval</button></div>
           </div>
         </div>
-        <div class="table-card">
-          <h3>Existing Accounts</h3>
-          <div class="table-wrap"><table class="table"><thead><tr><th>Type</th><th>Account Number</th><th>Name</th><th>Entries</th></tr></thead><tbody>${allAccts.map(a=>`<tr><td>${a.category}</td><td>${a.accountNumber}</td><td>${a.name}</td><td>${state.operations.entries.filter(e=>e.accountId===a.id).length}</td></tr>`).join('') || '<tr><td colspan="4">No accounts</td></tr>'}</tbody></table></div>
-        </div>
+        ${operationalBalanceTable("All Income Balance", state.operations.incomeAccounts)}
+        ${operationalBalanceTable("All Expense Balance", state.operations.expenseAccounts)}
       </div>`;
   }
 
@@ -2851,31 +2970,34 @@ function nextPaint() {
     const search = String(state.ui.customerDirectorySearch || '').trim().toLowerCase();
     const customers = [...(state.customers || [])]
       .filter(c => String(c.accountType || 'customer') !== 'staff_wallet')
-      .sort((a,b)=> String(a.name||'').localeCompare(String(b.name||'')));
+      .sort((a,b)=> String(a.accountNumber||'').localeCompare(String(b.accountNumber||''), undefined, {numeric:true}));
     const filteredCustomers = search
       ? customers.filter(c => [c.name, c.accountNumber, c.phone, c.email].some(value => String(value || '').toLowerCase().includes(search)))
       : customers;
     const totalCustomers = customers.length;
+    let grandBalance = 0, grandDebit = 0, grandCredit = 0;
+    const bodyRows = filteredCustomers.map((c,i)=>{
+      const credits = (c.transactions || []).filter(tx => tx.type === 'credit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const debits = (c.transactions || []).filter(tx => tx.type === 'debit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      grandCredit += credits; grandDebit += debits; grandBalance += Number(c.balance || 0);
+      const frozen = isCustomerFrozen(c);
+      const inactive = c.active === false;
+      const statusLabel = inactive ? 'Removed' : frozen ? 'Frozen' : 'Active';
+      const statusColor = inactive ? '#fee2e2' : frozen ? '#fef9c3' : '#d1fae5';
+      const statusText = inactive ? '#991b1b' : frozen ? '#854d0e' : '#065f46';
+      return `<tr style="${inactive ? 'opacity:0.5' : ''}"><td>${i+1}</td><td>${escapeHtml(c.name)}</td><td>${c.accountNumber || '—'}</td><td>${money(debits)}</td><td>${money(credits)}</td><td>${money(Number(c.balance || 0))}</td><td>${fmtDate(c.createdAt)}</td><td><span style="padding:1px 6px;border-radius:8px;font-size:0.8em;background:${statusColor};color:${statusText}">${statusLabel}</span></td><td>${!inactive ? `<button class="secondary" style="font-size:10px;padding:3px 8px" data-remove-customer="${c.id}">Remove</button>` : '<span style="font-size:10px;color:var(--muted)">Removed</span>'}</td></tr>`;
+    }).join('');
     return `
       <div class="stack">
         <div class="kpi-row balance-kpi-row">
           <div class="kpi"><div class="label">Total Customers</div><div class="number">${totalCustomers}</div></div>
         </div>
         <div class="table-card">
-          <div class="action-inline"><h3 style="margin:0">Customer Directory</h3></div>
+          <div class="action-inline"><h3 style="margin:0">All Customers' Balance</h3></div>
           <div class="form-grid one" style="margin-top:12px">
             <div class="field"><label>Search Customer</label><input id="customerDirectorySearch" class="entry-input" placeholder="Search by name, account number, phone or email" value="${escapeHtml(state.ui.customerDirectorySearch || '')}"></div>
           </div>
-          <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Customer Name</th><th>Account Number</th><th>Started</th><th>Balance</th><th>Total Credits</th><th>Total Debits</th><th>Status</th><th>Action</th></tr></thead><tbody>${filteredCustomers.map((c,i)=>{
-            const credits = (c.transactions || []).filter(tx => tx.type === 'credit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-            const debits = (c.transactions || []).filter(tx => tx.type === 'debit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-            const frozen = isCustomerFrozen(c);
-            const inactive = c.active === false;
-            const statusLabel = inactive ? 'Removed' : frozen ? 'Frozen' : 'Active';
-            const statusColor = inactive ? '#fee2e2' : frozen ? '#fef9c3' : '#d1fae5';
-            const statusText = inactive ? '#991b1b' : frozen ? '#854d0e' : '#065f46';
-            return `<tr style="${inactive ? 'opacity:0.5' : ''}"><td>${i+1}</td><td>${escapeHtml(c.name)}</td><td>${c.accountNumber || '—'}</td><td>${fmtDate(c.createdAt)}</td><td>${money(Number(c.balance || 0))}</td><td>${money(credits)}</td><td>${money(debits)}</td><td><span style="padding:1px 6px;border-radius:8px;font-size:0.8em;background:${statusColor};color:${statusText}">${statusLabel}</span></td><td>${!inactive ? `<button class="secondary" style="font-size:10px;padding:3px 8px" data-remove-customer="${c.id}">Remove</button>` : '<span style="font-size:10px;color:var(--muted)">Removed</span>'}</td></tr>`;
-          }).join('') || '<tr><td colspan="9">No matching customers</td></tr>'}</tbody></table></div>
+          <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="9">No matching customers</td></tr>'}${filteredCustomers.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="3"></td></tr>` : ''}</tbody></table></div>
           <div class="action-row" style="margin-top:14px"><button id="customerDirectoryCloseBtn" class="secondary">Collapse Directory</button></div>
         </div>
       </div>`;
@@ -2893,10 +3015,23 @@ function nextPaint() {
       const matchesSearch = !staffSearch || staffName.includes(staffSearch) || staffCode.includes(staffSearch);
       const matchesRole = staffRoleFilter === 'all' || staffRole === staffRoleFilter;
       return matchesSearch && matchesRole;
-    });
+    }).sort((a,b)=> String(ensureStaffAccount(a.id).accountNumber||'').localeCompare(String(ensureStaffAccount(b.id).accountNumber||''), undefined, {numeric:true}));
+    let grandBalance = 0, grandDebit = 0, grandCredit = 0;
+    const bodyRows = filteredStaff.map((s,i)=>{
+      const acc = ensureStaffAccount(s.id);
+      const wallet = (state.customers || []).find(c => c.id === acc.linkedCustomerId);
+      const credits = (wallet?.transactions || []).filter(tx => tx.type === 'credit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const debits = (wallet?.transactions || []).filter(tx => tx.type === 'debit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      grandCredit += credits; grandDebit += debits; grandBalance += Number(acc.balance || 0);
+      const staffCode = s.staffCode || s.staff_code || s.id || '—';
+      const staffName = s.name || s.full_name || '—';
+      const staffRole = s.role || s.role_code || '';
+      const isActive = s.active !== false && s.is_active !== false;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(acc.accountNumber))}</code></td><td>${money(debits)}</td><td>${money(credits)}</td><td>${money(acc.balance)}</td><td>${fmtDate(wallet?.createdAt)}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td>${money(acc.walletBalance)}</td><td class="${Number(acc.debtBalance||0)>0?'balance-negative':''}">-${money(acc.debtBalance)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
+    }).join('');
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">All Staff Balance</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
         ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
@@ -2905,15 +3040,35 @@ function nextPaint() {
             ${Object.keys(ROLE_LABELS).map(role => `<option value="${role}" ${staffRoleFilter===role?'selected':''}>${ROLE_LABELS[role]}</option>`).join('')}
           </select>
         </div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff ID</th><th>Name</th><th>Role</th><th>Status</th><th>Wallet</th><th>Debt</th><th>Float</th><th>Action</th></tr></thead><tbody>${filteredStaff.map((s,i)=>{
-          const acc = ensureStaffAccount(s.id);
-          const staffCode = s.staffCode || s.staff_code || s.id || '—';
-          const staffName = s.name || s.full_name || '—';
-          const staffRole = s.role || s.role_code || '';
-          const isActive = s.active !== false && s.is_active !== false;
-          return `<tr><td>${i+1}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${escapeHtml(staffName)}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td>${money(acc.walletBalance)}</td><td class="${Number(acc.debtBalance||0)>0?'balance-negative':''}">-${money(acc.debtBalance)}</td><td>${money(acc.balance)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
-        }).join('') || '<tr><td colspan="9">No staff found</td></tr>'}</tbody></table></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th><th>Start Date</th><th>Role</th><th>Status</th><th>Wallet</th><th>Debt</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="12">No staff found</td></tr>'}${filteredStaff.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="6"></td></tr>` : ''}</tbody></table></div>
       </div>`;
+  }
+
+  function renderOverallBalance() {
+    const rows = [];
+    (state.customers || []).filter(c => String(c.accountType || 'customer') !== 'staff_wallet').forEach(c => {
+      const credits = (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s,tx)=>s+Number(tx.amount||0),0);
+      const debits = (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s,tx)=>s+Number(tx.amount||0),0);
+      rows.push({ accountNumber: c.accountNumber || '—', name: c.name, totalDebit: debits, totalCredit: credits, balance: Number(c.balance||0) });
+    });
+    (state.staff || []).forEach(s => {
+      const acc = ensureStaffAccount(s.id);
+      const wallet = (state.customers || []).find(c => c.id === acc.linkedCustomerId);
+      const credits = (wallet?.transactions || []).filter(tx => tx.type === 'credit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
+      const debits = (wallet?.transactions || []).filter(tx => tx.type === 'debit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
+      rows.push({ accountNumber: acc.accountNumber, name: `${(s.name||s.full_name||'STAFF')}`, totalDebit: debits, totalCredit: credits, balance: Number(acc.balance||0) });
+    });
+    [...state.operations.incomeAccounts, ...state.operations.expenseAccounts].forEach(a => {
+      const t = operationalAccountTotals(a);
+      rows.push({ accountNumber: a.accountNumber, name: a.name, totalDebit: t.totalDebit, totalCredit: t.totalCredit, balance: t.balance });
+    });
+    rows.sort((a,b)=> String(a.accountNumber||'').localeCompare(String(b.accountNumber||''), undefined, {numeric:true}));
+    let grandDebit = 0, grandCredit = 0, grandBalance = 0;
+    const bodyRows = rows.map((r,i) => {
+      grandDebit += r.totalDebit; grandCredit += r.totalCredit; grandBalance += r.balance;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(String(r.accountNumber))}</td><td>${escapeHtml(String(r.name))}</td><td>${money(r.totalDebit)}</td><td>${money(r.totalCredit)}</td><td>${money(r.balance)}</td></tr>`;
+    }).join('');
+    return `<div class="stack"><div class="table-card"><h3>Overall Balance</h3><div class="note">The company's entire truth — every customer, staff, income, and expense account in one ledger.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Number</th><th>Name of Account</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="6">No accounts</td></tr>'}<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td></tr></tbody></table></div></div></div>`;
   }
 
   function renderBusinessBalance() {
@@ -2931,7 +3086,7 @@ function nextPaint() {
           <div class="kpi compact-page-kpi"><div class="label">Entries</div><div class="number">${filtered.length}</div></div>
           <div class="kpi compact-page-kpi"><div class="label">Net Book Balance</div><div class="number">${money(credits-debits)}</div></div>
         </div>
-        <div class="table-card"><h3>Business Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th></tr></thead><tbody>${filtered.slice(0,state.ui.businessEntriesLimit || 20).map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${t.accountNumber || '—'}</td><td>${t.details}</td><td>${t.kind==='debit'?money(t.amount):''}</td><td>${t.kind==='credit'?money(t.amount):''}</td><td>${money(t.balanceAfter || 0)}</td><td>${t.receivedOrPaidBy || '—'}</td><td>${t.postedBy || '—'}</td></tr>`).join('') || '<tr><td colspan="8">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.businessEntriesLimit || 20) ? `<button id="businessMore" class="secondary">Show More</button>` : ''}${(state.ui.businessEntriesLimit || 20) > 20 ? `<button id="businessLess" class="secondary">Show Less</button>` : ''}</div></div>
+        <div class="table-card"><h3>Business Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.businessEntriesLimit || 20).map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${t.accountNumber || '—'}</td><td>${t.details}</td><td>${t.kind==='debit'?money(t.amount):''}</td><td>${t.kind==='credit'?money(t.amount):''}</td><td>${money(t.balanceAfter || 0)}</td><td>${t.receivedOrPaidBy || '—'}</td><td>${t.postedBy || '—'}</td><td>${t.approvedBy || '—'}</td></tr>`).join('') || '<tr><td colspan="9">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.businessEntriesLimit || 20) ? `<button id="businessMore" class="secondary">Show More</button>` : ''}${(state.ui.businessEntriesLimit || 20) > 20 ? `<button id="businessLess" class="secondary">Show Less</button>` : ''}</div></div>
       </div>`;
   }
 
@@ -2976,7 +3131,8 @@ function nextPaint() {
         details: cleanOperationalNote(e.details || e.note) || '',
         balanceAfter: runningBalance,
         receivedOrPaidBy: e.receivedOrPaidBy || e.postedBy || '—',
-        postedBy: e.postedBy || '—'
+        postedBy: e.postedBy || '—',
+        approvedBy: e.approvedBy || '—'
       };
     });
   }
@@ -2999,7 +3155,7 @@ function nextPaint() {
     const activeFilter = String(state.ui.operationalType || 'all').toLowerCase();
 
     const csvRows = [
-      ['S/N','DATE','TYPE','ACCOUNT NAME','AMOUNT','DETAILS','BALANCE AFTER','POSTED BY'],
+      ['S/N','DATE','TYPE','ACCOUNT NAME','AMOUNT','DETAILS','BALANCE AFTER','POSTED BY','APPROVED BY'],
       ...rows.map(r => [
         r.sn,
         `‌${r.date || ''}`,
@@ -3008,17 +3164,18 @@ function nextPaint() {
         Number(r.amount || 0),
         r.details || r.note || '',
         Number(r.balanceAfter || 0),
-        r.postedBy || ''
+        r.postedBy || '',
+        r.approvedBy || ''
       ]),
       []
     ];
 
     if (activeFilter === 'all') {
-      csvRows.push(['', '', '', 'TOTAL INCOME', Number(summary.totalIncome || 0), '', '', '']);
-      csvRows.push(['', '', '', 'TOTAL EXPENSE', Number(summary.totalExpense || 0), '', '', '']);
-      csvRows.push(['', '', '', 'NET BALANCE', Number(summary.netOperationalBalance || 0), '', '', '']);
+      csvRows.push(['', '', '', 'TOTAL INCOME', Number(summary.totalIncome || 0), '', '', '', '']);
+      csvRows.push(['', '', '', 'TOTAL EXPENSE', Number(summary.totalExpense || 0), '', '', '', '']);
+      csvRows.push(['', '', '', 'NET BALANCE', Number(summary.netOperationalBalance || 0), '', '', '', '']);
     } else {
-      csvRows.push(['', '', '', 'TOTAL AMOUNT', Number(summary.totalAmount || 0), '', '', '']);
+      csvRows.push(['', '', '', 'TOTAL AMOUNT', Number(summary.totalAmount || 0), '', '', '', '']);
     }
 
     exportCsv(csvRows, 'operational_balance.csv', true);
@@ -3040,6 +3197,7 @@ function nextPaint() {
         <td>${r.note}</td>
         <td>${money(r.balanceAfter)}</td>
         <td>${r.postedBy}</td>
+        <td>${r.approvedBy || '—'}</td>
       </tr>
     `).join('');
 
@@ -3063,10 +3221,11 @@ function nextPaint() {
               <th>Note</th>
               <th>Balance After</th>
               <th>Posted By</th>
+              <th>Approved By</th>
             </tr>
           </thead>
           <tbody>
-            ${bodyRows || '<tr><td colspan="8">No entries</td></tr>'}
+            ${bodyRows || '<tr><td colspan="9">No entries</td></tr>'}
           </tbody>
         </table>
         <div class="statement-total"><strong>Total Amount:</strong> ${money(summary.totalAmount)}</div>
@@ -3101,7 +3260,8 @@ function nextPaint() {
         details: cleanOperationalNote(e.details || e.note) || '',
         balanceAfter: Number(e.balanceAfter || 0),
         receivedOrPaidBy: e.receivedBy || e.receivedOrPaidBy || e.postedBy || '',
-        postedBy: e.postedBy || ''
+        postedBy: e.postedBy || '',
+        approvedBy: e.approvedBy || ''
       };
     });
   }
@@ -3123,7 +3283,7 @@ function nextPaint() {
     const activeFilter = String(state.ui.businessType || 'all').toLowerCase();
 
     const csvRows = [
-      ['S/N','DATE','TYPE','ACCOUNT NAME','AMOUNT','DETAILS','BALANCE AFTER','RECEIVED OR PAID BY','POSTED BY'],
+      ['S/N','DATE','TYPE','ACCOUNT NAME','AMOUNT','DETAILS','BALANCE AFTER','RECEIVED OR PAID BY','POSTED BY','APPROVED BY'],
       ...rows.map(r => [
         r.sn,
         `‌${r.date || ''}`,
@@ -3133,17 +3293,18 @@ function nextPaint() {
         r.details || '',
         Number(r.balanceAfter || 0),
         r.receivedOrPaidBy || '',
-        r.postedBy || ''
+        r.postedBy || '',
+        r.approvedBy || ''
       ]),
       []
     ];
 
     if (activeFilter === 'all') {
-      csvRows.push(['', '', '', 'TOTAL CREDIT', Number(summary.totalCredit || 0), '', '', '', '']);
-      csvRows.push(['', '', '', 'TOTAL DEBIT', Number(summary.totalDebit || 0), '', '', '', '']);
-      csvRows.push(['', '', '', 'NET BALANCE', Number(summary.netBookBalance || 0), '', '', '', '']);
+      csvRows.push(['', '', '', 'TOTAL CREDIT', Number(summary.totalCredit || 0), '', '', '', '', '']);
+      csvRows.push(['', '', '', 'TOTAL DEBIT', Number(summary.totalDebit || 0), '', '', '', '', '']);
+      csvRows.push(['', '', '', 'NET BALANCE', Number(summary.netBookBalance || 0), '', '', '', '', '']);
     } else {
-      csvRows.push(['', '', '', 'TOTAL AMOUNT', Number(summary.totalAmount || 0), '', '', '', '']);
+      csvRows.push(['', '', '', 'TOTAL AMOUNT', Number(summary.totalAmount || 0), '', '', '', '', '']);
     }
 
     exportCsv(csvRows, 'business_balance.csv', true);
@@ -3163,6 +3324,7 @@ function nextPaint() {
         <td>${money(r.balanceAfter)}</td>
         <td>${r.receivedOrPaidBy}</td>
         <td>${r.postedBy}</td>
+        <td>${r.approvedBy || '—'}</td>
       </tr>
     `).join('');
     const html = `
@@ -3186,10 +3348,11 @@ function nextPaint() {
               <th>Balance After</th>
               <th>Received Or Paid By</th>
               <th>Posted By</th>
+              <th>Approved By</th>
             </tr>
           </thead>
           <tbody>
-            ${bodyRows || '<tr><td colspan="9">No entries</td></tr>'}
+            ${bodyRows || '<tr><td colspan="10">No entries</td></tr>'}
           </tbody>
         </table>
         <div class="statement-total"><strong>Total Amount:</strong> ${money(summary.totalAmount)}</div>
@@ -3233,7 +3396,7 @@ function staffLedgerEvents(staffId) {
         const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId);
         if (opAccount && (payload.targetAccountId === opAccount.id || payload.operationalAccountId === opAccount.id)) {
           const amount = Number(payload.amount || 0);
-          addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Cash Officer'} • ${payload.paymentMode || 'cash'}`, runningType: 'form' });
+          addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Treasury'} • ${payload.paymentMode || 'cash'}`, runningType: 'form' });
         }
       }
       if (req.type === 'float_declaration' && (payload.staffId === staffId || payload.staff_id === staffId)) {
@@ -3481,7 +3644,8 @@ function normalizeStaffLedgerEntryType(row) {
       case 'approval_queue':
       case 'approval_customer_service':
       case 'approval_tellering':
-      case 'approval_others': bindApprovals(); break;
+      case 'approval_others':
+      case 'approval_history': bindApprovals(); break;
       case 'permissions': bindPermissions(); break;
       case 'operational_posting': bindOperationalAccounts(); break;
       case 'operational_accounts': bindOperationalAccounts(); break;
@@ -3610,6 +3774,12 @@ function normalizeStaffLedgerEntryType(row) {
     const linkedStaffSelect = byId('openLinkedStaff');
     if (linkedStaffSelect) linkedStaffSelect.onchange = () => {
       openingDraft.linkedStaffId = linkedStaffSelect.value;
+      if ((openingDraft.accountType || 'customer') === 'staff_operational') {
+        const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffSelect.value);
+        openingDraft.name = linkedStaff ? `TELLER ${String(linkedStaff.name || '').toUpperCase()}` : '';
+        save();
+        renderWorkspace();
+      }
     };
 
     const focusedField = byId(state.ui.accountOpeningFocusedField || '');
@@ -3752,13 +3922,13 @@ function normalizeStaffLedgerEntryType(row) {
         <div class="cs2-title">Non Cash Transaction</div>
         <div class="cs2-stack">
           <div class="cs2-row">
-            <div class="cs2-label">Source Account</div>
+            <div class="cs2-label">Debit Account</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off"></div>
             <button id="itrLookupSource" class="sheet-btn secondary tiny-btn">Look Up</button>
           </div>
           <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
           <div class="cs2-row">
-            <div class="cs2-label">Destination Account</div>
+            <div class="cs2-label">Credit Account</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrDestAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number to credit" autocomplete="off"></div>
             <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Look Up</button>
           </div>
@@ -3834,7 +4004,7 @@ function normalizeStaffLedgerEntryType(row) {
     const categories = [
       { key: 'teller', label: 'Teller Transactions', icon: '💳', types: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer'] },
       { key: 'customer', label: 'Customer Transactions', icon: '🧾', types: ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','account_opening','account_maintenance','account_reactivation'] },
-      { key: 'cash_officer', label: 'Cash Officer Transactions', icon: '💰', types: ['cash_receipt','inter_staff_credit'] },
+      { key: 'cash_officer', label: 'Treasury Transactions', icon: '💰', types: ['cash_receipt','inter_staff_credit'] },
       { key: 'salary', label: 'Staff Salary Account Transactions', icon: '👤', types: ['account_opening'], acctType: 'staff_salary' },
       { key: 'income', label: 'Income Account Transactions', icon: '📈', types: ['operational_entry'], acctType: 'income' },
       { key: 'expense', label: 'Expense Account Transactions', icon: '📉', types: ['operational_entry'], acctType: 'expense' },
@@ -4151,10 +4321,10 @@ function normalizeStaffLedgerEntryType(row) {
         <td>${tx.details || ''}</td>
         <td>${tx.type==='debit'?money(tx.amount):''}</td>
         <td>${tx.type==='credit'?money(tx.amount):''}</td>
+        <td>${money(tx.balanceAfter)}</td>
         <td>${tx.receivedOrPaidBy || '—'}</td>
         <td>${tx.postedBy || tx.postedById || '—'}</td>
         <td>${tx.approvedBy || '—'}</td>
-        <td>${money(tx.balanceAfter)}</td>
       </tr>`).join('');
       byId('statementArea').innerHTML = `
         <div class="record-card statement-record-minimal">
@@ -4170,7 +4340,7 @@ function normalizeStaffLedgerEntryType(row) {
           </div>
           <div class="table-wrap" style="margin-top:16px">
             <table class="table">
-              <thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th><th>Balance</th></tr></thead>
+              <thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead>
               <tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}</tbody>
             </table>
           </div>
@@ -4185,22 +4355,28 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function getStaffOperationalBalance(staffId) {
-    // Sum of all approved credits to this staff's operational account,
-    // minus all approved debits and journal form amounts drawn from it.
+    return getStaffOperationalBreakdown(staffId).variance;
+  }
+
+  function getStaffOperationalBreakdown(staffId) {
+    // Cash = total funded to this teller's operational account by Treasury (approved credits).
+    // Posting Cash = total drawn from it via customer postings so far (approved debits).
+    // Variance = Cash - Posting Cash = what's actually left to work with (can go negative —
+    // a teller may credit a customer before Treasury has funded/reconciled them).
     const opAccount = (state.customers || []).find(c =>
       c.accountType === 'staff_operational' && c.linkedStaffId === staffId
     );
-    if (!opAccount) return 0;
-    const credits = (state.approvals || [])
+    if (!opAccount) return { cash: 0, postingCash: 0, variance: 0 };
+    const cash = (state.approvals || [])
       .filter(r => r.status === 'approved' &&
         (r.type === 'cash_receipt' || r.type === 'inter_staff_credit') &&
         (r.payload?.operationalAccountId === opAccount.id || r.payload?.targetAccountId === opAccount.id))
       .reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
-    const debits = (state.approvals || [])
+    const postingCash = (state.approvals || [])
       .filter(r => r.status === 'approved' && r.payload?.staffId === staffId &&
         ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type))
       .reduce((s, r) => s + (r.type.endsWith('_journal') ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
-    return credits - debits;
+    return { cash, postingCash, variance: cash - postingCash };
   }
 
   function hasApprovedFloat(staffId, dateStr) {
@@ -4354,8 +4530,14 @@ function normalizeStaffLedgerEntryType(row) {
       });
       const rows = withBalances.map(({ row, formBase, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(formBase)}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
-      ['postingRunningFloat'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,dailyRunning)); });
-      ['postingVariance'].forEach(id => { if (byId(id)) byId(id).textContent = money(Math.max(0,-dailyRunning)); });
+      const opBreakdownLive = getStaffOperationalBreakdown(staff.id);
+      if (byId('postingCashFunded')) byId('postingCashFunded').textContent = money(opBreakdownLive.cash);
+      if (byId('postingCashDrawn')) byId('postingCashDrawn').textContent = money(opBreakdownLive.postingCash + otherPendingDraftForms);
+      if (byId('postingCashVariance')) {
+        const el = byId('postingCashVariance');
+        el.textContent = money(dailyRunning);
+        el.classList.toggle('balance-negative', dailyRunning < 0);
+      }
       if (byId('journalFormRunning')) byId('journalFormRunning').textContent = money(Math.max(0, jRunning));
       if (byId('journalFormVariance')) byId('journalFormVariance').textContent = money(Math.max(0, -jRunning));
       const fileNameEl = byId('journalFieldNoteName');
@@ -4803,13 +4985,14 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('txPostSingle')) byId('txPostSingle').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance — request a credit from Cash Officer first');
+      if (kind === 'debit' && getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance to debit from — request a credit from Treasury first');
       const accountNumberInput = String(byId('txAcc')?.value || '').trim();
       const customer = getCustomerByAccountNo(accountNumberInput);
       if (!accountNumberInput || !customer) return showToast('Search for customer first');
       if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast('Frozen account cannot accept transactions'); }
       const amount = Number(byId('txAmount').value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
+      if (kind === 'debit' && amount > getStaffOperationalBalance(staff.id) + 0.01) return showToast(`Debit exceeds your operational balance (${money(getStaffOperationalBalance(staff.id))})`);
       const mode = selectedMode();
       const chargeBreakdown = kind === 'credit' ? collectChargeBreakdownFromUi('single', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -4875,7 +5058,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('journalSubmit')) byId('journalSubmit').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance — request a credit from Cash Officer first');
+      if (kind === 'debit' && getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance to debit from — request a credit from Treasury first');
       const alreadySubmitted = (state.approvals || []).some(r =>
         r.type === (kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal') &&
         r.payload?.staffId === staff.id && r.payload?.date === businessDate() &&
@@ -4888,9 +5071,11 @@ function normalizeStaffLedgerEntryType(row) {
       // Journal must balance: sum of rows must exactly equal the journal form amount
       const rowTotal = journal.reduce((s, r) => s + Number(r.amount || 0), 0);
       if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal journal form amount ${money(journalFormAmount)}`);
-      // Journal form amount must not exceed remaining operational balance
+      // Journal form amount must not exceed remaining operational balance — debit only.
+      // Credits are allowed to push the operational balance negative; Treasury
+      // reconciles it later (see the operational-account model).
       const opBalance = getStaffOperationalBalance(staff.id);
-      if (journalFormAmount > opBalance + 0.01) return showToast(`Journal form amount ${money(journalFormAmount)} exceeds your operational balance ${money(opBalance)}`);
+      if (kind === 'debit' && journalFormAmount > opBalance + 0.01) return showToast(`Journal form amount ${money(journalFormAmount)} exceeds your operational balance ${money(opBalance)}`);
       const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
@@ -5020,12 +5205,20 @@ function normalizeStaffLedgerEntryType(row) {
     if (bulkReject) bulkReject.onclick = () => runBulk('reject');
     qq('[data-approve]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
-      if (isApprovalLockedByOther(btn.dataset.approve)) return showToast('This request is being reviewed by another staff');
+      const reqId = btn.dataset.approve;
+      if (isApprovalLockedByOther(reqId)) return showToast('This request is being reviewed by another staff');
+      const req = state.approvals.find(r => r.id === reqId);
+      if (req && req.type === 'account_opening' && (req.payload?.accountType || 'customer') === 'customer') {
+        const assignInput = byId(`assignAcc-${reqId}`);
+        const accountNumber = assignInput ? assignInput.value.trim() : '';
+        if (!accountNumber) return showToast('Enter an account number before approving');
+        req.payload.generatedAccountNumber = accountNumber;
+      }
       confirmAction('Approve this request?', async () => {
         showProcessing('Approving request...');
         await nextPaint();
         try {
-          const result = await approveRequestRemote(btn.dataset.approve);
+          const result = await approveRequestRemote(reqId);
           if (result?.ok === false) showToast(result?.error?.message || 'Unable to approve request');
         } finally {
           hideProcessing();
@@ -5056,6 +5249,10 @@ function normalizeStaffLedgerEntryType(row) {
     if (more) more.onclick = () => { state.ui.approvalsLimit = (state.ui.approvalsLimit || 20) + 20; save(); renderWorkspace(); };
     const less = byId('approvalsLess');
     if (less) less.onclick = () => { state.ui.approvalsLimit = Math.max(20, (state.ui.approvalsLimit || 20) - 20); save(); renderWorkspace(); };
+    const historyMore = byId('approvalHistoryMore');
+    if (historyMore) historyMore.onclick = () => { state.ui.approvalHistoryLimit = (state.ui.approvalHistoryLimit || 30) + 30; save(); renderWorkspace(); };
+    const historyLess = byId('approvalHistoryLess');
+    if (historyLess) historyLess.onclick = () => { state.ui.approvalHistoryLimit = Math.max(30, (state.ui.approvalHistoryLimit || 30) - 30); save(); renderWorkspace(); };
     const codDate = byId('codAdminDate');
     if (codDate) codDate.onchange = () => { state.ui.codAdminDate = codDate.value || businessDate(); save(); renderWorkspace(); };
     const codResolutionMore = byId('codResolutionMore');
@@ -5157,9 +5354,8 @@ function normalizeStaffLedgerEntryType(row) {
       c.accountType === 'staff_operational' && c.linkedStaffId === st.id
     );
     openModal('Cash Receipt', `
-      <div class="form-grid three compact-modal-grid">
-        <div class="field"><label>Cash Officer</label><div class="display-field">${st.name}</div></div>
-        <div class="field field-date-compact"><label>Date</label><div class="display-field compact-date-display">${businessDate()}</div></div>
+      <div class="form-grid two compact-modal-grid">
+        <div class="field"><label>Treasury</label><div class="display-field">${st.name}</div></div>
         <div class="field"><label>Amount Received</label><input id="cashReceiptAmount" class="entry-input" type="number"></div>
       </div>
       <div class="form-grid two compact-modal-grid" style="margin-top:8px">
@@ -5265,7 +5461,7 @@ function normalizeStaffLedgerEntryType(row) {
       const variance = Math.max(0, -remaining);
       return `<tr><td>${st.name}</td><td>${money(opBalance)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
-    openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Operational Balance is the total funded by Cash Officer. Remaining Balance reduces as staff disburse funds. Net Balance is Total Credits minus Total Debits.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Op. Balance</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining</th><th>Variance</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
+    openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Operational Balance is the total funded by Treasury. Remaining Balance reduces as staff disburse funds. Net Balance is Total Credits minus Total Debits.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Op. Balance</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining</th><th>Variance</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
       closeModal();
       showProcessing('Closing business day...');
       await nextPaint();
@@ -5720,8 +5916,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <div class="kpi"><div class="label">Remaining Balance</div><div class="number ${remainingBalance<0?'balance-negative':''}">${money(remainingBalance)}</div></div>
         <div class="kpi"><div class="label">Variance</div><div class="number ${varianceValue>0?'balance-negative':''}">${money(varianceValue)}</div></div>
       </div>
-      <div class="note">Operational Balance is the total funded by Cash Officer. Net Balance is Total Credits minus Total Debits. Remaining Balance reflects unaccounted funds.</div>
-      <div class="note"><strong>Status:</strong> ${c.status || 'balanced'} • <strong>Manager Note:</strong> ${c.resolutionNote || c.note || '—'}</div>` : `<div class="note">No close-of-day record for selected date.</div>`;
+      <div class="note">Operational Balance is the total funded by Treasury. Net Balance is Total Credits minus Total Debits. Remaining Balance reflects unaccounted funds.</div>
+      <div class="note"><strong>Status:</strong> ${c.status === 'flagged' ? 'Anomaly' : (c.status || 'balanced')} • <strong>Manager Note:</strong> ${c.resolutionNote || c.note || '—'}</div>` : `<div class="note">No close-of-day record for selected date.</div>`;
     openModal('My Close of Day', `<div class="modal-sheet my-close-day-sheet"><div class="stack"><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" id="myCodDate" value="${state.ui.myCodDate}"></div></div>${summary}</div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const picker = byId('myCodDate');
     if (picker) picker.onchange = () => { state.ui.myCodDate = picker.value || businessDate(); save(); openMyCODModal(state.ui.myCodDate); };
@@ -5784,6 +5980,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     openModal('Resolve Close of Day', `
       <div class="stack">
         <div class="note">Form is the approved opening money collected from the field. Net Balance is Total Credits minus Total Debits. Final Agreed Amount corrects the system total only. Debt can still be recorded against staff where required.</div>
+        ${currentOverdraw > 0 ? `<div class="note" style="background:#fdecea;border-color:var(--danger)"><strong>Anomaly:</strong> this teller closed the day with a negative operational balance of ${money(currentOverdraw)}. Resolve directly with the staff involved before marking this closed.</div>` : ''}
         <div class="kpi-row">
           <div class="kpi"><div class="label">Form</div><div class="number">${money(formAmount)}</div></div>
           <div class="kpi"><div class="label">Credit Cash</div><div class="number">${money(totalCreditCash)}</div></div>
@@ -5915,7 +6112,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       amount: Number(t.amount || 0),
       balanceAfter: Number(t.balanceAfter || 0),
       receivedOrPaidBy: t.receivedOrPaidBy || t.receivedBy || t.postedBy || '',
-      postedBy: t.postedBy || t.postedById || ''
+      postedBy: t.postedBy || t.postedById || '',
+      approvedBy: t.approvedBy || ''
     }));
     const extras = (state.businessExtras || []).map(e => ({
       ...e,
@@ -5929,7 +6127,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       amount: Number(e.amount || 0),
       balanceAfter: Number(e.balanceAfter || 0),
       receivedOrPaidBy: e.receivedOrPaidBy || e.receivedBy || e.postedBy || '',
-      postedBy: e.postedBy || ''
+      postedBy: e.postedBy || '',
+      approvedBy: e.approvedBy || ''
     }));
     return [...txRows, ...extras].sort((a,b)=>new Date(b.date)-new Date(a.date));
   }

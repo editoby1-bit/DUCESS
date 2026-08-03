@@ -132,6 +132,12 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .modal-cs-grid .field-bvn .display-field{max-width:180px}
 .modal-cs-grid .field-id .display-field{max-width:220px}
 .approval-photo-stack{display:flex;flex-direction:column;gap:12px;align-items:flex-start;margin-top:8px}
+.total-row td{border-top:2px solid var(--line);background:#f8fafc;}
+.approval-heading-inline{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;line-height:1.5;max-width:360px}
+.approval-heading-item{white-space:nowrap}
+.approval-heading-item strong{color:var(--muted);font-weight:700;margin-right:2px}
+.approval-assign-inline{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.approval-assign-input-inline{width:110px;padding:2px 6px;font-size:11.5px;border:1px solid var(--brand);border-radius:5px;}
 .approval-photo-panel.hidden{display:none}
 .approval-photo-box{width:140px;height:140px}
 .field label { display:block; margin-bottom: 2px; font-size: 10px; font-weight: 700; color: var(--muted); text-transform:uppercase; letter-spacing:.03em; }
@@ -158,6 +164,8 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .badge.pending { background:#fff1e8; color: var(--warning); }
 .badge.approved { background:#e9f9f0; color: var(--success); }
 .badge.rejected { background:#fdecea; color: var(--danger); }
+.badge.flagged { background:#fdecea; color: var(--danger); }
+.badge.balanced { background:#e9f9f0; color: var(--success); }
 .muted { color: var(--muted); }
 .stack { display:flex; flex-direction:column; gap:5px; }
 .note { font-size: 11px; color: var(--muted); line-height: 1.4; }
@@ -2282,7 +2290,7 @@ body[data-theme="ducess-sheet"] .workspace-card .tool-tabs:not(.approvals-sectio
 
   .modal-back{
     padding:10px !important;
-    align-items:flex-start !important;
+    align-items:center !important;
   }
 
   .modal{
@@ -4669,6 +4677,20 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 
 .workspace-tool-body {
   min-width: 0;
+}
+
+@media (min-width: 981px) {
+  .workspace-tool-body {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .workspace-tool-body .layout-grid,
+  .workspace-tool-body .stack,
+  .workspace-tool-body .form-card,
+  .workspace-tool-body .table-card {
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 .tool-empty-state {
@@ -12433,6 +12455,46 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   min-height: 33px !important;
 }
 
+/* Cash / Posting Cash / Variance box — occupies the same footprint the
+   old free-text Details box used to. */
+.posting-row-opbox {
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+.op-breakdown-box {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+  box-sizing: border-box;
+  height: 33px;
+  min-height: 33px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+.op-breakdown-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-right: 1px solid var(--line);
+  padding: 2px 4px;
+}
+.op-breakdown-cell:last-child { border-right: none; }
+.op-breakdown-label {
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+.op-breakdown-value {
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
 /* Meta strip now only 3 cols — Received By gets the most room */
 @media (min-width: 901px) {
   .tellering-inline-meta .tellering-meta-line.compact-fields-inline {
@@ -12597,4 +12659,37 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   .module-card[data-module-key="approvals"]        { top: 270px !important; }
   .module-card[data-module-key="balances"]         { top: 420px !important; }
   .module-card[data-module-key="administration"]   { top: 420px !important; }
+}
+
+/* ===== SINGLE-RING HOME DASHBOARD — final override =====
+   Removes the outer glow ring entirely, leaving only the one bordered
+   ring around the hub. Tiles are pulled in proportionally (25% closer
+   to center) so they now orbit tight around that single remaining ring
+   instead of the removed outer boundary. This rule comes last so it
+   wins over every earlier "surgical patch" block above. */
+@media (min-width: 981px){
+  .module-grid::before{
+    content:none !important;
+    display:none !important;
+  }
+  .module-card[data-module-key="customer_service"]{ left:50%   !important; top:164px !important; transform:translate(-50%,-50%) !important; }
+  .module-card[data-module-key="tellering"]{        left:34.6% !important; top:277px !important; transform:translate(-50%,-50%) !important; }
+  .module-card[data-module-key="approvals"]{        left:65.4% !important; top:277px !important; transform:translate(-50%,-50%) !important; }
+  .module-card[data-module-key="balances"]{         left:38%   !important; top:389px !important; transform:translate(-50%,-50%) !important; }
+  .module-card[data-module-key="administration"]{   left:62%   !important; top:389px !important; transform:translate(-50%,-50%) !important; }
+  .module-card[data-module-key="cash_officer"]{     left:50%   !important; top:472px !important; transform:translate(-50%,-50%) !important; }
+
+  /* Logo: reveal the entire mark, uncropped, sitting inside the one
+     remaining circle — scale-to-fit rather than cover/crop. */
+  .module-hub{
+    overflow:hidden !important;
+    background:#fff !important;
+  }
+  .module-hub-logo{
+    width:90% !important;
+    height:90% !important;
+    object-fit:contain !important;
+    object-position:center !important;
+    border-radius:0 !important;
+  }
 }
