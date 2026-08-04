@@ -12801,3 +12801,26 @@ label.tx-toggle-pill span { font-size: 10px !important; }
     flex: 0 0 190px;
   }
 }
+
+/* ===== Round 5: Generate Journal "row-two" (Received By / Details /
+   Add to Journal / Collapse Journal) had a hard-coded minimum width
+   (~856px) wider than the card it sits in, which is what pushed
+   Collapse Journal outside the visible frame. Switch it to a
+   wrapping flex row so it always reflows to fit instead of
+   overflowing, regardless of container width. */
+.journal-entry-top.row-two{
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 10px 12px !important;
+}
+.journal-entry-top.row-two .journal-cell{
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.journal-entry-top.row-two .journal-cell.action{
+  flex: 0 0 auto;
+}
+.journal-entry-top.row-two .journal-cell.action .sheet-btn{
+  min-width: 0 !important;
+  white-space: nowrap;
+}
