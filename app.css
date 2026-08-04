@@ -12769,54 +12769,35 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   border-radius: 0 !important;
 }
 
-/* 3) Bring the left tool panel and the tool body it opens close together,
-   instead of spreading them across the full centered width. */
-@media (min-width: 981px){
-  .workspace-switcher{
-    max-width: 620px !important;
-    grid-template-columns: 190px minmax(0, 1fr) !important;
-    column-gap: 14px !important;
-  }
-}
-
-/* 4) Remove the enclosing translucent backdrop panel around the tool
-   list + tool body so they sit bare on the page background. */
+/* Remove the enclosing translucent backdrop panel around the tool list
+   + tool body so they sit bare on the page background. */
 .workspace-card{
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
 }
 
-/* 5) Center the sheet header (e.g. "TELLERING / Non Cash") so it sits
-   directly above the now-centered form content instead of hugging the
-   left edge of its own card. */
-.sheet-head-row.single-head{
-  justify-content: center !important;
-  text-align: center !important;
-}
-.sheet-head-row.single-head > div{
-  text-align: center !important;
-  width: 100%;
-}
-
-/* ===== Round 3: center the page-level workspace header (the
-   "TELLERING / Tellering Tools" block above the tool panel) so it sits
-   directly above the now-centered tool panel + body, instead of
-   hugging the far-left edge of the page. ===== */
+/* ===== Round 4: fix width so wide tool content (e.g. the Generate
+   Journal table) doesn't overflow past the card edge, and align the
+   page header directly above the item list instead of centering it
+   independently over the whole panel+body block. ===== */
 @media (min-width: 981px){
+  .workspace-switcher{
+    max-width: 960px !important;
+    grid-template-columns: 190px minmax(0, 1fr) !important;
+    column-gap: 14px !important;
+    margin: 0 auto !important;
+  }
   .workspace-head{
-    max-width: 620px !important;
+    max-width: 960px !important;
     margin: 0 auto 10px !important;
-    flex-direction: column !important;
-    align-items: center !important;
+    flex-direction: row !important;
+    align-items: flex-end !important;
+    justify-content: space-between !important;
   }
   .workspace-head > div:first-child{
-    text-align: center !important;
-    width: 100%;
-  }
-  .workspace-head .workspace-right{
-    width: 100%;
-    display: flex;
-    justify-content: center;
+    text-align: left !important;
+    width: 190px;
+    flex: 0 0 190px;
   }
 }

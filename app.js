@@ -667,7 +667,7 @@
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
-    if (['check_balance','operational_accounts','my_balance','my_close_day'].includes(tool)) return true;
+    if (['check_balance','account_statement','operational_accounts','my_balance','my_close_day'].includes(tool)) return true;
     const base = DEFAULT_PERMS[staff.role] || [];
     const grantOn = state.tempGrants.some(g => g.staffId === staff.id && g.tool === tool && g.enabled);
     return base.includes(tool) || grantOn;
@@ -2281,12 +2281,6 @@ function hideProcessing() {
     return `
       <div class="tellering-stack">
         <div class="tellering-sheet journal-sheet standalone-posting-sheet">
-          <div class="sheet-head-row single-head">
-            <div>
-              <div class="sheet-super">TELLERING</div>
-              <div class="sheet-title">${title}</div>
-            </div>
-          </div>
           <div class="posting-modal-rows polished-posting-modal">
             <div class="posting-row posting-row-acc-kpi">
               <div class="posting-acc-search-inline">
@@ -2388,12 +2382,6 @@ function hideProcessing() {
     const kind = state.ui.journalStandaloneKind === 'debit' ? 'debit' : 'credit';
     return `<div class="tellering-stack">
         <div class="tellering-sheet journal-toggle-sheet standalone-posting-sheet">
-          <div class="sheet-head-row single-head">
-            <div>
-              <div class="sheet-super">TELLERING</div>
-              <div class="sheet-title">Generate Journal</div>
-            </div>
-          </div>
           <div class="posting-row" style="padding:10px 14px">
             <div class="tx-mode-toggle inline-mode-toggle journal-kind-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="credit" ${kind === 'credit' ? 'checked' : ''}> <span>Credit</span></label><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="debit" ${kind === 'debit' ? 'checked' : ''}> <span>Debit</span></label></div>
           </div>
