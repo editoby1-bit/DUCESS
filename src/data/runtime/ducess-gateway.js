@@ -479,6 +479,22 @@ async function submitDebtRepayment(_payload) {
       return defaultResult.ok(normalizeStaffSummary(staff));
     }
 
+    async function updateStaffCode(payload = {}) {
+      const state = getLocalState();
+      const staffId = payload.staffId || payload.id;
+      const newCode = String(payload.staffCode || '').trim().toUpperCase();
+      if (!newCode) return defaultResult.err('STAFF_CODE_REQUIRED', 'New Staff ID is required.');
+      const staff = (state.staff || []).find((item) => item.id === staffId || item.staffId === staffId || item.staff_code === staffId);
+      if (!staff) return defaultResult.err('STAFF_NOT_FOUND', 'Staff not found.');
+      const clash = (state.staff || []).some((item) => item.id !== staff.id && String(item.staff_code || item.staffId || '').toUpperCase() === newCode);
+      if (clash) return defaultResult.err('STAFF_CODE_TAKEN', `Staff ID "${newCode}" is already in use.`);
+      staff.staffId = newCode;
+      staff.staff_code = newCode;
+      staff.updatedAt = new Date().toISOString();
+      writeLocalState(state);
+      return defaultResult.ok(normalizeStaffSummary(staff));
+    }
+
     async function getEffectivePermissions(staffId) {
       const staffResult = await getStaffById(staffId);
       if (!staffResult.ok) return staffResult;
@@ -729,6 +745,7 @@ async function submitDebtRepayment(_payload) {
         listActiveStaff,
         createStaff,
         updateStaffStatus,
+        updateStaffCode,
         listStaffLedger,
       },
       permissions: {
@@ -2299,6 +2316,34 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(normalizeStaffSummary(data));
     }
 
+    async function updateStaffCode(payload = {}) {
+      if (!canUseSupabase()) return local.staff.updateStaffCode(payload);
+      const newCode = String(payload.staffCode || '').trim().toUpperCase();
+      if (!newCode) return defaultResult.err('STAFF_CODE_REQUIRED', 'New Staff ID is required.');
+      const rpcName = config?.supabase?.updateStaffCodeRpc || 'ducess_update_staff_code';
+      // Deliberately NOT falling back to a raw table update here (unlike
+      // updateStaffStatus above): staff_code can be the basis of the
+      // staff member's Supabase Auth login email (see
+      // resolveAuthEmailByStaffId / synthetic_suffix mode). A raw column
+      // update would desync it from the actual auth account and lock
+      // them out. This RPC must be created server-side to update both
+      // staff_code and, where applicable, the linked auth user's email
+      // in the same transaction — see supabase-account-number-prefixes.sql
+      // companion notes for the staff_code rename RPC.
+      try {
+        const { data: rpcData, error: rpcError } = await client.rpc(rpcName, {
+          staff_id: await resolveStaffUuid(client, payload.staffId),
+          new_staff_code: newCode,
+          updated_by_staff_id: payload.updatedByStaffId || null,
+          updated_by_name: payload.updatedByName || null,
+        });
+        if (!rpcError) return defaultResult.ok(normalizeStaffSummary(Array.isArray(rpcData) ? rpcData[0] : rpcData));
+        return defaultResult.err('STAFF_CODE_UPDATE_FAILED', rpcError.message || `The "${rpcName}" function isn't set up in Supabase yet — see the SQL notes.`, rpcError);
+      } catch (err) {
+        return defaultResult.err('STAFF_CODE_UPDATE_FAILED', `The "${rpcName}" function isn't set up in Supabase yet — see the SQL notes.`, err);
+      }
+    }
+
     async function getEffectivePermissions(staffId) {
       if (!canUseSupabase()) return local.permissions.getEffectivePermissions(staffId);
       const staffResult = await getStaffById(staffId);
@@ -2794,6 +2839,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         listActiveStaff,
         createStaff,
         updateStaffStatus,
+        updateStaffCode,
         listStaffLedger,
       },
       permissions: {
