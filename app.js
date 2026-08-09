@@ -132,7 +132,7 @@
       title: 'Administration',
       desc: 'Manage working tools, operational postings, temporary grants, staff settings, and central close of day.',
       icon: '🛠️',
-      tools: ['central_close_day','operational_posting','operational_accounts','staff_directory','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
+      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
     },
     balances: {
       title: 'Balances',
@@ -166,6 +166,7 @@
     operational_posting: 'Income & Expense Posting',
     operational_accounts: 'Income & Expense Balance',
     staff_directory: 'All Staff Balance',
+    staff_roster: 'Staff Directory',
     customer_directory: "All Customers' Balance",
     business_balance: 'Business Balance',
     operational_balance: 'Operational Balance',
@@ -179,7 +180,7 @@
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts']
   };
 
@@ -2065,6 +2066,7 @@ function hideProcessing() {
       case 'operational_posting': return renderOperationalPosting();
       case 'operational_accounts': return renderOperationalAccounts();
       case 'staff_directory': return renderStaffDirectory();
+      case 'staff_roster': return renderStaffRoster();
       case 'customer_directory': return renderCustomerDirectory();
       case 'business_balance': return renderBusinessBalance();
       case 'operational_balance': return renderOperationalBalance();
@@ -3001,6 +3003,31 @@ function nextPaint() {
       </div>`;
   }
 
+  function renderStaffRoster() {
+    state.ui.staffDirectorySearch = state.ui.staffDirectorySearch || '';
+    const search = String(state.ui.staffDirectorySearch || '').trim().toLowerCase();
+    const filtered = state.staff.filter((s) => {
+      const staffCode = String(s.staffCode || s.staff_code || s.id || '').toLowerCase();
+      const staffName = String(s.name || s.full_name || '').toLowerCase();
+      return !search || staffName.includes(search) || staffCode.includes(search);
+    }).sort((a,b) => String(a.name || a.full_name || '').localeCompare(String(b.name || b.full_name || '')));
+    const bodyRows = filtered.map((s, i) => {
+      const staffCode = s.staffCode || s.staff_code || s.id || '—';
+      const staffName = s.name || s.full_name || '—';
+      const staffRole = s.role || s.role_code || '';
+      const isActive = s.active !== false && s.is_active !== false;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
+    }).join('');
+    return `
+      <div class="table-card">
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
+          <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
+        </div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Full Name</th><th>Staff ID</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="6">No staff found</td></tr>'}</tbody></table></div>
+      </div>`;
+  }
+
   function renderStaffDirectory() {
     state.ui.staffDirectorySearch = state.ui.staffDirectorySearch || '';
     state.ui.staffDirectoryRole = state.ui.staffDirectoryRole || 'all';
@@ -3664,6 +3691,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'operational_posting': bindOperationalAccounts(); break;
       case 'operational_accounts': bindOperationalAccounts(); break;
       case 'staff_directory': bindStaffDirectory(); break;
+      case 'staff_roster': bindStaffDirectory(); break;
       case 'customer_directory': bindCustomerDirectory(); break;
       case 'business_balance': bindBalanceFilters('business'); break;
       case 'operational_balance': bindBalanceFilters('operational'); break;
