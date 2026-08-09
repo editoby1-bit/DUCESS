@@ -3016,7 +3016,8 @@ function nextPaint() {
       const staffName = s.name || s.full_name || '—';
       const staffRole = s.role || s.role_code || '';
       const isActive = s.active !== false && s.is_active !== false;
-      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
+      const acc = ensureStaffAccount(s.id);
+      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code> <button class="secondary tiny-btn" data-staff-edit-code="${s.id}" title="Staff ID is manager-assigned — must stay unique">Edit ID</button></td><td><code style="font-size:0.85em">${escapeHtml(String(acc.accountNumber || '—'))}</code></td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
     }).join('');
     return `
       <div class="table-card">
@@ -3024,7 +3025,7 @@ function nextPaint() {
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
         </div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Full Name</th><th>Staff ID</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="6">No staff found</td></tr>'}</tbody></table></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Full Name</th><th>Staff ID</th><th>Account Number</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="7">No staff found</td></tr>'}</tbody></table></div>
       </div>`;
   }
 
@@ -6621,6 +6622,55 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     } catch (_) {}
   }
 
+  function openEditStaffCodeModal(staffId) {
+    const staff = state.staff.find(s => s.id === staffId);
+    if (!staff) return showToast('Staff not found');
+    const currentCode = staff.staffCode || staff.staff_code || staff.id || '';
+    openModal('Edit Staff ID', `
+      <p style="margin:0 0 10px;font-size:0.85em;color:var(--text-muted)">Staff ID is manager-assigned — it must be unique across all staff. Changing it changes their login ID.</p>
+      <div class="field"><label>Staff ID <span style="color:red">*</span></label><input id="editStaffCodeInput" class="entry-input" value="${escapeHtml(String(currentCode))}" style="text-transform:uppercase" maxlength="10"></div>
+    `, [
+      {label:'Cancel', className:'secondary', onClick: closeModal},
+      {label:'Save', onClick: async () => {
+        const raw = byId('editStaffCodeInput')?.value?.trim();
+        const newCode = raw ? raw.toUpperCase() : '';
+        if (!newCode) return showToast('Enter a Staff ID');
+        if (newCode.length > 10) return showToast('Staff ID must be 10 characters or fewer');
+        if (newCode === currentCode.toUpperCase()) return closeModal();
+        const clash = state.staff.some(s => s.id !== staffId && (s.staffCode || s.staff_code || s.id || '').toUpperCase() === newCode);
+        if (clash) return showToast(`Staff ID "${newCode}" is already in use`);
+
+        const submitBtn = document.querySelector('.modal-actions button:last-child');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+        try {
+          if (isSupabaseApprovalMode() && gateway.staff?.updateStaffCode) {
+            const currentUser = state.staff.find(s => s.id === state.activeStaffId);
+            const result = await gateway.staff.updateStaffCode({
+              staffId,
+              staffCode: newCode,
+              updatedByStaffId: currentUser?.id || null,
+              updatedByName: currentUser?.name || null,
+            });
+            if (!result.ok) {
+              showToast(result.error?.message || 'Could not update Staff ID');
+              if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save'; }
+              return;
+            }
+          }
+          staff.staffCode = newCode;
+          staff.staff_code = newCode;
+          save();
+          closeModal();
+          render();
+          showToast(`✓ Staff ID updated to "${newCode}"`);
+        } catch (err) {
+          showToast('Unexpected error updating Staff ID');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save'; }
+        }
+      }}
+    ]);
+  }
+
   function bindStaffDirectory() {
     const addBtn = byId('addStaffBtn');
     if (addBtn) addBtn.onclick = () => {
@@ -6701,6 +6751,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const adminRecoveryKeyInlineBtn = byId('adminRecoveryKeyInlineBtn');
     if (adminRecoveryKeyInlineBtn) adminRecoveryKeyInlineBtn.onclick = () => openAdminRecoveryKeyModal(false);
     qq('[data-staff-reset-password]').forEach(btn => btn.onclick = () => openAdminResetPasswordModal(btn.dataset.staffResetPassword));
+    qq('[data-staff-edit-code]').forEach(btn => btn.onclick = () => openEditStaffCodeModal(btn.dataset.staffEditCode));
 
     const staffDirectorySearch = byId('staffDirectorySearch');
     if (staffDirectorySearch) {
