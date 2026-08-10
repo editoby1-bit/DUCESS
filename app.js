@@ -2166,8 +2166,8 @@ function hideProcessing() {
           </div>` : ''}
           ${isCustomer ? `
           <div class="cs2-row">
-            <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off"></div>
+            <div class="cs2-label">Account Number <span style="font-weight:400;color:var(--muted);font-size:0.85em">(optional — can be assigned at approval)</span></div>
+            <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off" placeholder="Leave blank if unknown"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Address</div>
@@ -3875,7 +3875,7 @@ function normalizeStaffLedgerEntryType(row) {
         const nin = (byId('openNin')?.value || '').trim();
         const bvn = (byId('openBvn')?.value || '').trim();
         const accountNumber = (byId('openAccountNumber')?.value || '').trim();
-        if (!address || !phone || !nin || !bvn || !accountNumber) return showToast('Complete all required fields');
+        if (!address || !phone || !nin || !bvn) return showToast('Complete all required fields');
         payload = {
           accountType: 'customer', name, address, phone, nin, bvn,
           accountNumber,
