@@ -1308,7 +1308,21 @@ if (approvalRecord.type === 'float_topup') {
     if (shouldLockApprovalType(type) && isBusinessDateClosed(requestDate)) {
       return defaultResultErr('BUSINESS_DATE_CLOSED', businessDateClosedMessage(requestDate));
     }
+    // SURGICAL PATCH 2026-08-12b: promptForApprovingOfficer() opens a modal
+    // (.modal-back, z-index 9999) to let the user pick an officer. But every
+    // caller shows the global processing overlay (.processing-overlay,
+    // z-index 10100) BEFORE calling this function, so the overlay sits on top
+    // of the officer-picker modal and silently blocks all clicks on it —
+    // the "Send for Approval" button becomes unclickable and the request
+    // hangs forever on "Sending request...". Hide the overlay while the
+    // picker modal is open, then restore it (with its original label) once
+    // an officer has been chosen, before the network call proceeds.
+    const _processingOverlayEl = byId('globalProcessingOverlay');
+    const _wasProcessingVisible = !!(_processingOverlayEl && !_processingOverlayEl.classList.contains('hidden'));
+    const _processingLabelText = _wasProcessingVisible ? (byId('processingText')?.textContent || 'Processing...') : '';
+    if (_wasProcessingVisible) hideProcessing();
     const approver = await promptForApprovingOfficer();
+    if (_wasProcessingVisible) { showProcessing(_processingLabelText); await nextPaint(); }
     if (activeApprovingOfficers().length && !approver) {
       return defaultResultErr('APPROVER_REQUIRED', 'Choose an approving officer to send this request to.');
     }
@@ -1415,66 +1429,86 @@ if (approvalRecord.type === 'float_topup') {
     if (!isSupabaseApprovalMode()) { approveRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
 
-    // Detect staff account transactions before calling the gateway.
-    // The gateway's approval flow (RPC or direct posting) tries to fetch
-    // the account from Supabase customers table — staff accounts don't
-    // exist there. Handle staff approvals entirely in local state.
-    const pendingPayload = pendingReq?.payload || {};
-    const isStaffDirectTx = (pendingReq?.type === 'customer_credit' || pendingReq?.type === 'customer_debit') &&
-      (pendingPayload.accountType === 'staff' || pendingPayload.accountType === 'staff_wallet');
-    const isStaffJournalTx = (pendingReq?.type === 'customer_credit_journal' || pendingReq?.type === 'customer_debit_journal') &&
-      Array.isArray(pendingPayload.rows) && pendingPayload.rows.length > 0 &&
-      pendingPayload.rows.some(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
-    const isMyBalanceRequest = pendingReq?.type === 'wallet_fund' ||
-      (pendingReq?.type === 'debt_repayment' && pendingPayload.source === 'my_balance');
+    // SURGICAL PATCH 2026-08-12c: same class of bug as submitApprovalThroughGateway
+    // — these gateway calls had no timeout, so a stalled or interrupted connection
+    // left "Approving request..." spinning forever with no way to recover. Bound
+    // the whole remote approve operation with the same hard deadline used for
+    // submissions, so a network interruption always resolves into a clear,
+    // recoverable error instead of hanging.
+    try {
+      return await withRequestTimeout((async () => {
+        // Detect staff account transactions before calling the gateway.
+        // The gateway's approval flow (RPC or direct posting) tries to fetch
+        // the account from Supabase customers table — staff accounts don't
+        // exist there. Handle staff approvals entirely in local state.
+        const pendingPayload = pendingReq?.payload || {};
+        const isStaffDirectTx = (pendingReq?.type === 'customer_credit' || pendingReq?.type === 'customer_debit') &&
+          (pendingPayload.accountType === 'staff' || pendingPayload.accountType === 'staff_wallet');
+        const isStaffJournalTx = (pendingReq?.type === 'customer_credit_journal' || pendingReq?.type === 'customer_debit_journal') &&
+          Array.isArray(pendingPayload.rows) && pendingPayload.rows.length > 0 &&
+          pendingPayload.rows.some(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
+        const isMyBalanceRequest = pendingReq?.type === 'wallet_fund' ||
+          (pendingReq?.type === 'debt_repayment' && pendingPayload.source === 'my_balance');
 
-    if (isStaffDirectTx || isStaffJournalTx || isMyBalanceRequest) {
-      // Mark approved in Supabase via a minimal direct update (no posting RPC, no customer/debt-table fetch)
-      const markResult = await gateway.approvals.markApprovalApprovedDirect({
-        requestId: id,
-        approvedByStaffId: getStaffBackendId(staff),
-        approvedByName: staff?.name || 'System',
-      });
-      if (!markResult?.ok) return markResult;
-      // Apply locally so balances update
-      if (pendingReq) {
-        pendingReq.status = 'approved';
-        pendingReq.approvedBy = staff?.name || 'System';
-        pendingReq.approvedAt = new Date().toISOString();
-        applyRequest(pendingReq);
-      }
-      await syncApprovalsFromGateway();
-      syncOperationalEffectsFromApprovedRequests();
-      save();
-      pushAudit('request_approved', `${pendingReq?.type || 'request'} approved`);
-      render();
-      return markResult;
-    }
+        if (isStaffDirectTx || isStaffJournalTx || isMyBalanceRequest) {
+          // Mark approved in Supabase via a minimal direct update (no posting RPC, no customer/debt-table fetch)
+          const markResult = await gateway.approvals.markApprovalApprovedDirect({
+            requestId: id,
+            approvedByStaffId: getStaffBackendId(staff),
+            approvedByName: staff?.name || 'System',
+          });
+          if (!markResult?.ok) return markResult;
+          // Apply locally so balances update
+          if (pendingReq) {
+            pendingReq.status = 'approved';
+            pendingReq.approvedBy = staff?.name || 'System';
+            pendingReq.approvedAt = new Date().toISOString();
+            applyRequest(pendingReq);
+          }
+          await syncApprovalsFromGateway();
+          syncOperationalEffectsFromApprovedRequests();
+          save();
+          pushAudit('request_approved', `${pendingReq?.type || 'request'} approved`);
+          render();
+          return markResult;
+        }
 
-    const result = await gateway.approvals.approveRequest({
-  requestId: id,
-  approvedByStaffId: getStaffBackendId(staff),
-  approvedByName: staff?.name || 'System',
-  payload: payloadOverride || null
-});
-    if (result?.ok) {
-      await syncApprovalsFromGateway();
-      await syncApprovalEffectsFromGateway(result.data);
-      await syncCodFromGateway();
-      syncOperationalEffectsFromApprovedRequests();
-      save();
-      pushAudit('request_approved', `${result.data?.type || 'request'} approved</div>`);
-      render();
+        const result = await gateway.approvals.approveRequest({
+          requestId: id,
+          approvedByStaffId: getStaffBackendId(staff),
+          approvedByName: staff?.name || 'System',
+          payload: payloadOverride || null
+        });
+        if (result?.ok) {
+          await syncApprovalsFromGateway();
+          await syncApprovalEffectsFromGateway(result.data);
+          await syncCodFromGateway();
+          syncOperationalEffectsFromApprovedRequests();
+          save();
+          pushAudit('request_approved', `${result.data?.type || 'request'} approved</div>`);
+          render();
+        }
+        return result;
+      })());
+    } catch (requestError) {
+      return defaultResultErr('REQUEST_TIMEOUT', requestError?.message || 'Request failed. Please check your connection and try again.');
     }
-    return result;
   }
 
   async function rejectRequestRemote(id) {
     if (!isSupabaseApprovalMode()) { rejectRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
-    const result = await gateway.approvals.rejectRequest({ requestId: id, rejectedByStaffId: getStaffBackendId(staff), rejectedByName: staff?.name || 'System' });
-    if (result?.ok) { await syncApprovalsFromGateway(); pushAudit('request_rejected', `${result.data?.type || 'request'} rejected</div>`); render(); }
-    return result;
+    // SURGICAL PATCH 2026-08-12c: bound with the same hard deadline as approve —
+    // see comment above.
+    try {
+      return await withRequestTimeout((async () => {
+        const result = await gateway.approvals.rejectRequest({ requestId: id, rejectedByStaffId: getStaffBackendId(staff), rejectedByName: staff?.name || 'System' });
+        if (result?.ok) { await syncApprovalsFromGateway(); pushAudit('request_rejected', `${result.data?.type || 'request'} rejected</div>`); render(); }
+        return result;
+      })());
+    } catch (requestError) {
+      return defaultResultErr('REQUEST_TIMEOUT', requestError?.message || 'Request failed. Please check your connection and try again.');
+    }
   }
 
   function defaultResultOk(data) { return { ok: true, data }; }
@@ -2260,10 +2294,11 @@ function hideProcessing() {
             <div class="cs2-label">BVN</div>
             <div class="cs2-input-wrap cs2-medium"><input id="openBvn" class="entry-input cs2-input digit-11-input" inputmode="numeric" value="${escapeHtml(String(openingDraft.bvn || ''))}" autocomplete="off"></div>
           </div>
+          ${isCustomer ? `
           <div class="cs2-row">
             <div class="cs2-label">Old A/N</div>
             <div class="cs2-input-wrap cs2-short"><input id="openOldAccount" class="entry-input cs2-input" maxlength="4" inputmode="numeric" value="${escapeHtml(String(openingDraft.oldAccountNumber || ''))}" autocomplete="off"></div>
-          </div>
+          </div>` : ''}
           <div class="cs2-upload-row">
             <button id="openPhotoBtn" type="button" class="sheet-btn cs2-btn cs2-btn-ghost">Photo Upload</button>
             <input id="openPhoto" class="entry-input cs-sheet-input hidden-photo-input" type="file" accept="image/*">
