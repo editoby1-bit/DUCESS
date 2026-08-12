@@ -2238,11 +2238,12 @@ function hideProcessing() {
               </select>
             </div>
           </div>` : ''}
+          ${(isCustomer || isStaffSalary) ? `
           ${isCustomer ? `
           <div class="cs2-row">
             <div class="cs2-label">Account Number <span style="font-weight:400;color:var(--muted);font-size:0.85em">(optional — can be assigned at approval)</span></div>
             <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off" placeholder="Leave blank if unknown"></div>
-          </div>
+          </div>` : ''}
           <div class="cs2-row">
             <div class="cs2-label">Address</div>
             <div class="cs2-input-wrap cs2-wide"><input id="openAddress" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.address || ''))}" autocomplete="off"></div>
@@ -2267,7 +2268,8 @@ function hideProcessing() {
             <button id="openPhotoBtn" type="button" class="sheet-btn cs2-btn cs2-btn-ghost">Photo Upload</button>
             <input id="openPhoto" class="entry-input cs-sheet-input hidden-photo-input" type="file" accept="image/*">
             <div id="openPhotoStatus" class="cs2-note-box">No photo selected</div>
-          </div>` : `<div class="cs2-note-box">${systemNote}</div>`}
+          </div>
+          ${isStaffSalary ? `<div class="cs2-note-box">${systemNote}</div>` : ''}` : `<div class="cs2-note-box">${systemNote}</div>`}
           <div class="cs2-button-row">
             <button id="submitOpening" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
           </div>
@@ -3974,12 +3976,18 @@ function normalizeStaffLedgerEntryType(row) {
           systemAssigned: true, generatedAccountNumber: ''
         };
       } else if (acctType === 'staff_salary') {
-        // No staff link — opens like a regular account with system-assigned number
+        // No staff link — opens like a regular account with system-assigned number,
+        // but collects the same identity details a customer account does.
         const address = (byId('openAddress')?.value || '').trim();
         const phone = (byId('openPhone')?.value || '').trim();
+        const nin = (byId('openNin')?.value || '').trim();
+        const bvn = (byId('openBvn')?.value || '').trim();
+        if (!address || !phone || !nin || !bvn) return showToast('Complete all required fields');
         payload = {
           accountType: 'staff_salary', name,
-          address, phone,
+          address, phone, nin, bvn,
+          oldAccountNumber: (byId('openOldAccount')?.value || '').trim(),
+          photo: byId('openPhoto')?.dataset?.base64 || '',
           systemAssigned: true, generatedAccountNumber: ''
         };
       } else {
