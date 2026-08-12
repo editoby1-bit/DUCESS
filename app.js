@@ -1275,11 +1275,45 @@ if (approvalRecord.type === 'float_topup') {
   return defaultResultOk(null);
 }
 
+  function activeApprovingOfficers() {
+    return (state.staff || []).filter(s => s.role === 'approving_officer' && s.active !== false && s.is_active !== false);
+  }
+
+  function promptForApprovingOfficer() {
+    const officers = activeApprovingOfficers();
+    if (!officers.length) return Promise.resolve(null); // nobody to route to — admin-only fallback, no prompt needed
+    return new Promise((resolve) => {
+      openModal('Send to Approving Officer', `
+        <p style="margin:0 0 10px;font-size:0.85em;color:var(--text-muted)">Choose who should approve this request. Only they — or an Administrative Officer — will be able to act on it.</p>
+        <div class="field"><label>Approving Officer <span style="color:red">*</span></label>
+          <select id="approverPickerSelect" class="entry-input">
+            ${officers.map(o => `<option value="${o.id}">${escapeHtml(o.name || o.full_name || 'Officer')}</option>`).join('')}
+          </select>
+        </div>
+      `, [
+        {label:'Cancel', className:'secondary', onClick: () => { closeModal(); resolve(null); }},
+        {label:'Send for Approval', onClick: () => {
+          const select = byId('approverPickerSelect');
+          const officer = officers.find(o => o.id === select?.value);
+          closeModal();
+          resolve(officer ? { id: officer.id, name: officer.name || officer.full_name || 'Officer' } : null);
+        }}
+      ]);
+    });
+  }
+
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
     reconcileBusinessDateFromClosures();
     const requestDate = approvalBusinessDate(type, payload);
     if (shouldLockApprovalType(type) && isBusinessDateClosed(requestDate)) {
       return defaultResultErr('BUSINESS_DATE_CLOSED', businessDateClosedMessage(requestDate));
+    }
+    const approver = await promptForApprovingOfficer();
+    if (activeApprovingOfficers().length && !approver) {
+      return defaultResultErr('APPROVER_REQUIRED', 'Choose an approving officer to send this request to.');
+    }
+    if (approver) {
+      payload = { ...payload, assignedApproverId: approver.id, assignedApproverName: approver.name };
     }
     if (!isSupabaseApprovalMode()) return defaultResultOk(createRequest(type, payload, meta));
     const staff = currentStaff();
@@ -2484,6 +2518,7 @@ function hideProcessing() {
     reconcileBusinessDateFromClosures();
     const openDate = businessDate();
     const currentSection = state.ui.approvalsSection || 'tellering';
+    const viewer = currentStaff();
     const allRows = state.approvals.filter(a => {
       if (!categories[currentSection].includes(a.type)) return false;
       if (a.status !== 'pending') return false; // decided items live in Approval History now
@@ -2491,7 +2526,14 @@ function hideProcessing() {
       // Approval Queue belongs to the CURRENT OPEN business date only.
       // Closed dates belong to COD Resolution/history and must not remain
       // mixed with actionable approval work.
-      return reqDate === openDate && !isBusinessDateClosed(reqDate);
+      if (reqDate !== openDate || isBusinessDateClosed(reqDate)) return false;
+      // Officer routing: approving officers only see requests sent to them.
+      // Admin always sees everything, regardless of routing.
+      if (viewer?.role === 'approving_officer') {
+        const assignedTo = a.payload?.assignedApproverId;
+        if (assignedTo && assignedTo !== viewer.id) return false;
+      }
+      return true;
     });
     const limit = state.ui.approvalsLimit || 20;
     const approvals = allRows.slice(0, limit);
@@ -2571,8 +2613,9 @@ function hideProcessing() {
     const staff = (state.staff || []).find(s => s.id === staffId) || {};
     const roleLabel = ROLE_LABELS[staff.role] || staff.role || '';
     const name = a.requestedByName || staffName(staffId);
-    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') return `${name} • ${roleLabel || 'Staff'} • Journal`;
-    return `${name} • ${roleLabel || 'Staff'}`;
+    const routedNote = p.assignedApproverName ? `<div class="muted" style="font-size:0.85em">→ ${escapeHtml(p.assignedApproverName)}</div>` : '';
+    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') return `${name} • ${roleLabel || 'Staff'} • Journal${routedNote}`;
+    return `${name} • ${roleLabel || 'Staff'}${routedNote}`;
   }
   function approvalDetails(a) {
     const p = a.payload || {};
@@ -2597,7 +2640,7 @@ function hideProcessing() {
         : isCustomer
           ? line('Account Number', p.generatedAccountNumber || 'Not yet assigned')
           : (a.status === 'pending'
-              ? `<span class="approval-heading-item"><strong>Account Number:</strong> <em>Generated automatically by the system on approval — no manual entry needed for this account type.</em></span>`
+              ? `<span class="approval-heading-item approval-heading-item-wrap"><strong>Account Number:</strong> <em>Generated automatically by the system on approval — no manual entry needed for this account type.</em></span>`
               : `<span class="approval-heading-item"><strong>Account Number:</strong> <strong style="color:var(--success, #16a34a)">${esc(p.generatedAccountNumber || 'assigned — check the account directory')}</strong></span>`);
       return `<div class="approval-heading-inline">
         ${line('Type', acctTypeLabels[acctType] || acctType)}
@@ -5272,11 +5315,18 @@ function normalizeStaffLedgerEntryType(row) {
     if (bulkApprove) bulkApprove.onclick = () => runBulk('approve');
     const bulkReject = byId('approvalBulkReject');
     if (bulkReject) bulkReject.onclick = () => runBulk('reject');
+    const isRoutedAway = (req) => {
+      const viewer = currentStaff();
+      if (viewer?.role !== 'approving_officer') return false; // admin always allowed
+      const assignedTo = req?.payload?.assignedApproverId;
+      return !!(assignedTo && assignedTo !== viewer.id);
+    };
     qq('[data-approve]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
       const reqId = btn.dataset.approve;
       if (isApprovalLockedByOther(reqId)) return showToast('This request is being reviewed by another staff');
       const req = state.approvals.find(r => r.id === reqId);
+      if (isRoutedAway(req)) return showToast(`This request was sent to ${req?.payload?.assignedApproverName || 'another approving officer'} — only they or an Admin can approve it`);
       if (req && req.type === 'account_opening' && (req.payload?.accountType || 'customer') === 'customer') {
         const assignInput = byId(`assignAcc-${reqId}`);
         const accountNumber = assignInput ? assignInput.value.trim() : '';
@@ -5297,6 +5347,8 @@ function normalizeStaffLedgerEntryType(row) {
     qq('[data-reject]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
       if (isApprovalLockedByOther(btn.dataset.reject)) return showToast('This request is being reviewed by another staff');
+      const rejectReq = state.approvals.find(r => r.id === btn.dataset.reject);
+      if (isRoutedAway(rejectReq)) return showToast(`This request was sent to ${rejectReq?.payload?.assignedApproverName || 'another approving officer'} — only they or an Admin can act on it`);
       confirmAction('Reject this request?', async () => {
         showProcessing('Rejecting request...');
         await nextPaint();

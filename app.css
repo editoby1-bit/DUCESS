@@ -133,8 +133,9 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .modal-cs-grid .field-id .display-field{max-width:220px}
 .approval-photo-stack{display:flex;flex-direction:column;gap:12px;align-items:flex-start;margin-top:8px}
 .total-row td{border-top:2px solid var(--line);background:#f8fafc;}
-.approval-heading-inline{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;line-height:1.5;max-width:360px}
+.approval-heading-inline{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;line-height:1.5;max-width:320px;overflow-wrap:break-word}
 .approval-heading-item{white-space:nowrap}
+.approval-heading-item-wrap{white-space:normal;width:100%}
 .approval-heading-item strong{color:var(--muted);font-weight:700;margin-right:2px}
 .approval-assign-inline{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .approval-assign-input-inline{width:110px;padding:2px 6px;font-size:11.5px;border:1px solid var(--brand);border-radius:5px;}
