@@ -1452,9 +1452,12 @@ if (inserted.error) {
     }
 
     async function submitApprovalRequest(payload = {}) {
-  // FORCE Supabase (temporary debug override)
-  if (!canUseSupabase()) {
-  }
+  // SURGICAL PATCH 2026-08-12: this guard used to be a no-op ("FORCE Supabase" debug
+  // override left mid-edit), so when the Supabase client wasn't actually available
+  // this fell straight through into a network call on a broken/null client — the
+  // request would hang with no error and no record ever got created. Restore the
+  // same local-adapter fallback every other function in this file uses.
+  if (!canUseSupabase()) return local.approvals.submitApprovalRequest(payload);
 
   const insertPayload = {
     request_type: payload.requestType || payload.type || '',

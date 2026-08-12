@@ -1318,8 +1318,12 @@ if (approvalRecord.type === 'float_topup') {
     if (!isSupabaseApprovalMode()) return defaultResultOk(createRequest(type, payload, meta));
     const staff = currentStaff();
     let result;
-    if (type === 'account_opening' && gateway.customers?.submitAccountOpening) {
-      result = await gateway.customers.submitAccountOpening({
+    // SURGICAL PATCH 2026-08-12: the actual network call is made inside this IIFE so
+    // it can be raced against a hard deadline via withRequestTimeout — see below.
+    try {
+      result = await withRequestTimeout((async () => {
+        if (type === 'account_opening' && gateway.customers?.submitAccountOpening) {
+          return await gateway.customers.submitAccountOpening({
   ...payload,
   fullName: payload.name,
   phone: payload.phone,
@@ -1334,55 +1338,60 @@ if (approvalRecord.type === 'float_topup') {
   requestedByName: staff?.name || 'System'
 });
 
-    } else if (type === 'account_maintenance' && gateway.customers?.submitAccountMaintenance) {
-      result = await gateway.customers.submitAccountMaintenance({
-        customerId: payload.customerId,
-        updates: { ...payload.patch },
-        requestedByStaffId: getStaffBackendId(staff),
-        requestedByName: staff?.name || 'System'
-      });
-    } else if (type === 'account_reactivation' && gateway.customers?.submitAccountReactivation) {
-      result = await gateway.customers.submitAccountReactivation({
-        customerId: payload.customerId,
-        requestedByStaffId: getStaffBackendId(staff),
-        note: payload.note || '',
-        requestedByName: staff?.name || 'System'
-      });
-    } else if ((type === 'customer_credit' || type === 'customer_debit') && gateway.accounts && payload.accountType !== 'staff' && payload.accountType !== 'staff_wallet') {
-      const fn = type === 'customer_credit' ? gateway.accounts.submitCredit : gateway.accounts.submitDebit;
-      result = await fn({
-        accountId: payload.customerId,
-        accountType: payload.accountType || 'customer',
-        staffAccountId: payload.staffAccountId || '',
-        staffAccountUuid: payload.staffAccountUuid || '',
-        amount: Number(payload.amount || 0),
-        details: payload.details || '',
-        requestedByStaffId: getStaffBackendId(staff),
-        businessDate: payload.date,
-        requestedByName: staff?.name || 'System',
-        customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, paymentMode: payload.paymentMode, staffId: payload.staffId, date: payload.date, customerCreditAmount: payload.customerCreditAmount, chargeBreakdown: payload.chargeBreakdown, totalChargeAmount: payload.totalChargeAmount, commissionAmount: payload.commissionAmount, chargeTraceId: payload.chargeTraceId || payload.commissionTraceId, commissionTraceId: payload.commissionTraceId
-      });
-    } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries && !(payload.rows || []).some(row => row.accountType === 'staff' || row.accountType === 'staff_wallet')) {
-      result = await gateway.accounts.submitJournalEntries({
-        entries: (payload.rows || []).map(row => ({ accountId: row.accountType === 'staff' ? (row.staffAccountUuid || row.staffAccountId || row.accountNumber || row.customerId) : row.customerId, accountType: row.accountType || 'customer', staffAccountId: row.staffAccountId || '', staffAccountUuid: row.staffAccountUuid || '', txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown, totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount, chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId })),
-        rows: payload.rows || [],
-        requestedByStaffId: getStaffBackendId(staff),
-        requestedByName: staff?.name || 'System',
-        businessDate: payload.date,
-        staffId: payload.staffId,
-        date: payload.date,
-        openingFloat: payload.openingFloat,
-        formAmount: Number(payload.formAmount || 0),
-        formPaymentMode: payload.formPaymentMode || 'cash',
-        fieldNote: payload.fieldNote || null
-      });
-    } else if (gateway.approvals?.submitApprovalRequest) {
-      result = await gateway.approvals.submitApprovalRequest({
-        requestType: type,
-        requestedByStaffId: getStaffBackendId(staff),
-        requestedByName: staff?.name || 'System',
-        payload
-      });
+        } else if (type === 'account_maintenance' && gateway.customers?.submitAccountMaintenance) {
+          return await gateway.customers.submitAccountMaintenance({
+            customerId: payload.customerId,
+            updates: { ...payload.patch },
+            requestedByStaffId: getStaffBackendId(staff),
+            requestedByName: staff?.name || 'System'
+          });
+        } else if (type === 'account_reactivation' && gateway.customers?.submitAccountReactivation) {
+          return await gateway.customers.submitAccountReactivation({
+            customerId: payload.customerId,
+            requestedByStaffId: getStaffBackendId(staff),
+            note: payload.note || '',
+            requestedByName: staff?.name || 'System'
+          });
+        } else if ((type === 'customer_credit' || type === 'customer_debit') && gateway.accounts && payload.accountType !== 'staff' && payload.accountType !== 'staff_wallet') {
+          const fn = type === 'customer_credit' ? gateway.accounts.submitCredit : gateway.accounts.submitDebit;
+          return await fn({
+            accountId: payload.customerId,
+            accountType: payload.accountType || 'customer',
+            staffAccountId: payload.staffAccountId || '',
+            staffAccountUuid: payload.staffAccountUuid || '',
+            amount: Number(payload.amount || 0),
+            details: payload.details || '',
+            requestedByStaffId: getStaffBackendId(staff),
+            businessDate: payload.date,
+            requestedByName: staff?.name || 'System',
+            customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, paymentMode: payload.paymentMode, staffId: payload.staffId, date: payload.date, customerCreditAmount: payload.customerCreditAmount, chargeBreakdown: payload.chargeBreakdown, totalChargeAmount: payload.totalChargeAmount, commissionAmount: payload.commissionAmount, chargeTraceId: payload.chargeTraceId || payload.commissionTraceId, commissionTraceId: payload.commissionTraceId
+          });
+        } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries && !(payload.rows || []).some(row => row.accountType === 'staff' || row.accountType === 'staff_wallet')) {
+          return await gateway.accounts.submitJournalEntries({
+            entries: (payload.rows || []).map(row => ({ accountId: row.accountType === 'staff' ? (row.staffAccountUuid || row.staffAccountId || row.accountNumber || row.customerId) : row.customerId, accountType: row.accountType || 'customer', staffAccountId: row.staffAccountId || '', staffAccountUuid: row.staffAccountUuid || '', txType: type === 'customer_debit_journal' ? 'debit' : 'credit', amount: Number(row.amount || 0), details: row.details || '', customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown, totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount, chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId })),
+            rows: payload.rows || [],
+            requestedByStaffId: getStaffBackendId(staff),
+            requestedByName: staff?.name || 'System',
+            businessDate: payload.date,
+            staffId: payload.staffId,
+            date: payload.date,
+            openingFloat: payload.openingFloat,
+            formAmount: Number(payload.formAmount || 0),
+            formPaymentMode: payload.formPaymentMode || 'cash',
+            fieldNote: payload.fieldNote || null
+          });
+        } else if (gateway.approvals?.submitApprovalRequest) {
+          return await gateway.approvals.submitApprovalRequest({
+            requestType: type,
+            requestedByStaffId: getStaffBackendId(staff),
+            requestedByName: staff?.name || 'System',
+            payload
+          });
+        }
+        return undefined;
+      })());
+    } catch (requestError) {
+      return defaultResultErr('REQUEST_TIMEOUT', requestError?.message || 'Request failed. Please check your connection and try again.');
     }
     if (!result?.ok) return result;
     if (result.data) {
@@ -1470,6 +1479,19 @@ if (approvalRecord.type === 'float_topup') {
 
   function defaultResultOk(data) { return { ok: true, data }; }
   function defaultResultErr(code, message) { return { ok: false, error: { code, message } }; }
+
+  // SURGICAL PATCH 2026-08-12: gateway network calls had no timeout, so a stalled
+  // connection left the "Sending request..." overlay spinning forever with no
+  // feedback and no way out. Races a promise against a hard deadline so a hung
+  // request always resolves into a clear, recoverable error instead of hanging.
+  const REQUEST_TIMEOUT_MS = 20000;
+  function withRequestTimeout(promise, ms = REQUEST_TIMEOUT_MS) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Request timed out — check your connection and try again.')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
 
   function createRequest(type, payload, meta={}) {
     const staff = currentStaff();
@@ -1952,15 +1974,32 @@ if (approvalRecord.type === 'float_topup') {
   }
 }
 
+let _processingCancelTimer = null;
 function showProcessing(text = 'Processing...') {
   const overlay = byId('globalProcessingOverlay');
   const label = byId('processingText');
+  const cancelBtn = byId('processingCancelBtn');
   if (label) label.textContent = text;
   overlay?.classList.remove('hidden');
+  // SURGICAL PATCH 2026-08-12: a request should never trap the user behind an
+  // unclosable spinner. The network call itself is time-bounded (see
+  // withRequestTimeout), but reveal a manual Cancel button after a few seconds
+  // too, so the UI is never the thing blocking someone during a slow connection.
+  if (cancelBtn) {
+    cancelBtn.classList.add('hidden');
+    clearTimeout(_processingCancelTimer);
+    _processingCancelTimer = setTimeout(() => cancelBtn.classList.remove('hidden'), 6000);
+    cancelBtn.onclick = () => {
+      hideProcessing();
+      showToast('Cancelled — the request may still complete in the background');
+    };
+  }
 }
 
 function hideProcessing() {
+  clearTimeout(_processingCancelTimer);
   byId('globalProcessingOverlay')?.classList.add('hidden');
+  byId('processingCancelBtn')?.classList.add('hidden');
 }
 
   function smoothScrollToOpenedSegment(selector) {

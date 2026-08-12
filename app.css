@@ -10924,6 +10924,21 @@ button[data-inspect-journal] {
   font-weight: 500;
 }
 
+/* SURGICAL PATCH 2026-08-12: cancel affordance so a stalled request never traps
+   the user behind an unclosable spinner (see showProcessing/hideProcessing). */
+.processing-cancel-btn {
+  margin-left: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+}
+.processing-cancel-btn:hover { background: #ececec; }
+.processing-cancel-btn.hidden { display: none; }
+
 /* ===== 2026-04-27 SURGICAL PATCH: journal account/search alignment only ===== */
 .journal-entry-top.row-one{
   display:grid !important;
