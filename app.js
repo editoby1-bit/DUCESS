@@ -2932,6 +2932,7 @@ function hideProcessing() {
             showToast(result?.error?.message || 'Unable to reject request');
             return;
           }
+          showToast('Request rejected');
         } finally {
           hideProcessing();
         }
@@ -2968,6 +2969,7 @@ function hideProcessing() {
             showToast(result?.error?.message || 'Unable to approve request');
             return;
           }
+          showToast('Request approved');
         } finally {
           hideProcessing();
         }
