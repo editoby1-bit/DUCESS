@@ -1286,6 +1286,7 @@ if (approvalRecord.type === 'float_topup') {
     let result;
     if (type === 'account_opening' && gateway.customers?.submitAccountOpening) {
       result = await gateway.customers.submitAccountOpening({
+  ...payload,
   fullName: payload.name,
   phone: payload.phone,
   address: payload.address,
