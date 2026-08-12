@@ -2124,7 +2124,7 @@ function hideProcessing() {
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${s.name} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '"T" + 4-digit number (system-assigned on approval). Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
+      staff_operational: '"T" + 4-digit number — system-generated automatically when approved. Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
       staff_salary:      '4-digit number starting with 0 (system-assigned on approval).',
       expense:           'EXP-3xxx format (system-assigned on approval)',
       income:            'INC-3xxx format (system-assigned on approval)'
@@ -2138,7 +2138,7 @@ function hideProcessing() {
             <div class="cs2-input-wrap cs2-wide">
               <select id="openAccountType" class="entry-input cs2-input">
                 <option value="customer"          ${acctType==='customer'          ?'selected':''}>Customer Account</option>
-                <option value="staff_operational" ${acctType==='staff_operational' ?'selected':''}>Staff Operational Account</option>
+                <option value="staff_operational" ${acctType==='staff_operational' ?'selected':''}>Teller Account</option>
                 <option value="staff_salary"      ${acctType==='staff_salary'      ?'selected':''}>Staff Salary Account</option>
                 <option value="expense"           ${acctType==='expense'           ?'selected':''}>Expense Account</option>
                 <option value="income"            ${acctType==='income'            ?'selected':''}>Income Account</option>
@@ -2590,10 +2590,14 @@ function hideProcessing() {
     if (a.type === 'account_opening') {
       const acctType = p.accountType || 'customer';
       const isCustomer = acctType === 'customer';
-      const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Staff Operational Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
+      const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Teller Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
       const assignInput = (isCustomer && a.status === 'pending')
         ? `<span class="approval-heading-item approval-assign-inline"><strong>Account Number:</strong> <input id="assignAcc-${a.id}" class="entry-input approval-assign-input-inline" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Assign before approving"></span>`
-        : line('Account Number', isCustomer ? (p.generatedAccountNumber || 'Not yet assigned') : (a.status === 'pending' ? 'System-assigned on approval' : (p.generatedAccountNumber || 'System-assigned')));
+        : isCustomer
+          ? line('Account Number', p.generatedAccountNumber || 'Not yet assigned')
+          : (a.status === 'pending'
+              ? `<span class="approval-heading-item"><strong>Account Number:</strong> <em>Generated automatically by the system on approval — no manual entry needed for this account type.</em></span>`
+              : `<span class="approval-heading-item"><strong>Account Number:</strong> <strong style="color:var(--success, #16a34a)">${esc(p.generatedAccountNumber || 'assigned — check the account directory')}</strong></span>`);
       return `<div class="approval-heading-inline">
         ${line('Type', acctTypeLabels[acctType] || acctType)}
         ${line('Name', p.fullName || p.name)}
@@ -2686,7 +2690,7 @@ function hideProcessing() {
   if (req.type === 'account_opening') {
     const acctType = p.accountType || 'customer';
     const isCustomer = acctType === 'customer';
-    const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Staff Operational Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
+    const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Teller Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
     const assignBlock = isCustomer
       ? (req.status === 'pending'
           ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Enter account number before approval"></div>`
@@ -5472,7 +5476,7 @@ function normalizeStaffLedgerEntryType(row) {
     const draft = state.ui.staffCreditDraft ||= {};
     return `
       <div class="form-card cs2-card opening-card">
-        <div class="cs2-title">Credit Staff Operational Account</div>
+        <div class="cs2-title">Credit Teller Account</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Staff Account</div>
