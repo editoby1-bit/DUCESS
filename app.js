@@ -133,7 +133,7 @@
       title: 'Administration',
       desc: 'Manage working tools, operational postings, temporary grants, staff settings, and central close of day.',
       icon: '🛠️',
-      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
+      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','staff_salary_balance','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
     },
     balances: {
       title: 'Balances',
@@ -167,6 +167,7 @@
     operational_posting: 'Income & Expense Posting',
     operational_accounts: 'Income & Expense Balance',
     staff_directory: 'All Staff Balance',
+    staff_salary_balance: 'Staff Salary Balance',
     staff_roster: 'Staff Directory',
     customer_directory: "All Customers' Balance",
     business_balance: 'Business Balance',
@@ -181,8 +182,8 @@
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
-    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts']
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_salary_balance','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
+    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts','staff_salary_balance']
   };
 
   let realtimeBound = false;
@@ -2125,6 +2126,11 @@ function hideProcessing() {
         state.ui.tool = null;
       } else {
         state.ui.tool = nextTool;
+        if (nextTool === 'staff_salary_balance') {
+          // Always re-fetch fresh on entry — a newly approved staff_salary
+          // account (or a status change) shouldn't be masked by a stale cache.
+          state.ui.staffSalaryAccountsCache = null;
+        }
         if (nextTool === 'credit' || nextTool === 'debit') {
           state.ui.txAccDraft = '';
           state.ui.txAmountDraft = '';
@@ -2188,6 +2194,7 @@ function hideProcessing() {
       case 'operational_posting': return renderOperationalPosting();
       case 'operational_accounts': return renderOperationalAccounts();
       case 'staff_directory': return renderStaffDirectory();
+      case 'staff_salary_balance': return renderStaffSalaryBalance();
       case 'staff_roster': return renderStaffRoster();
       case 'customer_directory': return renderCustomerDirectory();
       case 'business_balance': return renderBusinessBalance();
@@ -2282,6 +2289,16 @@ function hideProcessing() {
               <select id="openLinkedStaff" class="entry-input cs2-input">
                 <option value="">— Select Staff Member —</option>
                 ${staffOptions}
+              </select>
+            </div>
+          </div>` : ''}
+          ${isStaffSalary ? `
+          <div class="cs2-row">
+            <div class="cs2-label">Account Holder's Role <span style="font-weight:400;color:var(--muted);font-size:0.85em">(classification only — not linked to a staff record)</span></div>
+            <div class="cs2-input-wrap cs2-wide">
+              <select id="openStaffRole" class="entry-input cs2-input">
+                <option value="">— Select Role —</option>
+                ${Object.entries(ROLE_LABELS).map(([code, label]) => `<option value="${code}" ${openingDraft.staffRole === code ? 'selected' : ''}>${label}</option>`).join('')}
               </select>
             </div>
           </div>` : ''}
@@ -2739,6 +2756,7 @@ function hideProcessing() {
         ${isCustomer ? line('NIN', p.nin) : ''}
         ${isCustomer ? line('BVN', p.bvn) : ''}
         ${acctType === 'staff_operational' ? line('Linked Staff', p.linkedStaffName || p.linkedStaffId) : ''}
+        ${acctType === 'staff_salary' ? line('Account Holder Role', ROLE_LABELS[p.staffRole] || p.staffRole) : ''}
         ${assignInput}
       </div>`;
     }
@@ -2838,6 +2856,7 @@ function hideProcessing() {
       ${isCustomer ? field('NIN', p.nin, 'field-id') : ''}
       ${isCustomer ? field('BVN', p.bvn, 'field-bvn') : ''}
       ${acctType === 'staff_operational' ? field('Linked Staff', p.linkedStaffName || p.linkedStaffId || '—', 'field-wide') : ''}
+      ${acctType === 'staff_salary' ? field('Account Holder Role', ROLE_LABELS[p.staffRole] || p.staffRole || '—', 'field-wide') : ''}
       ${assignBlock}
       ${isCustomer ? photoBlock : ''}
     </div>`;
@@ -3201,6 +3220,64 @@ function nextPaint() {
         </div>
         <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th><th>Start Date</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="10">No staff found</td></tr>'}${filteredStaff.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="4"></td></tr>` : ''}</tbody></table></div>
       </div>`;
+  }
+
+  // SURGICAL ADDITION 2026-08-14: Staff Salary Balance is its own report,
+  // separate from "All Staff Balance" (which is actually the wallet/float
+  // balance every staff member has, regardless of role) and "Teller
+  // Balances" (operational T#### accounts, tellers only). Staff Salary
+  // accounts are opened like customer accounts and are NOT linked to a
+  // specific staff record — the account holder's role is captured only as a
+  // classification tag at opening time, purely so this report can filter by
+  // it. Data is fetched on demand (not synced into state.customers) via a
+  // dedicated gateway read, then cached in state.ui for re-render.
+  function renderStaffSalaryBalance() {
+    state.ui.staffSalaryRoleFilter = state.ui.staffSalaryRoleFilter || 'all';
+    const roleFilter = state.ui.staffSalaryRoleFilter;
+    const loading = state.ui.staffSalaryBalanceLoading;
+    const rows = state.ui.staffSalaryAccountsCache || [];
+    const filtered = rows.filter(r => roleFilter === 'all' || r.staffRoleCode === roleFilter);
+    const grandBalance = filtered.reduce((s, r) => s + Number(r.balance || 0), 0);
+    const bodyRows = filtered.map((r, i) => `<tr><td>${i+1}</td><td>${escapeHtml(r.name || '—')}</td><td><code style="font-size:0.85em">${escapeHtml(String(r.accountNumber || '—'))}</code></td><td>${r.staffRoleCode ? escapeHtml(ROLE_LABELS[r.staffRoleCode] || r.staffRoleCode) : '<em>Not set</em>'}</td><td>${money(r.balance)}</td><td>${fmtDate(r.createdAt)}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${r.active?'#d1fae5':'#fee2e2'};color:${r.active?'#065f46':'#991b1b'}">${r.active ? 'Active' : 'Inactive'}</span></td></tr>`).join('');
+    return `
+      <div class="table-card">
+        <div class="action-inline"><h3 style="margin:0">Staff Salary Balance</h3></div>
+        <div class="note" style="margin:6px 0">Staff Salary accounts are opened per account, not linked to a specific staff record — role here is a classification tag chosen at opening, for filtering only.</div>
+        <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
+          <select id="staffSalaryRoleFilter" class="entry-input" style="height:24px;max-width:190px;font-size:0.78em;padding:2px 8px">
+            <option value="all" ${roleFilter==='all'?'selected':''}>All Roles</option>
+            ${Object.keys(ROLE_LABELS).map(role => `<option value="${role}" ${roleFilter===role?'selected':''}>${ROLE_LABELS[role]}</option>`).join('')}
+          </select>
+          ${loading ? '<span class="muted" style="font-size:0.8em">Loading…</span>' : ''}
+        </div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Role</th><th>Balance</th><th>Opened</th><th>Status</th></tr></thead><tbody>${bodyRows || `<tr><td colspan="7">${loading ? 'Loading…' : 'No staff salary accounts found'}</td></tr>`}${filtered.length ? `<tr class="total-row"><td colspan="4"><strong>Total</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
+      </div>`;
+  }
+
+  async function bindStaffSalaryBalance() {
+    const roleFilterSelect = byId('staffSalaryRoleFilter');
+    if (roleFilterSelect) roleFilterSelect.onchange = () => {
+      state.ui.staffSalaryRoleFilter = roleFilterSelect.value || 'all';
+      save();
+      renderWorkspace();
+    };
+    // Fetch once per visit to this tool (not on every keystroke/filter
+    // change) — cache lives in state.ui so switching the role filter above
+    // just re-renders from the cache instead of re-fetching.
+    if (state.ui.staffSalaryAccountsCache || state.ui.staffSalaryBalanceLoading || !gateway.customers?.listStaffSalaryAccounts) return;
+    state.ui.staffSalaryBalanceLoading = true;
+    renderWorkspace();
+    try {
+      const result = await gateway.customers.listStaffSalaryAccounts();
+      state.ui.staffSalaryAccountsCache = result?.ok ? (result.data || []) : [];
+      if (!result?.ok) showToast(result?.error?.message || 'Unable to load staff salary accounts');
+    } catch (err) {
+      state.ui.staffSalaryAccountsCache = [];
+      showToast('Unexpected error loading staff salary accounts');
+    } finally {
+      state.ui.staffSalaryBalanceLoading = false;
+      if (state.ui.tool === 'staff_salary_balance') renderWorkspace();
+    }
   }
 
   function renderOverallBalance() {
@@ -3825,6 +3902,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'operational_posting': bindOperationalAccounts(); break;
       case 'operational_accounts': bindOperationalAccounts(); break;
       case 'staff_directory': bindStaffDirectory(); break;
+      case 'staff_salary_balance': bindStaffSalaryBalance(); break;
       case 'staff_roster': bindStaffDirectory(); break;
       case 'customer_directory': bindCustomerDirectory(); break;
       case 'business_balance': bindBalanceFilters('business'); break;
@@ -3922,6 +4000,7 @@ function normalizeStaffLedgerEntryType(row) {
       openingDraft.name = '';
       openingDraft.linkedStaffId = '';
       openingDraft.accountNumber = '';
+      openingDraft.staffRole = '';
       save();
       renderWorkspace();
     };
@@ -3957,6 +4036,9 @@ function normalizeStaffLedgerEntryType(row) {
         renderWorkspace();
       }
     };
+
+    const staffRoleSelect = byId('openStaffRole');
+    if (staffRoleSelect) staffRoleSelect.onchange = () => { openingDraft.staffRole = staffRoleSelect.value; };
 
     const focusedField = byId(state.ui.accountOpeningFocusedField || '');
     if (focusedField) {
@@ -4033,9 +4115,12 @@ function normalizeStaffLedgerEntryType(row) {
         const nin = (byId('openNin')?.value || '').trim();
         const bvn = (byId('openBvn')?.value || '').trim();
         if (!address || !phone || !nin || !bvn) return showToast('Complete all required fields');
+        const staffRole = (byId('openStaffRole')?.value || '').trim();
+        if (!staffRole) return showToast('Select the account holder\'s role');
         payload = {
           accountType: 'staff_salary', name,
           address, phone, nin, bvn,
+          staffRole,
           oldAccountNumber: (byId('openOldAccount')?.value || '').trim(),
           photo: byId('openPhoto')?.dataset?.base64 || '',
           systemAssigned: true, generatedAccountNumber: ''
