@@ -2286,6 +2286,40 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       }
       if (insertError) return defaultResult.err('STAFF_CREATE_FAILED', 'Staff auth user created but profile insert failed: ' + insertError.message, insertError);
 
+      // Step 2.5 (2026-08-14): auto-provision the teller's operational account
+      // at creation time — same "T"+4-digit prefix/sequence rules as before,
+      // but no separate Account Opening request and no approval step. This is
+      // deterministic and system-generated; there is nothing here for an
+      // approving officer to review, so routing it through the approval queue
+      // would just add a hop with no actual decision in it.
+      let operationalAccount = null;
+      let operationalAccountError = null;
+      if (roleCode === 'teller') {
+        try {
+          const { data: seqData, error: seqError } = await client.rpc('generate_staff_operational_account_number');
+          if (seqError || !seqData) {
+            operationalAccountError = seqError?.message || 'Failed to generate teller account number.';
+          } else {
+            const acctInsert = await client.from(customersTable).insert({
+              account_number: seqData,
+              full_name: fullName,
+              display_name: `TELLER ${fullName}`,
+              phone: '',
+              status: 'active',
+              account_type: 'staff_operational',
+              linked_staff_id: data.id,
+              system_assigned: true,
+              created_at: new Date().toISOString(),
+              is_active: true,
+            }).select(customersSelect).maybeSingle();
+            if (acctInsert.error) operationalAccountError = acctInsert.error.message;
+            else operationalAccount = acctInsert.data;
+          }
+        } catch (err) {
+          operationalAccountError = err?.message || 'Unexpected error provisioning teller operational account.';
+        }
+      }
+
       // Step 3: Log audit
       try {
         await client.from(config?.supabase?.auditLogTable || 'audit_log').insert({
@@ -2293,11 +2327,14 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           action_type: 'staff_created',
           entity_type: 'staff',
           entity_id: data.id,
-          metadata: { staff_code: staffCode, full_name: fullName, role_code: roleCode, auth_user_id: authUserId },
+          metadata: { staff_code: staffCode, full_name: fullName, role_code: roleCode, auth_user_id: authUserId, operational_account_number: operationalAccount?.account_number || null },
         });
       } catch (_e) {}
 
-      return defaultResult.ok(normalizeStaffSummary(data));
+      const staffSummary = normalizeStaffSummary(data);
+      if (operationalAccount) staffSummary.operationalAccount = operationalAccount;
+      if (operationalAccountError) staffSummary.operationalAccountError = operationalAccountError;
+      return defaultResult.ok(staffSummary);
     }
 
     async function updateStaffStatus(payload = {}) {
