@@ -133,7 +133,7 @@
       title: 'Administration',
       desc: 'Manage working tools, operational postings, temporary grants, staff settings, and central close of day.',
       icon: '🛠️',
-      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','staff_salary_balance','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
+      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
     },
     balances: {
       title: 'Balances',
@@ -166,8 +166,7 @@
     permissions: 'Permissions Matrix',
     operational_posting: 'Income & Expense Posting',
     operational_accounts: 'Income & Expense Balance',
-    staff_directory: 'All Staff Balance',
-    staff_salary_balance: 'Staff Salary Balance',
+    staff_directory: 'Staff Salary Balance',
     staff_roster: 'Staff Directory',
     customer_directory: "All Customers' Balance",
     business_balance: 'Business Balance',
@@ -182,8 +181,8 @@
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_salary_balance','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
-    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts','staff_salary_balance']
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
+    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts','staff_directory']
   };
 
   let realtimeBound = false;
@@ -2126,7 +2125,7 @@ function hideProcessing() {
         state.ui.tool = null;
       } else {
         state.ui.tool = nextTool;
-        if (nextTool === 'staff_salary_balance') {
+        if (nextTool === 'staff_directory') {
           // Always re-fetch fresh on entry — a newly approved staff_salary
           // account (or a status change) shouldn't be masked by a stale cache.
           state.ui.staffSalaryAccountsCache = null;
@@ -2194,7 +2193,6 @@ function hideProcessing() {
       case 'operational_posting': return renderOperationalPosting();
       case 'operational_accounts': return renderOperationalAccounts();
       case 'staff_directory': return renderStaffDirectory();
-      case 'staff_salary_balance': return renderStaffSalaryBalance();
       case 'staff_roster': return renderStaffRoster();
       case 'customer_directory': return renderCustomerDirectory();
       case 'business_balance': return renderBusinessBalance();
@@ -3173,7 +3171,8 @@ function nextPaint() {
     }).join('');
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
+        ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
         </div>
@@ -3181,59 +3180,21 @@ function nextPaint() {
       </div>`;
   }
 
+  // REDESIGN 2026-08-14: "All Staff Balance" (wallet/float balance for every
+  // staff regardless of role) and the separate "Staff Salary Balance" report
+  // were two different balance views under confusingly similar names. Staff
+  // management actions (Add Staff, Ledger, Reset Password, Deactivate,
+  // Recovery Key) already live on "Staff Directory" (renderStaffRoster,
+  // above) — nothing unique here needed preserving except the wallet balance
+  // table, which is exactly the source of the confusion. So this tool is now
+  // fully repurposed: it shows ONLY staff_salary account balances (role is a
+  // classification tag chosen at account opening, not a link to a specific
+  // staff record — see the Account Opening form), filterable by role.
+  // "Teller Balances" remains its own separate, unambiguous report for
+  // operational T#### accounts only.
   function renderStaffDirectory() {
-    state.ui.staffDirectorySearch = state.ui.staffDirectorySearch || '';
     state.ui.staffDirectoryRole = state.ui.staffDirectoryRole || 'all';
-    const staffSearch = String(state.ui.staffDirectorySearch || '').trim().toLowerCase();
-    const staffRoleFilter = state.ui.staffDirectoryRole || 'all';
-    const filteredStaff = state.staff.filter((s) => {
-      const staffCode = String(s.staffCode || s.staff_code || s.id || '').toLowerCase();
-      const staffName = String(s.name || s.full_name || '').toLowerCase();
-      const staffRole = s.role || s.role_code || '';
-      const matchesSearch = !staffSearch || staffName.includes(staffSearch) || staffCode.includes(staffSearch);
-      const matchesRole = staffRoleFilter === 'all' || staffRole === staffRoleFilter;
-      return matchesSearch && matchesRole;
-    }).sort((a,b)=> String(ensureStaffAccount(a.id).accountNumber||'').localeCompare(String(ensureStaffAccount(b.id).accountNumber||''), undefined, {numeric:true}));
-    let grandBalance = 0, grandDebit = 0, grandCredit = 0;
-    const bodyRows = filteredStaff.map((s,i)=>{
-      const acc = ensureStaffAccount(s.id);
-      const wallet = (state.customers || []).find(c => c.id === acc.linkedCustomerId);
-      const credits = (wallet?.transactions || []).filter(tx => tx.type === 'credit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-      const debits = (wallet?.transactions || []).filter(tx => tx.type === 'debit').reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-      grandCredit += credits; grandDebit += debits; grandBalance += Number(acc.balance || 0);
-      const staffCode = s.staffCode || s.staff_code || s.id || '—';
-      const staffName = s.name || s.full_name || '—';
-      const staffRole = s.role || s.role_code || '';
-      const isActive = s.active !== false && s.is_active !== false;
-      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(acc.accountNumber))}</code></td><td>${money(debits)}</td><td>${money(credits)}</td><td>${money(acc.balance)}</td><td>${fmtDate(wallet?.createdAt)}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
-    }).join('');
-    return `
-      <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">All Staff Balance</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
-        ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
-        <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
-          <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
-          <select id="staffDirectoryRoleFilter" class="entry-input" style="height:24px;max-width:170px;font-size:0.78em;padding:2px 8px">
-            <option value="all" ${staffRoleFilter==='all'?'selected':''}>All Roles</option>
-            ${Object.keys(ROLE_LABELS).map(role => `<option value="${role}" ${staffRoleFilter===role?'selected':''}>${ROLE_LABELS[role]}</option>`).join('')}
-          </select>
-        </div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th><th>Start Date</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="10">No staff found</td></tr>'}${filteredStaff.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="4"></td></tr>` : ''}</tbody></table></div>
-      </div>`;
-  }
-
-  // SURGICAL ADDITION 2026-08-14: Staff Salary Balance is its own report,
-  // separate from "All Staff Balance" (which is actually the wallet/float
-  // balance every staff member has, regardless of role) and "Teller
-  // Balances" (operational T#### accounts, tellers only). Staff Salary
-  // accounts are opened like customer accounts and are NOT linked to a
-  // specific staff record — the account holder's role is captured only as a
-  // classification tag at opening time, purely so this report can filter by
-  // it. Data is fetched on demand (not synced into state.customers) via a
-  // dedicated gateway read, then cached in state.ui for re-render.
-  function renderStaffSalaryBalance() {
-    state.ui.staffSalaryRoleFilter = state.ui.staffSalaryRoleFilter || 'all';
-    const roleFilter = state.ui.staffSalaryRoleFilter;
+    const roleFilter = state.ui.staffDirectoryRole;
     const loading = state.ui.staffSalaryBalanceLoading;
     const rows = state.ui.staffSalaryAccountsCache || [];
     const filtered = rows.filter(r => roleFilter === 'all' || r.staffRoleCode === roleFilter);
@@ -3242,9 +3203,9 @@ function nextPaint() {
     return `
       <div class="table-card">
         <div class="action-inline"><h3 style="margin:0">Staff Salary Balance</h3></div>
-        <div class="note" style="margin:6px 0">Staff Salary accounts are opened per account, not linked to a specific staff record — role here is a classification tag chosen at opening, for filtering only.</div>
+        <div class="note" style="margin:6px 0">Shows Staff Salary account balances only. Role here is a classification tag chosen when the account was opened — accounts aren't linked to a specific staff record. Teller operational balances are on the separate "Teller Balances" report.</div>
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
-          <select id="staffSalaryRoleFilter" class="entry-input" style="height:24px;max-width:190px;font-size:0.78em;padding:2px 8px">
+          <select id="staffDirectoryRoleFilter" class="entry-input" style="height:24px;max-width:190px;font-size:0.78em;padding:2px 8px">
             <option value="all" ${roleFilter==='all'?'selected':''}>All Roles</option>
             ${Object.keys(ROLE_LABELS).map(role => `<option value="${role}" ${roleFilter===role?'selected':''}>${ROLE_LABELS[role]}</option>`).join('')}
           </select>
@@ -3252,32 +3213,6 @@ function nextPaint() {
         </div>
         <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Role</th><th>Balance</th><th>Opened</th><th>Status</th></tr></thead><tbody>${bodyRows || `<tr><td colspan="7">${loading ? 'Loading…' : 'No staff salary accounts found'}</td></tr>`}${filtered.length ? `<tr class="total-row"><td colspan="4"><strong>Total</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
       </div>`;
-  }
-
-  async function bindStaffSalaryBalance() {
-    const roleFilterSelect = byId('staffSalaryRoleFilter');
-    if (roleFilterSelect) roleFilterSelect.onchange = () => {
-      state.ui.staffSalaryRoleFilter = roleFilterSelect.value || 'all';
-      save();
-      renderWorkspace();
-    };
-    // Fetch once per visit to this tool (not on every keystroke/filter
-    // change) — cache lives in state.ui so switching the role filter above
-    // just re-renders from the cache instead of re-fetching.
-    if (state.ui.staffSalaryAccountsCache || state.ui.staffSalaryBalanceLoading || !gateway.customers?.listStaffSalaryAccounts) return;
-    state.ui.staffSalaryBalanceLoading = true;
-    renderWorkspace();
-    try {
-      const result = await gateway.customers.listStaffSalaryAccounts();
-      state.ui.staffSalaryAccountsCache = result?.ok ? (result.data || []) : [];
-      if (!result?.ok) showToast(result?.error?.message || 'Unable to load staff salary accounts');
-    } catch (err) {
-      state.ui.staffSalaryAccountsCache = [];
-      showToast('Unexpected error loading staff salary accounts');
-    } finally {
-      state.ui.staffSalaryBalanceLoading = false;
-      if (state.ui.tool === 'staff_salary_balance') renderWorkspace();
-    }
   }
 
   function renderOverallBalance() {
@@ -3902,7 +3837,6 @@ function normalizeStaffLedgerEntryType(row) {
       case 'operational_posting': bindOperationalAccounts(); break;
       case 'operational_accounts': bindOperationalAccounts(); break;
       case 'staff_directory': bindStaffDirectory(); break;
-      case 'staff_salary_balance': bindStaffSalaryBalance(); break;
       case 'staff_roster': bindStaffDirectory(); break;
       case 'customer_directory': bindCustomerDirectory(); break;
       case 'business_balance': bindBalanceFilters('business'); break;
@@ -6905,6 +6839,36 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function bindStaffDirectory() {
+    // REDESIGN 2026-08-14: staff_directory now shows Staff Salary Balance —
+    // fetch fresh data on demand, same pattern used elsewhere for on-demand
+    // reads. Guarded to only run when this tool (not staff_roster, which
+    // shares this bind function) is the active screen.
+    if (state.ui.tool === 'staff_directory') {
+      const staffDirectoryRoleFilter = byId('staffDirectoryRoleFilter');
+      if (staffDirectoryRoleFilter) staffDirectoryRoleFilter.onchange = () => {
+        state.ui.staffDirectoryRole = staffDirectoryRoleFilter.value || 'all';
+        save();
+        renderWorkspace();
+      };
+      if (!state.ui.staffSalaryAccountsCache && !state.ui.staffSalaryBalanceLoading && gateway.customers?.listStaffSalaryAccounts) {
+        state.ui.staffSalaryBalanceLoading = true;
+        renderWorkspace();
+        (async () => {
+          try {
+            const result = await gateway.customers.listStaffSalaryAccounts();
+            state.ui.staffSalaryAccountsCache = result?.ok ? (result.data || []) : [];
+            if (!result?.ok) showToast(result?.error?.message || 'Unable to load staff salary accounts');
+          } catch (err) {
+            state.ui.staffSalaryAccountsCache = [];
+            showToast('Unexpected error loading staff salary accounts');
+          } finally {
+            state.ui.staffSalaryBalanceLoading = false;
+            if (state.ui.tool === 'staff_directory') renderWorkspace();
+          }
+        })();
+      }
+      return;
+    }
     const addBtn = byId('addStaffBtn');
     if (addBtn) addBtn.onclick = () => {
       openModal('Onboard New Staff', `
@@ -7011,14 +6975,6 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         save();
         renderWorkspace();
       }, 200);
-    }
-    const staffDirectoryRoleFilter = byId('staffDirectoryRoleFilter');
-    if (staffDirectoryRoleFilter) {
-      staffDirectoryRoleFilter.onchange = () => {
-        state.ui.staffDirectoryRole = staffDirectoryRoleFilter.value || 'all';
-        save();
-        renderWorkspace();
-      };
     }
     qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
 
