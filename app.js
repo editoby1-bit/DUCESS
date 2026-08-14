@@ -4306,9 +4306,9 @@ function normalizeStaffLedgerEntryType(row) {
     const catChips = categories.map(c => {
       const count = approvals.filter(r => r.status==='approved' && c.types.includes(r.type) && (r.payload?.date||String(r.approvedAt||'').slice(0,10)) === filterDate).length;
       const isActive = filter.activeKey === c.key;
-      return `<button type="button" class="summary-cat-chip ${isActive?'active':''}" data-cat="${c.key}" style="cursor:pointer;padding:8px 14px;border-radius:20px;border:1.5px solid ${isActive?'var(--accent-blue)':'var(--border)'};background:${isActive?'var(--accent-blue-light, #eff6ff)':'var(--surface)'};display:inline-flex;align-items:center;gap:8px;font:inherit;text-align:left">
+      return `<button type="button" class="summary-cat-chip ${isActive?'active':''}" data-cat="${c.key}" style="cursor:pointer;padding:8px 14px;border-radius:20px;border:1.5px solid ${isActive?'var(--brand)':'var(--line)'};background:${isActive?'var(--accent)':'var(--panel)'};color:var(--text);display:inline-flex;align-items:center;gap:8px;font:inherit;text-align:left">
         <span style="font-size:1.15em">${c.icon}</span>
-        <span><span style="font-weight:700;font-size:0.88em">${c.label}</span><span style="font-size:0.78em;color:var(--text-muted);margin-left:6px">${count}</span></span>
+        <span><span style="font-weight:700;font-size:0.88em;color:var(--text)">${c.label}</span><span style="font-size:0.78em;color:var(--muted);margin-left:6px">${count}</span></span>
       </button>`;
     }).join('');
 
