@@ -133,7 +133,7 @@
       title: 'Administration',
       desc: 'Manage working tools, operational postings, temporary grants, staff settings, and central close of day.',
       icon: '🛠️',
-      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','transaction_summary','teller_balances','overall_balance','permissions']
+      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','teller_balances','transaction_summary','overall_balance','permissions']
     },
     balances: {
       title: 'Balances',
@@ -4308,19 +4308,19 @@ function normalizeStaffLedgerEntryType(row) {
     }).join('');
 
     return `
-      <div class="form-card cs2-card" style="max-width:860px">
+      <div class="form-card cs2-card" style="max-width:${activeKey ? '1120px' : '860px'}">
         <div class="cs2-title">Transaction Summary</div>
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
           <label style="font-size:0.88em;font-weight:600">Date</label>
           <input id="txSummaryDate" type="date" class="entry-input" value="${filterDate}" style="width:160px">
           <button id="txSummaryToday" class="sheet-btn secondary tiny-btn">Today</button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr ${activeKey?'1.4fr':''}; gap:16px">
-          <div>${catCards}</div>
+        <div style="display:grid;grid-template-columns:${activeKey ? '1fr 1.4fr' : '1fr'}; gap:16px; align-items:start">
+          <div style="min-width:0">${catCards}</div>
           ${activeKey ? `
-          <div>
+          <div style="min-width:0">
             <div style="font-weight:700;font-size:0.95em;margin-bottom:10px">${escapeHtml(detailTitle)} — ${filterDate}</div>
-            <div class="table-wrap">
+            <div class="table-wrap" style="max-width:100%;overflow-x:auto">
               ${detailRows.startsWith('__CUSTOMER_TABLE__')
                 ? `<table class="table">${detailRows.replace('__CUSTOMER_TABLE__','')}</table>`
                 : `<table class="table"><thead><tr><th>#</th><th>Type</th><th>Posted By</th><th>Account</th><th>Amount</th><th>Date</th></tr></thead><tbody>${detailRows}</tbody></table>`
