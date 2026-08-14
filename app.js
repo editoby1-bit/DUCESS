@@ -7,6 +7,7 @@
     supabase: runtimeConfig.supabase || {}
   }) || null;
   const DATE_FMT = new Intl.DateTimeFormat('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+  const TIME_FMT = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:true });
   const THEMES = ['classic','ducess-sheet','ocean','dark-slate','neutral-stone'];
   const THEME_LABELS = { classic:'Classic', 'ducess-sheet':'Ducess Sheet', ocean:'Ocean', 'dark-slate':'Dark Slate', 'neutral-stone':'Neutral Stone' };
   const money = (n) => Number(n || 0).toLocaleString();
@@ -725,6 +726,19 @@
     const plainDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const d = plainDate ? new Date(Number(plainDate[1]), Number(plainDate[2]) - 1, Number(plainDate[3]), 12, 0, 0) : new Date(raw);
     return isNaN(d) ? iso : DATE_FMT.format(d);
+  }
+
+  // SURGICAL PATCH 2026-08-13: audit entries are already stored with a full
+  // timestamp (auditEntry() sets `at: new Date().toISOString()`), but the
+  // Audit Trail table rendered them through fmtDate(), which only formats the
+  // day — the time of occurrence was silently dropped. This is used only for
+  // the Audit Trail column; fmtDate() itself is untouched everywhere else
+  // since business/transaction dates are correctly date-only.
+  function fmtDateTime(iso) {
+    const raw = String(iso || '');
+    const d = new Date(raw);
+    if (isNaN(d)) return iso;
+    return `${DATE_FMT.format(d)}, ${TIME_FMT.format(d)}`;
   }
 
   function recalcCustomerBalance(customer) {
@@ -2246,7 +2260,6 @@ function hideProcessing() {
             <div class="cs2-input-wrap cs2-wide">
               <select id="openAccountType" class="entry-input cs2-input">
                 <option value="customer"          ${acctType==='customer'          ?'selected':''}>Customer Account</option>
-                <option value="staff_operational" ${acctType==='staff_operational' ?'selected':''}>Teller Account</option>
                 <option value="staff_salary"      ${acctType==='staff_salary'      ?'selected':''}>Staff Salary Account</option>
                 <option value="expense"           ${acctType==='expense'           ?'selected':''}>Expense Account</option>
                 <option value="income"            ${acctType==='income'            ?'selected':''}>Income Account</option>
@@ -5796,9 +5809,9 @@ function normalizeStaffLedgerEntryType(row) {
       const actorStaff = getAuditActorStaff(a);
       return escapeHtml(actorStaff?.name || a.actor || a.actorName || a.actor_name || 'System');
     };
-    const rowForAudit = (a) => `<tr><td style="white-space:nowrap">${fmtDate(a.at || a.timestamp || a.createdAt)}</td><td>${actorName(a)}</td><td><span class="audit-action-badge">${escapeHtml(formatActionType(a))}</span></td><td style="font-size:12px">${formatAuditDetail(a)}</td></tr>`;
+    const rowForAudit = (a) => `<tr><td style="white-space:nowrap">${fmtDateTime(a.at || a.timestamp || a.createdAt)}</td><td>${actorName(a)}</td><td><span class="audit-action-badge">${escapeHtml(formatActionType(a))}</span></td><td style="font-size:12px">${formatAuditDetail(a)}</td></tr>`;
     const scopeNote = adminView ? '<div class="note">Admin Global Audit View: showing all staff actions. Use role/staff filters to narrow the trail.</div>' : '<div class="note">Showing only your own audit trail.</div>';
-    openModal('Audit Trail', `${scopeNote}${filterHtml}<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody id="auditTrailRows"></tbody></table></div>`, [{label:'Close', onClick: closeModal}]);
+    openModal('Audit Trail', `${scopeNote}${filterHtml}<div class="table-wrap"><table class="table"><thead><tr><th>Date &amp; Time</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody id="auditTrailRows"></tbody></table></div>`, [{label:'Close', onClick: closeModal}]);
     const renderAuditRows = () => {
       const roleFilter = byId('auditRoleFilter')?.value || '';
       const staffFilter = byId('auditStaffFilter')?.value || '';
@@ -6868,9 +6881,27 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           state.staff.push(newStaffRecord);
           ensureStaffAccount(newStaffRecord.id);
           save();
+          // SURGICAL PATCH 2026-08-13: staff creation was never recorded in
+          // the audit trail — every other state-changing action calls
+          // pushAudit(), this one was missed. The gateway also attempts a
+          // server-side audit insert, but it's fire-and-forget and its result
+          // is never checked, so this local entry is the reliable record.
+          pushAudit('staff_created', `${name} (${staffCode}) added as ${ROLE_LABELS[role] || role}`);
+          // SURGICAL PATCH 2026-08-14: tellers now get their operational
+          // account auto-provisioned by the gateway at creation time (no more
+          // separate Account Opening + approval step — see gateway.staff.createStaff).
+          // Pull the fresh customer list so the new T#### account shows up
+          // immediately, and log it as its own audit entry (distinct from
+          // "staff_created") since it's a separate record being opened.
+          if (newStaffRecord.operationalAccount?.account_number) {
+            await syncCustomersListFromGateway();
+            pushAudit('teller_account_opened', `Operational account ${newStaffRecord.operationalAccount.account_number} auto-opened for ${name}`);
+          } else if (role === 'teller' && newStaffRecord.operationalAccountError) {
+            showToast(`Staff created, but operational account setup failed: ${newStaffRecord.operationalAccountError}. Open it manually.`);
+          }
           closeModal();
           render();
-          showToast(`✓ Staff "${name}" (${staffCode}) created successfully`);
+          showToast(`✓ Staff "${name}" (${staffCode}) created successfully${newStaffRecord.operationalAccount?.account_number ? ` — teller account ${newStaffRecord.operationalAccount.account_number} opened` : ''}`);
         } catch (err) {
           showToast('Unexpected error creating staff');
           if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Staff Account'; }
