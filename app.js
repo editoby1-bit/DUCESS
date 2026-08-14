@@ -4298,36 +4298,39 @@ function normalizeStaffLedgerEntryType(row) {
       }
     }
 
-    const catCards = categories.map(c => {
+    // REDESIGN 2026-08-14: the two-column layout (tall vertical card list next
+    // to a short table) forced vertical scrolling on the left panel while the
+    // right panel sat mostly empty, and the table got squeezed into a narrow
+    // column. Switched to horizontal chips that wrap naturally, with the
+    // table full-width underneath — no more mismatched-height columns.
+    const catChips = categories.map(c => {
       const count = approvals.filter(r => r.status==='approved' && c.types.includes(r.type) && (r.payload?.date||String(r.approvedAt||'').slice(0,10)) === filterDate).length;
-      return `<div class="summary-cat-card ${filter.activeKey===c.key?'active':''}" data-cat="${c.key}" style="cursor:pointer;padding:14px 18px;border-radius:10px;border:1.5px solid ${filter.activeKey===c.key?'var(--accent-blue)':'var(--border)'};background:${filter.activeKey===c.key?'var(--accent-blue-light, #eff6ff)':'var(--surface)'};display:flex;align-items:center;gap:12px;margin-bottom:8px">
-        <span style="font-size:1.6em">${c.icon}</span>
-        <div style="flex:1"><div style="font-weight:700;font-size:0.95em">${c.label}</div><div style="font-size:0.82em;color:var(--text-muted)">${count} transaction${count===1?'':'s'} on ${filterDate}</div></div>
-        <span style="font-size:1.2em;color:var(--text-muted)">›</span>
-      </div>`;
+      const isActive = filter.activeKey === c.key;
+      return `<button type="button" class="summary-cat-chip ${isActive?'active':''}" data-cat="${c.key}" style="cursor:pointer;padding:8px 14px;border-radius:20px;border:1.5px solid ${isActive?'var(--accent-blue)':'var(--border)'};background:${isActive?'var(--accent-blue-light, #eff6ff)':'var(--surface)'};display:inline-flex;align-items:center;gap:8px;font:inherit;text-align:left">
+        <span style="font-size:1.15em">${c.icon}</span>
+        <span><span style="font-weight:700;font-size:0.88em">${c.label}</span><span style="font-size:0.78em;color:var(--text-muted);margin-left:6px">${count}</span></span>
+      </button>`;
     }).join('');
 
     return `
-      <div class="form-card cs2-card" style="max-width:${activeKey ? '1120px' : '860px'}">
+      <div class="form-card cs2-card" style="max-width:1120px">
         <div class="cs2-title">Transaction Summary</div>
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
           <label style="font-size:0.88em;font-weight:600">Date</label>
           <input id="txSummaryDate" type="date" class="entry-input" value="${filterDate}" style="width:160px">
           <button id="txSummaryToday" class="sheet-btn secondary tiny-btn">Today</button>
         </div>
-        <div style="display:grid;grid-template-columns:${activeKey ? '1fr 1.4fr' : '1fr'}; gap:16px; align-items:start">
-          <div style="min-width:0">${catCards}</div>
-          ${activeKey ? `
-          <div style="min-width:0">
-            <div style="font-weight:700;font-size:0.95em;margin-bottom:10px">${escapeHtml(detailTitle)} — ${filterDate}</div>
-            <div class="table-wrap" style="max-width:100%;overflow-x:auto">
-              ${detailRows.startsWith('__CUSTOMER_TABLE__')
-                ? `<table class="table">${detailRows.replace('__CUSTOMER_TABLE__','')}</table>`
-                : `<table class="table"><thead><tr><th>#</th><th>Type</th><th>Posted By</th><th>Account</th><th>Amount</th><th>Date</th></tr></thead><tbody>${detailRows}</tbody></table>`
-              }
-            </div>
-          </div>` : ''}
-        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">${catChips}</div>
+        ${activeKey ? `
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:0.95em;margin-bottom:10px">${escapeHtml(detailTitle)} — ${filterDate}</div>
+          <div class="table-wrap" style="max-width:100%;overflow-x:auto">
+            ${detailRows.startsWith('__CUSTOMER_TABLE__')
+              ? `<table class="table">${detailRows.replace('__CUSTOMER_TABLE__','')}</table>`
+              : `<table class="table"><thead><tr><th>#</th><th>Type</th><th>Posted By</th><th>Account</th><th>Amount</th><th>Date</th></tr></thead><tbody>${detailRows}</tbody></table>`
+            }
+          </div>
+        </div>` : `<div class="note">Select a category above to see its transactions for this date.</div>`}
       </div>`;
   }
 
@@ -4336,7 +4339,7 @@ function normalizeStaffLedgerEntryType(row) {
     const dateInput = byId('txSummaryDate');
     if (dateInput) dateInput.onchange = () => { filter.date = dateInput.value; filter.activeKey = null; save(); renderWorkspace(); };
     if (byId('txSummaryToday')) byId('txSummaryToday').onclick = () => { filter.date = businessDate(); filter.activeKey = null; save(); renderWorkspace(); };
-    qq('.summary-cat-card').forEach(card => {
+    qq('.summary-cat-chip').forEach(card => {
       card.onclick = () => {
         filter.activeKey = filter.activeKey === card.dataset.cat ? null : card.dataset.cat;
         save(); renderWorkspace();
