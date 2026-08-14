@@ -763,6 +763,7 @@ async function submitDebtRepayment(_payload) {
         submitAccountOpening: () => notYet('customers.submitAccountOpening'),
         submitAccountMaintenance: () => notYet('customers.submitAccountMaintenance'),
         submitAccountReactivation: () => notYet('customers.submitAccountReactivation'),
+        listStaffSalaryAccounts: async () => ({ ok: true, data: [] }),
       },
       accounts: {
         getAccountByNumber,
@@ -1205,6 +1206,10 @@ function subscribeRealtime() {
     account_type: acctType,
     display_name: payload.name || fullName,
     linked_staff_id: payload.linkedStaffId || null,
+    // Classification-only role tag for staff_salary accounts (2026-08-14) —
+    // NOT a link to any specific staff record, just what the account holder's
+    // role is, so it can be filtered on the Staff Salary Balance report.
+    staff_role_code: acctType === 'staff_salary' ? (payload.staffRole || payload.staffRoleCode || null) : null,
     system_assigned: acctType !== 'customer',
     created_at: new Date().toISOString(),
     is_active: true
@@ -1218,6 +1223,24 @@ function subscribeRealtime() {
 
 if (inserted.error) {
   const msg = String(inserted.error.message || '').toLowerCase();
+
+  // If the staff_role_code column hasn't been migrated in yet, don't let
+  // that break account opening for every account type — retry once without
+  // it so customer/expense/income/staff_salary postings keep working.
+  if ((inserted.error.code === '42703' || msg.includes('column')) && msg.includes('staff_role_code')) {
+    const { staff_role_code, ...rowWithoutRoleCode } = customerRow;
+    const retryInsert = await client.from(customersTable).insert([rowWithoutRoleCode]).select(customersSelect).maybeSingle();
+    if (!retryInsert.error) {
+      return defaultResult.ok({
+        posted: true,
+        requestType: type,
+        transactions: [],
+        cashLedger: null,
+        customer: retryInsert.data,
+        decisionNote: decisionNote || ''
+      });
+    }
+  }
 
   if (inserted.error.code === '23505' || msg.includes('duplicate') || msg.includes('unique')) {
     if (msg.includes('account_number')) {
@@ -2430,6 +2453,49 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return listCustomers({ search: query || '' });
     }
 
+    // SURGICAL ADDITION 2026-08-14: dedicated, self-contained read for the
+    // Staff Salary Balance report. Deliberately NOT folded into
+    // fetchCustomersRows/customersSelect (used by login/session sync and every
+    // other customer read) — if the staff_role_code column hasn't been
+    // migrated in yet, this function degrades gracefully on its own instead
+    // of breaking every other customer-related screen in the app.
+    async function listStaffSalaryAccounts() {
+      if (!canUseSupabase()) return defaultResult.ok([]);
+      const cols = 'id, account_number, full_name, display_name, status, is_active, created_at, staff_role_code';
+      let { data, error: queryError } = await client.from(customersTable).select(cols).eq('account_type', 'staff_salary').order('created_at', { ascending: true });
+      if (queryError) {
+        const msg = String(queryError.message || '').toLowerCase();
+        if (queryError.code === '42703' || msg.includes('column')) {
+          // Migration not applied yet — retry without the role column so the
+          // report still works, just without role classification/filtering.
+          const retry = await client.from(customersTable).select('id, account_number, full_name, display_name, status, is_active, created_at').eq('account_type', 'staff_salary').order('created_at', { ascending: true });
+          if (retry.error) return defaultResult.err('STAFF_SALARY_LIST_FAILED', 'Could not fetch staff salary accounts.', retry.error);
+          data = retry.data; queryError = null;
+        } else {
+          return defaultResult.err('STAFF_SALARY_LIST_FAILED', 'Could not fetch staff salary accounts.', queryError);
+        }
+      }
+      const staffAccountIds = (data || []).map(r => r.id).filter(Boolean);
+      const txResult = staffAccountIds.length ? await fetchTransactionsByCustomerIds(staffAccountIds) : { ok: true, data: [] };
+      const txByCustomer = new Map();
+      (txResult.ok ? txResult.data : []).forEach(row => {
+        const key = row.customer_id;
+        if (!key) return;
+        if (!txByCustomer.has(key)) txByCustomer.set(key, 0);
+        txByCustomer.set(key, txByCustomer.get(key) + (row.tx_type === 'credit' ? Number(row.amount || 0) : -Number(row.amount || 0)));
+      });
+      const normalized = (data || []).map(row => ({
+        id: row.id,
+        accountNumber: row.account_number,
+        name: row.display_name || row.full_name || '',
+        staffRoleCode: row.staff_role_code || null,
+        active: typeof row.is_active === 'boolean' ? row.is_active : String(row.status || 'active').toLowerCase() === 'active',
+        createdAt: row.created_at,
+        balance: Number(txByCustomer.get(row.id) || 0),
+      }));
+      return defaultResult.ok(normalized);
+    }
+
     async function getCustomerById(customerId) {
       if (!canUseSupabase()) return local.customers.getCustomerById(customerId);
       const rowsResult = await fetchCustomersRows({ customerId });
@@ -2897,6 +2963,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         submitAccountOpening,
         submitAccountMaintenance,
         submitAccountReactivation,
+        listStaffSalaryAccounts,
       },
       accounts: {
         getAccountByNumber,
