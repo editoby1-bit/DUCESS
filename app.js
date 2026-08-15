@@ -4303,6 +4303,11 @@ function normalizeStaffLedgerEntryType(row) {
           });
         });
         detailRows = rows.length ? rows.join('') : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">No customer transactions for this date</td></tr>`;
+        if (rows.length) {
+          const totalCredit = Object.values(todayTxMap).flat().filter(t=>t.isCredit).reduce((s,t)=>s+t.amount,0);
+          const totalDebit = Object.values(todayTxMap).flat().filter(t=>!t.isCredit).reduce((s,t)=>s+t.amount,0);
+          detailRows += `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>+${money(totalCredit)} / -${money(totalDebit)}</strong></td><td colspan="2"></td></tr>`;
+        }
         // Override table header for customer view
         const tableHeader = `<thead><tr><th>A/N</th><th>Customer</th><th>Type</th><th>Amount</th><th>Running Balance</th><th>Date &amp; Time</th></tr></thead>`;
         // Wrap in special marker for template below
@@ -4315,6 +4320,11 @@ function normalizeStaffLedgerEntryType(row) {
           const to = p.customerName || p.destAccountName || p.targetAccountName || '—';
           return `<tr><td>${i+1}</td><td>${r.type.replace(/_/g,' ')}</td><td>${escapeHtml(String(from))}</td><td>${escapeHtml(String(to))}</td><td>${money(amount)}</td><td style="white-space:nowrap">${fmtDateTime(r.approvedAt) || '—'}</td></tr>`;
         }).join('');
+        const grandTotal = filtered.reduce((s,r) => {
+          const p = r.payload || {};
+          return s + (p.amount || p.formAmount || (p.rows||[]).reduce((sx,x)=>sx+Number(x.amount||0),0) || 0);
+        }, 0);
+        detailRows += `<tr class="total-row"><td colspan="4"><strong>Total</strong></td><td><strong>${money(grandTotal)}</strong></td><td></td></tr>`;
       }
     }
 
