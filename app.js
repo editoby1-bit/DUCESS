@@ -155,7 +155,6 @@
     debit: 'Debit',
     journal: 'Generate Journal',
     intra_transfer: 'Non Cash',
-    my_balance: 'My Balance',
     my_close_day: 'My Close of Day',
     central_close_day: 'Central Close of Day',
     approval_queue: 'Approval Queue',
@@ -181,7 +180,7 @@
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_balance','my_close_day','transaction_summary'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts','staff_directory']
   };
 
@@ -669,7 +668,7 @@
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
-    if (['check_balance','account_statement','operational_accounts','my_balance','my_close_day'].includes(tool)) return true;
+    if (['check_balance','account_statement','operational_accounts','my_close_day'].includes(tool)) return true;
     const base = DEFAULT_PERMS[staff.role] || [];
     const grantOn = state.tempGrants.some(g => g.staffId === staff.id && g.tool === tool && g.enabled);
     return base.includes(tool) || grantOn;
@@ -2150,14 +2149,13 @@ function hideProcessing() {
         if (nextTool === 'approval_others') state.ui.approvalsSection = 'others';
       }
       if (state.ui.tool === 'check_balance') state.ui.checkBalanceLoaded = false;
-      state.ui.modalToggleTool = state.ui.tool && ['my_balance','my_close_day','central_close_day'].includes(state.ui.tool) ? state.ui.tool : null;
+      state.ui.modalToggleTool = state.ui.tool && ['my_close_day','central_close_day'].includes(state.ui.tool) ? state.ui.tool : null;
       save();
       renderWorkspace();
-      if (nextTool === 'my_balance' && state.ui.tool === 'my_balance') openMyBalanceModal();
       if (nextTool === 'cash_receipt' && state.ui.tool === 'cash_receipt') openCashReceiptModal();
       if (nextTool === 'my_close_day' && state.ui.tool === 'my_close_day') openMyCODModal();
       if (nextTool === 'central_close_day' && state.ui.tool === 'central_close_day') openCODModal();
-      if (['my_balance','my_close_day','central_close_day'].includes(nextTool)) return;
+      if (['my_close_day','central_close_day'].includes(nextTool)) return;
       if (['approval_customer_service','approval_tellering','approval_others'].includes(nextTool) && state.ui.tool === nextTool) {
         smoothScrollToOpenedSegment('#approvalsSectionTabs');
         return;
@@ -2181,7 +2179,6 @@ function hideProcessing() {
       case 'journal': return renderJournalStandalone();
       case 'intra_transfer': return renderIntraTransfer();
       case 'transaction_summary': return renderTransactionSummary();
-      case 'my_balance': return `<div class="tool-empty-state"><div class="tool-empty-title">My Balance</div><div class="tool-empty-note">Balance details open in a modal when this heading is selected.</div></div>`;
       case 'my_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">My Close of Day</div><div class="tool-empty-note">Close-of-day details open in a modal when this heading is selected.</div></div>`;
       case 'central_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">Central Close of Day</div><div class="tool-empty-note">Central close-of-day opens in a modal when this heading is selected.</div></div>`;
       case 'approval_customer_service':
@@ -3811,7 +3808,7 @@ function normalizeStaffLedgerEntryType(row) {
 
   
   function isTelleringDirectModalTool(tool) {
-    return ['my_balance', 'form', 'my_close_day'].includes(tool);
+    return ['form', 'my_close_day'].includes(tool);
   }
 
   function bindToolHandlers() {
@@ -4210,6 +4207,30 @@ function normalizeStaffLedgerEntryType(row) {
       { key: 'income', label: 'Income Account Transactions', icon: '📈', types: ['operational_entry'], acctType: 'income' },
       { key: 'expense', label: 'Expense Account Transactions', icon: '📉', types: ['operational_entry'], acctType: 'expense' },
     ];
+    // SURGICAL PATCH 2026-08-14: two bugs found together.
+    // (1) acctType was defined on the salary/income/expense categories but
+    // never actually checked in the filter below — so e.g. "Income" and
+    // "Expense" both matched every operational_entry regardless of which
+    // account it hit, and "Staff Salary" matched every account_opening
+    // regardless of account type.
+    // (2) Several real transaction types (wallet_fund, debt_repayment,
+    // create_operational_account, and any future type) weren't in ANY
+    // category's list, so approved admin transactions of those types
+    // silently never appeared anywhere in this report. Added a catch-all
+    // "Administration Transactions" category computed by EXCLUSION (not a
+    // fixed list) so any current or future uncategorized type surfaces here
+    // instead of disappearing again.
+    const matchesCategory = (r, cat) => {
+      if (!cat.types.includes(r.type)) return false;
+      if (!cat.acctType) return true;
+      const p = r.payload || {};
+      if (r.type === 'operational_entry') return p.kind === cat.acctType;
+      if (r.type === 'account_opening') return p.accountType === cat.acctType;
+      return true;
+    };
+    const coveredTypes = new Set(categories.flatMap(c => c.types));
+    categories.push({ key: 'admin', label: 'Administration Transactions', icon: '🛠️', types: [], isCatchAll: true });
+    const matchesAny = (r, cat) => cat.isCatchAll ? !coveredTypes.has(r.type) : matchesCategory(r, cat);
     const approvals = state.approvals || [];
     const activeKey = filter.activeKey || null;
     const filterDate = filter.date || businessDate();
@@ -4224,11 +4245,11 @@ function normalizeStaffLedgerEntryType(row) {
         if (r.status !== 'approved') return false;
         const d = r.payload?.date || String(r.approvedAt||'').slice(0,10);
         if (d !== filterDate) return false;
-        return cat?.types?.includes(r.type);
+        return cat && matchesAny(r, cat);
       });
 
       if (filtered.length === 0) {
-        detailRows = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No transactions for this date</td></tr>`;
+        detailRows = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">No transactions for this date</td></tr>`;
       } else if (activeKey === 'customer') {
         // For customer view: compute running balance per account
         // Build a map of all approved transactions per account (all time, sorted by date)
@@ -4247,7 +4268,7 @@ function normalizeStaffLedgerEntryType(row) {
               balanceMap[accountId] = (balanceMap[accountId] || 0) + (isCreditForAccount ? amount : -amount);
             } else if (d === filterDate) {
               todayTxMap[accountId] = todayTxMap[accountId] || [];
-              todayTxMap[accountId].push({ amount, isCredit: isCreditForAccount, type: r.type, req: r, date: d });
+              todayTxMap[accountId].push({ amount, isCredit: isCreditForAccount, type: r.type, req: r, date: d, approvedAt: r.approvedAt });
             }
           };
           if (r.type === 'intra_bank_transfer') {
@@ -4277,23 +4298,22 @@ function normalizeStaffLedgerEntryType(row) {
               <td>${tx.type.replace(/_/g,' ')}</td>
               <td class="${tx.isCredit?'':'balance-negative'}">${tx.isCredit?'+':'-'}${money(tx.amount)}</td>
               <td class="${running<0?'balance-negative':''}">${money(running)}</td>
-              <td>${tx.date}</td>
+              <td style="white-space:nowrap">${fmtDateTime(tx.approvedAt) || tx.date}</td>
             </tr>`);
           });
         });
-        detailRows = rows.length ? rows.join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No customer transactions for this date</td></tr>`;
+        detailRows = rows.length ? rows.join('') : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">No customer transactions for this date</td></tr>`;
         // Override table header for customer view
-        const tableHeader = `<thead><tr><th>A/N</th><th>Customer</th><th>Type</th><th>Amount</th><th>Running Balance</th><th>Date</th></tr></thead>`;
+        const tableHeader = `<thead><tr><th>A/N</th><th>Customer</th><th>Type</th><th>Amount</th><th>Running Balance</th><th>Date &amp; Time</th></tr></thead>`;
         // Wrap in special marker for template below
         detailRows = `__CUSTOMER_TABLE__${tableHeader}<tbody>${detailRows}</tbody>`;
       } else {
         detailRows = filtered.map((r,i) => {
           const p = r.payload || {};
-          const d = r.payload?.date || String(r.approvedAt||'').slice(0,10);
           const amount = p.amount || p.formAmount || (p.rows||[]).reduce((s,x)=>s+Number(x.amount||0),0) || 0;
           const from = p.staffName || p.sourceAccountName || p.sourceName || '—';
           const to = p.customerName || p.destAccountName || p.targetAccountName || '—';
-          return `<tr><td>${i+1}</td><td>${r.type.replace(/_/g,' ')}</td><td>${escapeHtml(String(from))}</td><td>${escapeHtml(String(to))}</td><td>${money(amount)}</td><td>${d||'—'}</td></tr>`;
+          return `<tr><td>${i+1}</td><td>${r.type.replace(/_/g,' ')}</td><td>${escapeHtml(String(from))}</td><td>${escapeHtml(String(to))}</td><td>${money(amount)}</td><td style="white-space:nowrap">${fmtDateTime(r.approvedAt) || '—'}</td></tr>`;
         }).join('');
       }
     }
@@ -4304,7 +4324,7 @@ function normalizeStaffLedgerEntryType(row) {
     // column. Switched to horizontal chips that wrap naturally, with the
     // table full-width underneath — no more mismatched-height columns.
     const catChips = categories.map(c => {
-      const count = approvals.filter(r => r.status==='approved' && c.types.includes(r.type) && (r.payload?.date||String(r.approvedAt||'').slice(0,10)) === filterDate).length;
+      const count = approvals.filter(r => r.status==='approved' && matchesAny(r, c) && (r.payload?.date||String(r.approvedAt||'').slice(0,10)) === filterDate).length;
       const isActive = filter.activeKey === c.key;
       return `<button type="button" class="summary-cat-chip ${isActive?'active':''}" data-cat="${c.key}" style="cursor:pointer;padding:8px 14px;border-radius:20px;border:1.5px solid ${isActive?'var(--brand)':'var(--line)'};background:${isActive?'var(--accent)':'var(--panel)'};color:var(--text);display:inline-flex;align-items:center;gap:8px;font:inherit;text-align:left">
         <span style="font-size:1.15em">${c.icon}</span>
@@ -6083,52 +6103,18 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     return (state.cod || []).filter(c => c.staffId === staffId);
   }
 
-  function openMyBalanceModal() {
-    const st = currentStaff();
-    const acc = ensureStaffAccount(st.id);
-    openModal('My Balance', `<div class="modal-sheet my-balance-sheet"><div class="modal-sheet my-balance-sheet">
-      <div class="stack my-balance-modal">
-        <div class="kpi-row">
-          <div class="kpi"><div class="label">Wallet Balance</div><div class="number">${money(acc.walletBalance||0)}</div></div>
-          <div class="kpi"><div class="label">Debt Balance</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">-${money(acc.debtBalance||0)}</div></div>
-          <div class="kpi"><div class="label">Operational Balance</div><div class="number">${money(getStaffOperationalBalance(st.id))}</div></div>
-        </div>
-        <div class="form-grid three">
-          <div class="field"><label style="font-size:9px">Wallet Funding Amount</label><input id="walletFundAmt" class="entry-input my-balance-input" type="number" style="height:28px;min-height:28px;padding:4px 8px;font-size:12px"></div>
-          <div class="field"><label style="font-size:9px">Debt Repayment Amount</label><input id="walletRepayAmt" class="entry-input my-balance-input" type="number" style="height:28px;min-height:28px;padding:4px 8px;font-size:12px"></div>
-          <div class="field"><label style="font-size:9px">Note</label><input id="walletNote" class="entry-input my-balance-input" style="height:28px;min-height:28px;padding:4px 8px;font-size:12px"></div>
-        </div>
-      </div>
-    `,[
-      {label:'Fund Wallet', onClick: async ()=> {
-        const amt = Number(byId('walletFundAmt').value||0); if(!(amt>0)) return showToast('Enter amount');
-        const note = byId('walletNote').value.trim();
-        const result = await submitApprovalThroughGateway('wallet_fund',{source:'my_balance', staffId:st.id, staffName:st.name, amount:amt, note, date:businessDate()});
-        if (!result?.ok) return showToast(result?.error?.message || 'Could not send wallet funding for approval');
-        closeModal(); render(); showToast('Wallet funding sent for approval');
-      }},
-      {label:'Pay Debt', onClick: async ()=> {
-        const amt = Number(byId('walletRepayAmt').value||0); if(!(amt>0)) return showToast('Enter amount');
-        if (amt > Number(acc.walletBalance||0)) return showToast('Insufficient wallet balance');
-        if (amt > Number(acc.debtBalance||0)) return showToast('Amount exceeds debt');
-        const note = byId('walletNote').value.trim();
-        const result = await submitApprovalThroughGateway('debt_repayment',{source:'my_balance', staffId:st.id, staffName:st.name, amount:amt, note, date:businessDate()});
-        if (!result?.ok) return showToast(result?.error?.message || 'Could not send debt repayment for approval');
-        closeModal(); render(); showToast('Debt repayment sent for approval');
-      }},
-      {label:'Close', className:'secondary', onClick: closeModal}
-    ]);
-    // shrink My Balance action buttons
-    setTimeout(() => {
-      document.querySelectorAll('#modalActions button').forEach(btn => {
-        btn.style.height = '28px';
-        btn.style.minHeight = '28px';
-        btn.style.fontSize = '12px';
-        btn.style.padding = '4px 14px';
-        btn.style.lineHeight = '1';
-      });
-    }, 0);
-  }
+  // REMOVED 2026-08-14: openMyBalanceModal() and its "Fund Wallet"/"Pay Debt"
+  // buttons — the last live path that could submit new wallet_fund/
+  // debt_repayment requests. This screen was already unreachable through
+  // normal navigation (no menu ever set state.ui.tool to 'my_balance'), and
+  // it belonged to the old design where a teller's wallet/debt were manually
+  // funded and repaid. The current design lets a teller run a negative
+  // balance until Treasury credits them (inter_staff_credit, already its own
+  // report category), and staff-level balances now live on Staff Salary
+  // Balance. Historical wallet_fund/debt_repayment records already approved
+  // in the past are NOT touched — applyRequest() and the debt/wallet balance
+  // calculations they feed are left exactly as they were, so old data keeps
+  // rendering correctly. Only the ability to create NEW ones is removed.
 
   function openMyCODModal(selectedDate=null) {
     const st = currentStaff();
