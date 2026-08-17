@@ -1919,6 +1919,15 @@ if (approvalRecord.type === 'float_topup') {
   function isInputFocused() {
     const active = document.activeElement;
     if (!active || active === document.body) return false;
+    // SURGICAL PATCH 2026-08-14: this guard only protected a hardcoded
+    // handful of transaction/journal field IDs, so a background sync every
+    // ~8s (or any realtime event) could wipe focus out of EVERY OTHER field
+    // in the app mid-keystroke — account opening, check balance, staff
+    // creation, maintenance edits, all of it. Broadened to cover any
+    // editable field generically, not just the old whitelist.
+    const tag = active.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (active.isContentEditable) return true;
     return FOCUS_GUARD_SELECTORS.some(sel => active.matches && active.matches(sel));
   }
 
@@ -2201,13 +2210,20 @@ function hideProcessing() {
   }
 
   function renderCheckBalance() {
+    // SURGICAL PATCH 2026-08-14: lookupFill() restores name/phone/balance/
+    // photo on every re-render, but never touched this input, and the
+    // template had no persisted value either — so any re-render (background
+    // poll, tool switch, even the Photo/Statement buttons) silently wiped the
+    // account number box back to empty while everything else stayed filled.
+    const loadedCustomer = state.ui.checkBalanceLoaded ? getSelectedCustomer() : null;
+    const lookupVal = loadedCustomer?.accountNumber || '';
     return `
       <div class="form-card cs2-card check-balance-card">
         <div class="cs2-title">Check Balance</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="4" inputmode="numeric"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="4" inputmode="numeric" value="${escapeHtml(lookupVal)}"></div>
             <button id="lookupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Search</button>
           </div>
           <div class="cs2-row">
@@ -2287,21 +2303,11 @@ function hideProcessing() {
               </select>
             </div>
           </div>` : ''}
-          ${isStaffSalary ? `
-          <div class="cs2-row">
-            <div class="cs2-label">Account Holder's Role <span style="font-weight:400;color:var(--muted);font-size:0.85em">(classification only — not linked to a staff record)</span></div>
-            <div class="cs2-input-wrap cs2-wide">
-              <select id="openStaffRole" class="entry-input cs2-input">
-                <option value="">— Select Role —</option>
-                ${Object.entries(ROLE_LABELS).map(([code, label]) => `<option value="${code}" ${openingDraft.staffRole === code ? 'selected' : ''}>${label}</option>`).join('')}
-              </select>
-            </div>
-          </div>` : ''}
           ${(isCustomer || isStaffSalary) ? `
           ${isCustomer ? `
           <div class="cs2-row">
-            <div class="cs2-label">Account Number <span style="font-weight:400;color:var(--muted);font-size:0.85em">(optional — can be assigned at approval)</span></div>
-            <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off" placeholder="Leave blank if unknown"></div>
+            <div class="cs2-label">Account Number <span style="font-weight:400;color:var(--muted);font-size:0.85em">(required — assigned by Customer Service)</span></div>
+            <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off" placeholder="Enter account number"></div>
           </div>` : ''}
           <div class="cs2-row">
             <div class="cs2-label">Address</div>
@@ -2375,29 +2381,83 @@ function hideProcessing() {
       </div>`;
   }
 
+  // SURGICAL REDESIGN 2026-08-14: three issues fixed together.
+  // (1) The generated statement lived ONLY in a throwaway DOM node
+  // (byId('statementArea').innerHTML = ...), never in state — so ANY
+  // re-render (a background sync fires every ~8s) wiped it instantly. It's
+  // now derived from state.ui on every render, same as everything else that
+  // behaves correctly in this app.
+  // (2) Removed the standalone account-number search — this screen now only
+  // ever shows the customer already selected via Check Balance
+  // (state.ui.selectedCustomerId), with just date filters.
+  // (3) "Print Statement" is no longer a standalone always-visible button —
+  // it only appears once a statement has actually been generated, inside
+  // the generated statement block itself.
   function renderAccountStatement() {
+    const customer = getSelectedCustomer();
+    const filter = state.ui.accountStatementFilter ||= { from: '', to: '' };
+    const generated = state.ui.accountStatementGenerated && customer;
+
+    let statementHtml = '';
+    if (generated) {
+      const rows = (customer.transactions || []).filter(tx => {
+        const d = tx.date.slice(0,10);
+        if (filter.from && d < filter.from) return false;
+        if (filter.to && d > filter.to) return false;
+        return true;
+      }).map((tx, i) => `<tr>
+        <td>${i+1}</td>
+        <td>${fmtDate(tx.date)}</td>
+        <td>${tx.details || ''}</td>
+        <td>${tx.type==='debit'?money(tx.amount):''}</td>
+        <td>${tx.type==='credit'?money(tx.amount):''}</td>
+        <td>${money(tx.balanceAfter)}</td>
+        <td>${tx.receivedOrPaidBy || '—'}</td>
+        <td>${tx.postedBy || tx.postedById || '—'}</td>
+        <td>${tx.approvedBy || '—'}</td>
+      </tr>`).join('');
+      statementHtml = `
+        <div class="record-card statement-record-minimal" id="statementPrintArea">
+          <div class="lookup-card statement-lookup-minimal">
+            <div class="stack">
+              <div class="info-grid">
+                <div class="info-item"><div class="k">A/C Name</div><div class="v">${customer.name || customer.full_name || customer.display_name}</div></div>
+                <div class="info-item"><div class="k">Account Number</div><div class="v">${customer.accountNumber || '—'}</div></div>
+                <div class="info-item"><div class="k">Phone No</div><div class="v">${customer.phone || '—'}</div></div>
+                <div class="info-item"><div class="k">Available Balance</div><div class="v">${money(customer.balance)}</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="table-wrap" style="margin-top:16px">
+            <table class="table">
+              <thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead>
+              <tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="action-row compact-action-row" style="margin-top:10px">
+          <button class="secondary tiny-btn" id="stmtPrintBtn">Print Statement</button>
+        </div>`;
+    }
+
     return `
       <div class="stack">
         <div class="form-card">
-          <h3>Account Statement</h3>
-          <div class="form-grid three account-statement-filter-grid polished-statement-grid">
-            <div class="field stmt-field stmt-acc-field">
-              <label>Account Number</label>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input id="stmtAcc" class="entry-input stmt-acc-input" inputmode="numeric" maxlength="6" placeholder="A/N">
-                <button id="stmtSearch" class="sheet-btn secondary tiny-btn">Search</button>
-              </div>
-              <div id="stmtAccName" style="margin-top:4px;font-size:0.83em;color:var(--text-muted);min-height:16px"></div>
-            </div>
-            <div class="field stmt-field stmt-date-field"><label>From Date</label><input id="stmtFrom" class="entry-input stmt-date-input polished-date-input" type="date"></div>
-            <div class="field stmt-field stmt-date-field"><label>To Date</label><input id="stmtTo" class="entry-input stmt-date-input polished-date-input" type="date"></div>
+          <h3>Statement of Account</h3>
+          ${customer ? `
+          <div class="info-grid" style="margin-bottom:10px">
+            <div class="info-item"><div class="k">A/C Name</div><div class="v">${customer.name || customer.full_name || customer.display_name}</div></div>
+            <div class="info-item"><div class="k">Account Number</div><div class="v">${customer.accountNumber || '—'}</div></div>
+          </div>` : `<div class="note">No customer selected. Go to Check Balance, search an account, then open Statement from there.</div>`}
+          <div class="form-grid two account-statement-filter-grid polished-statement-grid">
+            <div class="field stmt-field stmt-date-field"><label>From Date</label><input id="stmtFrom" class="entry-input stmt-date-input polished-date-input" type="date" value="${escapeHtml(filter.from || '')}"></div>
+            <div class="field stmt-field stmt-date-field"><label>To Date</label><input id="stmtTo" class="entry-input stmt-date-input polished-date-input" type="date" value="${escapeHtml(filter.to || '')}"></div>
           </div>
           <div class="action-row compact-action-row">
-            <button id="stmtGenerate" class="tiny-btn">Generate Statement</button>
-            <button class="secondary tiny-btn" id="stmtPrintBtn">Print Statement</button>
+            <button id="stmtGenerate" class="tiny-btn" ${customer ? '' : 'disabled'}>Generate Statement</button>
           </div>
         </div>
-        <div id="statementArea"></div>
+        <div id="statementArea">${statementHtml}</div>
       </div>`;
   }
 
@@ -2736,13 +2796,16 @@ function hideProcessing() {
       const acctType = p.accountType || 'customer';
       const isCustomer = acctType === 'customer';
       const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Teller Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
-      const assignInput = (isCustomer && a.status === 'pending')
-        ? `<span class="approval-heading-item approval-assign-inline"><strong>Account Number:</strong> <input id="assignAcc-${a.id}" class="entry-input approval-assign-input-inline" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Assign before approving"></span>`
-        : isCustomer
-          ? line('Account Number', p.generatedAccountNumber || 'Not yet assigned')
-          : (a.status === 'pending'
-              ? `<span class="approval-heading-item approval-heading-item-wrap"><strong>Account Number:</strong> <em>Generated automatically by the system on approval — no manual entry needed for this account type.</em></span>`
-              : `<span class="approval-heading-item"><strong>Account Number:</strong> <strong style="color:var(--success, #16a34a)">${esc(p.generatedAccountNumber || 'assigned — check the account directory')}</strong></span>`);
+      // SURGICAL PATCH 2026-08-14: Customer Service now assigns the account
+      // number at Account Opening (required, not optional) — the approving
+      // officer only SEES it here, never assigns or edits it. Previously a
+      // pending customer request showed an editable input letting the
+      // approver type/overwrite the number themselves.
+      const assignInput = isCustomer
+        ? line('Account Number', p.generatedAccountNumber || 'Not assigned — return to Customer Service')
+        : (a.status === 'pending'
+            ? `<span class="approval-heading-item approval-heading-item-wrap"><strong>Account Number:</strong> <em>Generated automatically by the system on approval — no manual entry needed for this account type.</em></span>`
+            : `<span class="approval-heading-item"><strong>Account Number:</strong> <strong style="color:var(--success, #16a34a)">${esc(p.generatedAccountNumber || 'assigned — check the account directory')}</strong></span>`);
       return `<div class="approval-heading-inline">
         ${line('Type', acctTypeLabels[acctType] || acctType)}
         ${line('Name', p.fullName || p.name)}
@@ -2751,7 +2814,6 @@ function hideProcessing() {
         ${isCustomer ? line('NIN', p.nin) : ''}
         ${isCustomer ? line('BVN', p.bvn) : ''}
         ${acctType === 'staff_operational' ? line('Linked Staff', p.linkedStaffName || p.linkedStaffId) : ''}
-        ${acctType === 'staff_salary' ? line('Account Holder Role', ROLE_LABELS[p.staffRole] || p.staffRole) : ''}
         ${assignInput}
       </div>`;
     }
@@ -2837,10 +2899,11 @@ function hideProcessing() {
     const acctType = p.accountType || 'customer';
     const isCustomer = acctType === 'customer';
     const acctTypeLabels = { customer: 'Customer Account', staff_operational: 'Teller Account', staff_salary: 'Staff Salary Account', expense: 'Expense Account', income: 'Income Account' };
+    // SURGICAL PATCH 2026-08-14: same change as approvalAccountHeadingsInline
+    // above — approver sees the number Customer Service already assigned,
+    // never types or edits it here.
     const assignBlock = isCustomer
-      ? (req.status === 'pending'
-          ? `<div class="field field-account approval-assign-field"><label>Assign Account Number</label><input id="approvalAssignAccount" class="entry-input approval-assign-input" inputmode="numeric" value="${esc(p.generatedAccountNumber || '')}" autocomplete="off" placeholder="Enter account number before approval"></div>`
-          : field('Assigned Account Number', p.generatedAccountNumber || '—', 'field-account'))
+      ? field('Account Number', p.generatedAccountNumber || 'Not assigned — return to Customer Service', 'field-account')
       : field('Account Number', req.status === 'pending' ? 'System-assigned on approval' : (p.generatedAccountNumber || 'System-assigned'), 'field-account');
 
     html = `<div class="stack approval-opening-linear">
@@ -2851,7 +2914,6 @@ function hideProcessing() {
       ${isCustomer ? field('NIN', p.nin, 'field-id') : ''}
       ${isCustomer ? field('BVN', p.bvn, 'field-bvn') : ''}
       ${acctType === 'staff_operational' ? field('Linked Staff', p.linkedStaffName || p.linkedStaffId || '—', 'field-wide') : ''}
-      ${acctType === 'staff_salary' ? field('Account Holder Role', ROLE_LABELS[p.staffRole] || p.staffRole || '—', 'field-wide') : ''}
       ${assignBlock}
       ${isCustomer ? photoBlock : ''}
     </div>`;
@@ -2972,9 +3034,14 @@ function hideProcessing() {
       onClick: async () => {
         if (req.type === 'account_opening') {
           const acctType = req.payload?.accountType || 'customer';
-          if (acctType === 'customer') {
-            const assignInput = byId('approvalAssignAccount');
-            if (assignInput) req.payload.generatedAccountNumber = assignInput.value.trim();
+          // SURGICAL PATCH 2026-08-14: the approver used to be able to type
+          // in the account number themselves via #approvalAssignAccount if
+          // Customer Service left it blank. That input no longer exists —
+          // Customer Service must assign it at Account Opening. If it's
+          // somehow still missing here, block the approval instead of
+          // silently letting it through unassigned.
+          if (acctType === 'customer' && !String(req.payload?.generatedAccountNumber || '').trim()) {
+            return showToast('No account number assigned. Return this request to Customer Service.');
           }
           // staff_operational, staff_salary, expense, income — system-assigned via RPC
         }
@@ -3184,31 +3251,28 @@ function nextPaint() {
   // Recovery Key) already live on "Staff Directory" (renderStaffRoster,
   // above) — nothing unique here needed preserving except the wallet balance
   // table, which is exactly the source of the confusion. So this tool is now
-  // fully repurposed: it shows ONLY staff_salary account balances (role is a
-  // classification tag chosen at account opening, not a link to a specific
-  // staff record — see the Account Opening form), filterable by role.
+  // fully repurposed: it shows ONLY staff_salary account balances. Role
+  // classification was removed 2026-08-14 (client didn't need the filter) —
+  // search by account number instead.
   // "Teller Balances" remains its own separate, unambiguous report for
   // operational T#### accounts only.
   function renderStaffDirectory() {
-    state.ui.staffDirectoryRole = state.ui.staffDirectoryRole || 'all';
-    const roleFilter = state.ui.staffDirectoryRole;
+    state.ui.staffSalarySearch = state.ui.staffSalarySearch || '';
+    const search = String(state.ui.staffSalarySearch || '').trim();
     const loading = state.ui.staffSalaryBalanceLoading;
     const rows = state.ui.staffSalaryAccountsCache || [];
-    const filtered = rows.filter(r => roleFilter === 'all' || r.staffRoleCode === roleFilter);
+    const filtered = rows.filter(r => !search || String(r.accountNumber||'').includes(search) || String(r.name||'').toLowerCase().includes(search.toLowerCase()));
     const grandBalance = filtered.reduce((s, r) => s + Number(r.balance || 0), 0);
-    const bodyRows = filtered.map((r, i) => `<tr><td>${i+1}</td><td>${escapeHtml(r.name || '—')}</td><td><code style="font-size:0.85em">${escapeHtml(String(r.accountNumber || '—'))}</code></td><td>${r.staffRoleCode ? escapeHtml(ROLE_LABELS[r.staffRoleCode] || r.staffRoleCode) : '<em>Not set</em>'}</td><td>${money(r.balance)}</td><td>${fmtDate(r.createdAt)}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${r.active?'#d1fae5':'#fee2e2'};color:${r.active?'#065f46':'#991b1b'}">${r.active ? 'Active' : 'Inactive'}</span></td></tr>`).join('');
+    const bodyRows = filtered.map((r, i) => `<tr><td>${i+1}</td><td>${escapeHtml(r.name || '—')}</td><td><code style="font-size:0.85em">${escapeHtml(String(r.accountNumber || '—'))}</code></td><td>${money(r.balance)}</td><td>${fmtDate(r.createdAt)}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${r.active?'#d1fae5':'#fee2e2'};color:${r.active?'#065f46':'#991b1b'}">${r.active ? 'Active' : 'Inactive'}</span></td></tr>`).join('');
     return `
       <div class="table-card">
         <div class="action-inline"><h3 style="margin:0">Staff Salary Balance</h3></div>
-        <div class="note" style="margin:6px 0">Shows Staff Salary account balances only. Role here is a classification tag chosen when the account was opened — accounts aren't linked to a specific staff record. Teller operational balances are on the separate "Teller Balances" report.</div>
+        <div class="note" style="margin:6px 0">Shows Staff Salary account balances. Teller operational balances are on the separate "Teller Balances" report.</div>
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
-          <select id="staffDirectoryRoleFilter" class="entry-input" style="height:24px;max-width:190px;font-size:0.78em;padding:2px 8px">
-            <option value="all" ${roleFilter==='all'?'selected':''}>All Roles</option>
-            ${Object.keys(ROLE_LABELS).map(role => `<option value="${role}" ${roleFilter===role?'selected':''}>${ROLE_LABELS[role]}</option>`).join('')}
-          </select>
+          <input id="staffSalarySearch" class="entry-input" value="${escapeHtml(state.ui.staffSalarySearch || '')}" placeholder="Search by account number or name" style="height:24px;max-width:220px;font-size:0.78em;padding:2px 8px">
           ${loading ? '<span class="muted" style="font-size:0.8em">Loading…</span>' : ''}
         </div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Role</th><th>Balance</th><th>Opened</th><th>Status</th></tr></thead><tbody>${bodyRows || `<tr><td colspan="7">${loading ? 'Loading…' : 'No staff salary accounts found'}</td></tr>`}${filtered.length ? `<tr class="total-row"><td colspan="4"><strong>Total</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Balance</th><th>Opened</th><th>Status</th></tr></thead><tbody>${bodyRows || `<tr><td colspan="6">${loading ? 'Loading…' : 'No staff salary accounts found'}</td></tr>`}${filtered.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
       </div>`;
   }
 
@@ -3895,6 +3959,9 @@ function normalizeStaffLedgerEntryType(row) {
       if (!val) { state.ui.checkBalanceLoaded = false; save(); return lookupFill(byId('workspace'), null); }
       const c = getCustomerByAccountNo(val);
       if (!c) { if (!quiet) showToast('Customer not found. Use name search.'); return; }
+      // Clear any previously generated statement if switching to a different
+      // customer, so Statement of Account never shows stale data.
+      if (state.ui.selectedCustomerId !== c.id) state.ui.accountStatementGenerated = false;
       state.ui.selectedCustomerId = c.id;
       state.ui.checkBalanceLoaded = true;
       save();
@@ -3908,7 +3975,7 @@ function normalizeStaffLedgerEntryType(row) {
     }, 200);
     byId('lookupAcc').onchange = () => doLookup(true);
     byId('lookupAcc').onkeyup = (e) => { if (e.key === "Enter") doLookup(false); };
-    byId('openStatementBtn').onclick = () => { state.ui.tool = 'account_statement'; renderWorkspace(); setTimeout(()=>{ byId('stmtAcc').value = getSelectedCustomer()?.accountNumber || ''; }, 30); };
+    byId('openStatementBtn').onclick = () => { state.ui.tool = 'account_statement'; renderWorkspace(); };
     const photoBtn = byId('searchPhotoBtn'); if (photoBtn) photoBtn.onclick = ()=> {
       const row = byId('checkBalancePhotoRow');
       const selected = getSelectedCustomer();
@@ -3931,7 +3998,6 @@ function normalizeStaffLedgerEntryType(row) {
       openingDraft.name = '';
       openingDraft.linkedStaffId = '';
       openingDraft.accountNumber = '';
-      openingDraft.staffRole = '';
       save();
       renderWorkspace();
     };
@@ -3967,9 +4033,6 @@ function normalizeStaffLedgerEntryType(row) {
         renderWorkspace();
       }
     };
-
-    const staffRoleSelect = byId('openStaffRole');
-    if (staffRoleSelect) staffRoleSelect.onchange = () => { openingDraft.staffRole = staffRoleSelect.value; };
 
     const focusedField = byId(state.ui.accountOpeningFocusedField || '');
     if (focusedField) {
@@ -4022,6 +4085,11 @@ function normalizeStaffLedgerEntryType(row) {
         const bvn = (byId('openBvn')?.value || '').trim();
         const accountNumber = (byId('openAccountNumber')?.value || '').trim();
         if (!address || !phone || !nin || !bvn) return showToast('Complete all required fields');
+        // SURGICAL PATCH 2026-08-14: account number is now required at
+        // opening (assigned by Customer Service), not optional/left for the
+        // approving officer to fill in later.
+        if (!accountNumber) return showToast('Account number is required');
+        if (getCustomerByAccountNo(accountNumber)) return showToast('This account number is already in use');
         payload = {
           accountType: 'customer', name, address, phone, nin, bvn,
           accountNumber,
@@ -4041,17 +4109,16 @@ function normalizeStaffLedgerEntryType(row) {
       } else if (acctType === 'staff_salary') {
         // No staff link — opens like a regular account with system-assigned number,
         // but collects the same identity details a customer account does.
+        // Role classification removed 2026-08-14 — client only needs
+        // account-number search on the Staff Salary Balance report.
         const address = (byId('openAddress')?.value || '').trim();
         const phone = (byId('openPhone')?.value || '').trim();
         const nin = (byId('openNin')?.value || '').trim();
         const bvn = (byId('openBvn')?.value || '').trim();
         if (!address || !phone || !nin || !bvn) return showToast('Complete all required fields');
-        const staffRole = (byId('openStaffRole')?.value || '').trim();
-        if (!staffRole) return showToast('Select the account holder\'s role');
         payload = {
           accountType: 'staff_salary', name,
           address, phone, nin, bvn,
-          staffRole,
           oldAccountNumber: (byId('openOldAccount')?.value || '').trim(),
           photo: byId('openPhoto')?.dataset?.base64 || '',
           systemAssigned: true, generatedAccountNumber: ''
@@ -4499,92 +4566,23 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function bindStatement() {
-    const stmtAcc = byId('stmtAcc');
-    const stmtAccName = byId('stmtAccName');
+    const filter = state.ui.accountStatementFilter ||= { from: '', to: '' };
+    const stmtFrom = byId('stmtFrom');
+    const stmtTo = byId('stmtTo');
+    if (stmtFrom) stmtFrom.onchange = () => { filter.from = stmtFrom.value || ''; save(); };
+    if (stmtTo) stmtTo.onchange = () => { filter.to = stmtTo.value || ''; save(); };
 
-    const lookupByAcct = (quiet = false) => {
-      const val = (stmtAcc?.value || '').trim();
-      if (!val) return;
-      if (!(state.customers || []).length) { if (!quiet) showToast('Customer data still loading — try again in a moment'); return; }
-      const c = getCustomerByAccountNo(val);
-      if (!c) {
-        if (stmtAccName) stmtAccName.textContent = '';
-        if (!quiet) showToast('Account not found');
-        return;
-      }
-      state.ui.selectedCustomerId = c.id;
-      if (stmtAccName) stmtAccName.textContent = c.name || c.full_name || c.display_name || '';
+    const generateBtn = byId('stmtGenerate');
+    if (generateBtn) generateBtn.onclick = () => {
+      if (!getSelectedCustomer()) return showToast('No customer selected — go to Check Balance first');
+      state.ui.accountStatementGenerated = true;
       save();
+      renderWorkspace();
     };
 
-    if (stmtAcc) {
-      stmtAcc.oninput = () => {
-        const v = (stmtAcc.value || '').trim();
-        if (stmtAccName) stmtAccName.textContent = '';
-        if (/^\d{4,6}$/.test(v)) lookupByAcct(true);
-      };
-      stmtAcc.onkeyup = (e) => { if (e.key === 'Enter') lookupByAcct(false); };
-    }
-
-    // Search button — same as Credit/Debit search
-    if (byId('stmtSearch')) byId('stmtSearch').onclick = () => {
-      lookupByAcct(false);
-      // Also open customer search modal if no account number typed
-      if (!(stmtAcc?.value || '').trim()) {
-        openCustomerSearchModal(c => {
-          if (stmtAcc) stmtAcc.value = c.accountNumber || c.account_number || '';
-          if (stmtAccName) stmtAccName.textContent = c.name || c.full_name || c.display_name || '';
-          state.ui.selectedCustomerId = c.id;
-          save();
-        });
-      }
-    };
-
-    byId('stmtGenerate').onclick = () => {
-      if (!(state.customers || []).length) return showToast('Customer data still loading — try again in a moment');
-      const c = getCustomerByAccountNo((byId('stmtAcc')?.value || '').trim());
-      if (!c) return showToast('Account not found — search first');
-      const from = byId('stmtFrom').value;
-      const to = byId('stmtTo').value;
-      const rows = (c.transactions || []).filter(tx => {
-        const d = tx.date.slice(0,10);
-        if (from && d < from) return false;
-        if (to && d > to) return false;
-        return true;
-      }).map((tx, i) => `<tr>
-        <td>${i+1}</td>
-        <td>${fmtDate(tx.date)}</td>
-        <td>${tx.details || ''}</td>
-        <td>${tx.type==='debit'?money(tx.amount):''}</td>
-        <td>${tx.type==='credit'?money(tx.amount):''}</td>
-        <td>${money(tx.balanceAfter)}</td>
-        <td>${tx.receivedOrPaidBy || '—'}</td>
-        <td>${tx.postedBy || tx.postedById || '—'}</td>
-        <td>${tx.approvedBy || '—'}</td>
-      </tr>`).join('');
-      byId('statementArea').innerHTML = `
-        <div class="record-card statement-record-minimal">
-          <div class="lookup-card statement-lookup-minimal">
-            <div class="stack">
-              <div class="info-grid">
-                <div class="info-item"><div class="k">A/C Name</div><div class="v">${c.name || c.full_name || c.display_name}</div></div>
-                <div class="info-item"><div class="k">Phone No</div><div class="v">${c.phone || '—'}</div></div>
-                <div class="info-item"><div class="k">Address</div><div class="v">${c.address || '—'}</div></div>
-                <div class="info-item"><div class="k">Available Balance</div><div class="v">${money(c.balance)}</div></div>
-              </div>
-            </div>
-          </div>
-          <div class="table-wrap" style="margin-top:16px">
-            <table class="table">
-              <thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead>
-              <tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}</tbody>
-            </table>
-          </div>
-        </div>`;
-    };
-
-    byId('stmtPrintBtn').onclick = () => {
-      const area = byId('statementArea')?.innerHTML;
+    const printBtn = byId('stmtPrintBtn');
+    if (printBtn) printBtn.onclick = () => {
+      const area = byId('statementPrintArea')?.innerHTML;
       if (!area?.trim()) return showToast('Generate statement first');
       printHtml(`<h2>Customer Statement</h2>${area}</div>`);
     };
@@ -5477,10 +5475,14 @@ function normalizeStaffLedgerEntryType(row) {
       const req = state.approvals.find(r => r.id === reqId);
       if (isRoutedAway(req)) return showToast(`This request was sent to ${req?.payload?.assignedApproverName || 'another approving officer'} — only they or an Admin can approve it`);
       if (req && req.type === 'account_opening' && (req.payload?.accountType || 'customer') === 'customer') {
-        const assignInput = byId(`assignAcc-${reqId}`);
-        const accountNumber = assignInput ? assignInput.value.trim() : '';
-        if (!accountNumber) return showToast('Enter an account number before approving');
-        req.payload.generatedAccountNumber = accountNumber;
+        // SURGICAL PATCH 2026-08-14: account number is now assigned by
+        // Customer Service at Account Opening, not typed in by the approver
+        // here — check the stored payload value directly instead of reading
+        // a DOM input that no longer exists (which would otherwise block
+        // every customer approval, correctly-assigned or not).
+        if (!String(req.payload?.generatedAccountNumber || '').trim()) {
+          return showToast('No account number assigned. Return this request to Customer Service.');
+        }
       }
       confirmAction('Approve this request?', async () => {
         showProcessing('Approving request...');
@@ -6552,7 +6554,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       return;
     }
     if (state.ui.tool === 'account_statement') {
-      if (byId('stmtAcc')) byId('stmtAcc').value = c.accountNumber;
+      // stmtAcc no longer exists (2026-08-14 redesign) — statement now always
+      // reflects state.ui.selectedCustomerId, set via Check Balance.
+      state.ui.selectedCustomerId = c.id;
+      state.ui.accountStatementGenerated = false;
+      save();
+      renderWorkspace();
       return;
     }
     if (state.ui.tool === 'account_maintenance') {
@@ -6843,12 +6850,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     // reads. Guarded to only run when this tool (not staff_roster, which
     // shares this bind function) is the active screen.
     if (state.ui.tool === 'staff_directory') {
-      const staffDirectoryRoleFilter = byId('staffDirectoryRoleFilter');
-      if (staffDirectoryRoleFilter) staffDirectoryRoleFilter.onchange = () => {
-        state.ui.staffDirectoryRole = staffDirectoryRoleFilter.value || 'all';
+      const staffSalarySearch = byId('staffSalarySearch');
+      if (staffSalarySearch) staffSalarySearch.oninput = debounce(() => {
+        state.ui.staffSalarySearch = staffSalarySearch.value || '';
         save();
         renderWorkspace();
-      };
+      }, 200);
       if (!state.ui.staffSalaryAccountsCache && !state.ui.staffSalaryBalanceLoading && gateway.customers?.listStaffSalaryAccounts) {
         state.ui.staffSalaryBalanceLoading = true;
         renderWorkspace();
