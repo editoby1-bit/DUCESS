@@ -6,7 +6,9 @@
     useSupabaseBackend: runtimeConfig.useSupabaseBackend === true,
     supabase: runtimeConfig.supabase || {}
   }) || null;
-  const DATE_FMT = new Intl.DateTimeFormat('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+  // Enforced DD/MM/YYYY throughout (2026-08-14): numeric, unambiguous, not
+  // dependent on month-name locale rendering.
+  const DATE_FMT = new Intl.DateTimeFormat('en-GB', { day:'2-digit', month:'2-digit', year:'numeric' });
   const TIME_FMT = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:true });
   const THEMES = ['classic','ducess-sheet','ocean','dark-slate','neutral-stone'];
   const THEME_LABELS = { classic:'Classic', 'ducess-sheet':'Ducess Sheet', ocean:'Ocean', 'dark-slate':'Dark Slate', 'neutral-stone':'Neutral Stone' };
