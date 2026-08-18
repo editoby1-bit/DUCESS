@@ -7316,6 +7316,17 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         state.activeStaffId = sessionStaff.id;
         save();
       }
+      // SURGICAL PATCH 2026-08-18: state.ui.selectedCustomerId is shared
+      // across Check Balance / Maintenance / Reactivation / Statement and
+      // was never cleared on login — so a customer looked up in a PREVIOUS
+      // session (possibly days earlier, by a different staff member on a
+      // shared device) would silently resurface on Statement of Account
+      // looking like a hardcoded "default customer". Reset per-session state
+      // on every fresh login so nothing carries over.
+      state.ui.selectedCustomerId = null;
+      state.ui.checkBalanceLoaded = false;
+      state.ui.accountStatementGenerated = false;
+      save();
       hideLoginScreen();
       await syncStaffFromGateway();
       await syncApprovalsFromGateway();
