@@ -2223,7 +2223,7 @@ function hideProcessing() {
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="4" inputmode="numeric" value="${escapeHtml(lookupVal)}"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(lookupVal)}" placeholder="e.g. 1024, T0012, EXP-3001"></div>
             <button id="lookupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Search</button>
           </div>
           <div class="cs2-row">
@@ -2351,26 +2351,40 @@ function hideProcessing() {
   }
   function maintenanceCommon(prefix, btnLabel) {
     const isReactivation = prefix === 'reactivation';
+    // SURGICAL REDESIGN 2026-08-14: this form only ever wrote field values
+    // directly into the DOM (fillCustomer()), never into state — so once the
+    // focus-guard fix defers a render until blur (tabbing to the next field),
+    // the very next re-render rebuilds this template from scratch with
+    // nothing to rehydrate from, wiping every field mid-edit. Persisted
+    // draft added, mirroring the pattern Account Opening already uses.
+    const draft = state.ui[`${prefix}Draft`] ||= {};
+    const editable = !!draft.editable;
+    const readonlyAttr = editable ? '' : 'readonly';
+    const readonlyClass = editable ? '' : 'cs-readonly';
+    const selected = getSelectedCustomer();
+    const displayName = selected?.name || '—';
+    const displayPhone = selected?.phone || '—';
+    const displayStatus = selected ? customerStatusLabel(selected) : '—';
     return `
       <div class="form-card cs2-card ${isReactivation ? 'reactivation-card' : 'maintenance-card'}">
         <div class="cs2-title">${isReactivation ? 'Account Reactivation' : 'Account Maintenance'}</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-short"><input id="${prefix}Acc" class="entry-input cs2-input" maxlength="4" inputmode="numeric"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="${prefix}Acc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(draft.accountNumber || '')}"></div>
             <button id="${prefix}Search" class="sheet-btn cs2-btn cs2-btn-solid">Search</button>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Account Name</div>
-            <div class="cs2-input-wrap ${isReactivation ? 'cs2-wide' : 'cs2-name-narrow'}"><input id="${prefix}Name" class="entry-input cs2-input cs-detail-input"></div>
+            <div class="cs2-input-wrap ${isReactivation ? 'cs2-wide' : 'cs2-name-narrow'}"><input id="${prefix}Name" class="entry-input cs2-input cs-detail-input ${readonlyClass}" ${readonlyAttr} value="${escapeHtml(draft.name || '')}"></div>
           </div>
-          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">Address</div><div class="cs2-input-wrap cs2-name-narrow"><input id="${prefix}Address" class="entry-input cs2-input cs-detail-input"></div></div>`}
-          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">Phone Number</div><div class="cs2-input-wrap cs2-medium"><input id="${prefix}Phone" class="entry-input cs2-input cs-detail-input digit-11-input" inputmode="numeric"></div></div>`}
-          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">NIN</div><div class="cs2-input-wrap cs2-medium"><input id="${prefix}Nin" class="entry-input cs2-input cs-detail-input digit-11-input" inputmode="numeric"></div></div>`}
-          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">BVN</div><div class="cs2-input-wrap cs2-medium"><input id="${prefix}Bvn" class="entry-input cs2-input cs-detail-input digit-11-input" inputmode="numeric"></div></div>`}
-          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">Old A/N</div><div class="cs2-input-wrap cs2-short"><input id="${prefix}OldAccount" class="entry-input cs2-input cs-detail-input" maxlength="4" inputmode="numeric"></div></div>`}
+          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">Address</div><div class="cs2-input-wrap cs2-name-narrow"><input id="${prefix}Address" class="entry-input cs2-input cs-detail-input ${readonlyClass}" ${readonlyAttr} value="${escapeHtml(draft.address || '')}"></div></div>`}
+          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">Phone Number</div><div class="cs2-input-wrap cs2-medium"><input id="${prefix}Phone" class="entry-input cs2-input cs-detail-input digit-11-input ${readonlyClass}" inputmode="numeric" ${readonlyAttr} value="${escapeHtml(draft.phone || '')}"></div></div>`}
+          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">NIN</div><div class="cs2-input-wrap cs2-medium"><input id="${prefix}Nin" class="entry-input cs2-input cs-detail-input digit-11-input ${readonlyClass}" inputmode="numeric" ${readonlyAttr} value="${escapeHtml(draft.nin || '')}"></div></div>`}
+          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">BVN</div><div class="cs2-input-wrap cs2-medium"><input id="${prefix}Bvn" class="entry-input cs2-input cs-detail-input digit-11-input ${readonlyClass}" inputmode="numeric" ${readonlyAttr} value="${escapeHtml(draft.bvn || '')}"></div></div>`}
+          ${isReactivation ? '' : `<div class="cs2-row"><div class="cs2-label">Old A/N</div><div class="cs2-input-wrap cs2-short"><input id="${prefix}OldAccount" class="entry-input cs2-input cs-detail-input ${readonlyClass}" maxlength="4" inputmode="numeric" ${readonlyAttr} value="${escapeHtml(draft.oldAccountNumber || '')}"></div></div>`}
           <div class="cs2-footer">
-            <div class="cs2-status">Account Name: <strong id="${prefix}DisplayName">—</strong> &nbsp;&nbsp; Phone Number: <strong id="${prefix}DisplayPhone">—</strong> &nbsp;&nbsp; Current Status: <strong id="${prefix}DisplayStatus">—</strong></div>
+            <div class="cs2-status">Account Name: <strong id="${prefix}DisplayName">${escapeHtml(displayName)}</strong> &nbsp;&nbsp; Phone Number: <strong id="${prefix}DisplayPhone">${escapeHtml(displayPhone)}</strong> &nbsp;&nbsp; Current Status: <strong id="${prefix}DisplayStatus">${escapeHtml(displayStatus)}</strong></div>
             <div class="cs2-hint">${isReactivation ? 'Search account, confirm details, and submit reactivation.' : 'Search first, update details, then save for approval.'}</div>
           </div>
           <div class="cs2-button-row">
@@ -2483,7 +2497,7 @@ function hideProcessing() {
             <div class="posting-row posting-row-acc-kpi">
               <div class="posting-acc-search-inline">
                 <label class="sheet-label posting-label-account" for="txAcc">Acct No.</label>
-                <input id="txAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
+                <input id="txAcc" class="entry-input sheet-input short-code" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                 <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
               </div>
             </div>
@@ -2556,7 +2570,7 @@ function hideProcessing() {
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 190px;column-gap:6px;align-items:end;justify-content:start;">
                 <label class="sheet-label posting-label-account" for="journalAcc" style="margin:0;white-space:nowrap;align-self:center;">Account Number</label>
-                <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="4" inputmode="numeric" style="width:76px;min-width:76px;margin:0;" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}">
+                <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="12" style="width:100px;min-width:100px;margin:0;" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}">
                 <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
                 <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
                 <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="number" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount</div></div>
@@ -4445,27 +4459,18 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function bindMaintenance(prefix) {
+    const draft = state.ui[`${prefix}Draft`] ||= {};
     const detailIds = [`${prefix}Name`, `${prefix}Address`, `${prefix}Phone`, `${prefix}Nin`, `${prefix}Bvn`, `${prefix}OldAccount`];
+    const draftKeyOf = { [`${prefix}Name`]: 'name', [`${prefix}Address`]: 'address', [`${prefix}Phone`]: 'phone', [`${prefix}Nin`]: 'nin', [`${prefix}Bvn`]: 'bvn', [`${prefix}OldAccount`]: 'oldAccountNumber' };
     const clearFilledCustomer = () => {
-      if (byId(`${prefix}Name`)) byId(`${prefix}Name`).value = '';
-      if (byId(`${prefix}Address`)) byId(`${prefix}Address`).value = '';
-      if (byId(`${prefix}Phone`)) byId(`${prefix}Phone`).value = '';
-      if (byId(`${prefix}Nin`)) byId(`${prefix}Nin`).value = '';
-      if (byId(`${prefix}Bvn`)) byId(`${prefix}Bvn`).value = '';
-      if (byId(`${prefix}OldAccount`)) byId(`${prefix}OldAccount`).value = '';
-      byId(`${prefix}DisplayName`).textContent = '—';
-      byId(`${prefix}DisplayPhone`).textContent = '—';
-      byId(`${prefix}DisplayStatus`).textContent = '—';
-      if (state.ui.selectedCustomerId) {
-        const selected = getSelectedCustomer();
-        if (selected?.accountNumber === (byId(`${prefix}Acc`)?.value || '').trim() || !(byId(`${prefix}Acc`)?.value || '').trim()) {
-          state.ui.selectedCustomerId = null;
-        }
-      }
+      Object.keys(draft).forEach(k => delete draft[k]);
+      state.ui.selectedCustomerId = null;
       save();
-      setDetailsEditable(false);
+      renderWorkspace();
     };
     const setDetailsEditable = (editable) => {
+      draft.editable = editable;
+      save();
       detailIds.forEach(id => {
         const el = byId(id);
         if (!el) return;
@@ -4477,20 +4482,26 @@ function normalizeStaffLedgerEntryType(row) {
       if (!c) return;
       if (prefix==='reactivation' && !(isCustomerFrozen(c) || c.active === false)) return showToast('Account is not frozen');
       state.ui.selectedCustomerId = c.id;
+      draft.accountNumber = c.accountNumber || '';
+      draft.name = c.name || '';
+      draft.address = c.address || '';
+      draft.phone = c.phone || '';
+      draft.nin = c.nin || '';
+      draft.bvn = c.bvn || '';
+      draft.oldAccountNumber = c.oldAccountNumber || '';
+      draft.editable = false;
       save();
-      byId(`${prefix}Acc`).value = c.accountNumber || '';
-      byId(`${prefix}Name`).value = c.name || '';
-      if (byId(`${prefix}Address`)) byId(`${prefix}Address`).value = c.address || '';
-      if (byId(`${prefix}Phone`)) byId(`${prefix}Phone`).value = c.phone || '';
-      if (byId(`${prefix}Nin`)) byId(`${prefix}Nin`).value = c.nin || '';
-      if (byId(`${prefix}Bvn`)) byId(`${prefix}Bvn`).value = c.bvn || '';
-      if (byId(`${prefix}OldAccount`)) byId(`${prefix}OldAccount`).value = c.oldAccountNumber || '';
-      byId(`${prefix}DisplayName`).textContent = c.name || '—';
-      byId(`${prefix}DisplayPhone`).textContent = c.phone || '—';
-      byId(`${prefix}DisplayStatus`).textContent = customerStatusLabel(c);
-      setDetailsEditable(false);
+      renderWorkspace();
     };
-    setDetailsEditable(false);
+    // Every detail field writes straight into the persisted draft on each
+    // keystroke (save() only — no renderWorkspace() here, same as Account
+    // Opening) so a deferred render after blur rehydrates from state instead
+    // of wiping the form.
+    detailIds.forEach(id => {
+      const el = byId(id);
+      if (!el) return;
+      el.oninput = () => { draft[draftKeyOf[id]] = el.value; save(); };
+    });
     const doLookup = (quiet=false) => {
       const accVal = (byId(`${prefix}Acc`)?.value || '').trim();
       if (!accVal) {
@@ -4508,10 +4519,11 @@ function normalizeStaffLedgerEntryType(row) {
     if (accInput) {
       accInput.oninput = () => {
         const v = (accInput.value || '').trim();
-        if (!v) return doLookup(true);
-        if (/^\d{4}$/.test(v)) doLookup(true);
+        draft.accountNumber = v;
+        save();
+        if (!v) return;
+        if (getCustomerByAccountNo(v)) doLookup(true);
       };
-      accInput.onchange = () => doLookup(true);
       accInput.onkeyup = (e) => { if (e.key === 'Enter') doLookup(false); };
     }
     const searchBtn = byId(`${prefix}Search`);
@@ -4534,12 +4546,12 @@ function normalizeStaffLedgerEntryType(row) {
       customerId: c.id,
       accountNumber: c.accountNumber,
       patch: {
-        name: byId(`${prefix}Name`).value.trim(),
-        address: byId(`${prefix}Address`).value.trim(),
-        phone: byId(`${prefix}Phone`)?.value.trim() || c.phone,
-        nin: byId(`${prefix}Nin`)?.value.trim() || c.nin,
-        bvn: byId(`${prefix}Bvn`)?.value.trim() || c.bvn,
-        oldAccountNumber: byId(`${prefix}OldAccount`)?.value.trim() || (c.oldAccountNumber || '')
+        name: (draft.name || '').trim(),
+        address: (draft.address || '').trim(),
+        phone: (draft.phone || '').trim() || c.phone,
+        nin: (draft.nin || '').trim() || c.nin,
+        bvn: (draft.bvn || '').trim() || c.bvn,
+        oldAccountNumber: (draft.oldAccountNumber || '').trim() || (c.oldAccountNumber || '')
       }
     });
 
@@ -4555,6 +4567,8 @@ function normalizeStaffLedgerEntryType(row) {
     showToast('Reactivation request sent for approval');
   }
 
+  Object.keys(draft).forEach(k => delete draft[k]);
+  save();
   render();
 };
 
@@ -6562,25 +6576,21 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       renderWorkspace();
       return;
     }
-    if (state.ui.tool === 'account_maintenance') {
-      if (byId('maintenanceAcc')) byId('maintenanceAcc').value = c.accountNumber;
-      if (byId('maintenanceName')) byId('maintenanceName').value = c.name || '';
-      if (byId('maintenanceAddress')) byId('maintenanceAddress').value = c.address || '';
-      if (byId('maintenancePhone')) byId('maintenancePhone').value = c.phone || '';
-      if (byId('maintenanceNin')) byId('maintenanceNin').value = c.nin || '';
-      if (byId('maintenanceBvn')) byId('maintenanceBvn').value = c.bvn || '';
-      if (byId('maintenanceOldAccount')) byId('maintenanceOldAccount').value = c.oldAccountNumber || '';
-      if (byId('maintenanceDisplayName')) byId('maintenanceDisplayName').textContent = c.name || '—';
-      if (byId('maintenanceDisplayPhone')) byId('maintenanceDisplayPhone').textContent = c.phone || '—';
-      if (byId('maintenanceDisplayStatus')) byId('maintenanceDisplayStatus').textContent = customerStatusLabel(c);
-      return;
-    }
-    if (state.ui.tool === 'account_reactivation') {
-      if (byId('reactivationAcc')) byId('reactivationAcc').value = c.accountNumber;
-      if (byId('reactivationName')) byId('reactivationName').value = c.name || '';
-      if (byId('reactivationDisplayName')) byId('reactivationDisplayName').textContent = c.name || '—';
-      if (byId('reactivationDisplayPhone')) byId('reactivationDisplayPhone').textContent = c.phone || '—';
-      if (byId('reactivationDisplayStatus')) byId('reactivationDisplayStatus').textContent = customerStatusLabel(c);
+    if (state.ui.tool === 'account_maintenance' || state.ui.tool === 'account_reactivation') {
+      // Route through the same persisted draft fillCustomer() uses, so a
+      // background re-render doesn't wipe the picked customer's details.
+      const prefix = state.ui.tool === 'account_reactivation' ? 'reactivation' : 'maintenance';
+      const draft = state.ui[`${prefix}Draft`] ||= {};
+      draft.accountNumber = c.accountNumber || '';
+      draft.name = c.name || '';
+      draft.address = c.address || '';
+      draft.phone = c.phone || '';
+      draft.nin = c.nin || '';
+      draft.bvn = c.bvn || '';
+      draft.oldAccountNumber = c.oldAccountNumber || '';
+      draft.editable = false;
+      save();
+      renderWorkspace();
       return;
     }
   }
