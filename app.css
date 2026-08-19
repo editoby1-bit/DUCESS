@@ -12850,7 +12850,7 @@ label.tx-toggle-pill span { font-size: 10px !important; }
    invisible (opacity:0 -- hides everything, not just text) and stacked
    directly on top to catch all clicks/keyboard interaction; a plain,
    fully-visible text input underneath shows the formatted dd/mm/yyyy value. */
-.date-mirror-wrap { position: relative; display: inline-block; }
+.date-mirror-wrap { position: relative; display: inline-block; overflow: visible; }
 .date-mirror-display { pointer-events: none; padding-right: 26px !important; box-sizing: border-box; }
 .date-mirror-icon {
   position: absolute;
@@ -12861,6 +12861,7 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   font-size: 0.95em;
   line-height: 1;
   opacity: 0.75;
+  z-index: 2;
 }
 input.date-mirror-native {
   position: absolute;

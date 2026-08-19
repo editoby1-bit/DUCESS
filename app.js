@@ -2481,7 +2481,19 @@ function hideProcessing() {
   function renderJournalTool(kind) {
     const title = kind === 'credit' ? 'Credit' : 'Debit';
     const st = currentStaff();
-    const opBreakdown = getStaffOperationalBreakdown(st?.id);
+    // REDESIGN 2026-08-19: replaced the Cash/Posting Cash/Variance tiles with
+    // a more direct till reconciliation view. Opening Cash is literally the
+    // teller's operational account balance (same figure Teller Balances
+    // shows); Cash Received/Withdrawal are today's approved CASH-mode
+    // transactions only (reusing the exact helpers Close of Day already uses
+    // for this, so the numbers stay consistent across screens); Till is what
+    // should physically be in the drawer right now.
+    const tillBreakdown = (() => {
+      const openingCash = getStaffOperationalBalance(st?.id);
+      const cashReceived = approvedCreditTotalForDateByMode(st?.id, businessDate(), 'cash');
+      const cashWithdrawal = approvedDebitTotalForDateByMode(st?.id, businessDate(), 'cash');
+      return { openingCash, cashReceived, cashWithdrawal, till: openingCash + cashReceived - cashWithdrawal };
+    })();
     state.ui.generatedJournals ||= {};
     state.ui.collapsedJournals ||= {};
     const journalKey = `${st?.id || 'staff'}:${businessDate()}:${kind}`;
@@ -2508,29 +2520,46 @@ function hideProcessing() {
             <div class="posting-row posting-row-name">
               <label class="sheet-label posting-label-name" for="txName">Acct Name</label>
               <div class="display-field value-wide" id="txName">—</div>
-              <label class="sheet-label posting-label-name" for="txBalance">Balance</label>
-              <div class="display-field" id="txBalance">—</div>
             </div>
 
             <div class="posting-row posting-row-amount">
-              <label class="sheet-label posting-label-name" for="txAmount">Amount</label>
+              <label class="sheet-label posting-label-name" for="txAmount">Amount ${kind === 'credit' ? 'Received' : 'Paid'}</label>
               <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}" />
               <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
+            </div>
+
+            <div class="posting-row posting-row-details">
+              <label class="sheet-label posting-label-name" for="txDetails">Details</label>
+              <input id="txDetails" class="entry-input sheet-input value-wide" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}" placeholder="What is this transaction for?">
+            </div>
+
+            <div class="posting-row posting-row-counterparty">
+              <label class="sheet-label posting-label-name" for="txCounterparty">${kind === 'credit' ? 'Received By' : 'Paid By'}</label>
+              <input id="txCounterparty" class="entry-input sheet-input value-wide" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}">
+            </div>
+
+            <div class="posting-row posting-row-balance">
+              <label class="sheet-label posting-label-name" for="txBalance">Available Balance</label>
+              <div class="display-field" id="txBalance">—</div>
+            </div>
+
+            <div class="posting-row posting-row-mode">
+              <label class="sheet-label posting-label-name">${kind === 'credit' ? 'Mode' : 'Payout Source'}</label>
+              <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
             </div>
             ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
             <div class="posting-row posting-row-opbox">
               <div class="op-breakdown-box" id="txOpBreakdown">
-                <div class="op-breakdown-cell"><span class="op-breakdown-label">Cash</span><span class="op-breakdown-value" id="postingCashFunded">${money(opBreakdown.cash)}</span></div>
-                <div class="op-breakdown-cell"><span class="op-breakdown-label">Posting Cash</span><span class="op-breakdown-value" id="postingCashDrawn">${money(opBreakdown.postingCash)}</span></div>
-                <div class="op-breakdown-cell"><span class="op-breakdown-label">Variance</span><span class="op-breakdown-value ${opBreakdown.variance < 0 ? 'balance-negative' : ''}" id="postingCashVariance">${money(opBreakdown.variance)}</span></div>
+                <div class="op-breakdown-cell"><span class="op-breakdown-label">Opening Cash</span><span class="op-breakdown-value" id="postingOpeningCash">${money(tillBreakdown.openingCash)}</span></div>
+                <div class="op-breakdown-cell"><span class="op-breakdown-label">Cash Received</span><span class="op-breakdown-value" id="postingCashReceived">${money(tillBreakdown.cashReceived)}</span></div>
+                <div class="op-breakdown-cell"><span class="op-breakdown-label">Cash Withdrawal</span><span class="op-breakdown-value" id="postingCashWithdrawal">${money(tillBreakdown.cashWithdrawal)}</span></div>
+                <div class="op-breakdown-cell"><span class="op-breakdown-label">Till</span><span class="op-breakdown-value ${tillBreakdown.till < 0 ? 'balance-negative' : ''}" id="postingTill">${money(tillBreakdown.till)}</span></div>
               </div>
             </div>
           </div>
         </div>
         <div class="tellering-inline-meta form-card compact-left tellering-entry-card">
           <div class="form-grid tellering-meta-line compact-fields-inline">
-            <div class="field"><label>${kind === 'credit' ? 'Received By' : 'Paid To'}</label><input id="txCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}"></div>
-            <div class="field"><label>${kind === 'credit' ? 'Mode' : 'Payout Source'}</label><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div></div>
             <div class="field"><label>Business Date</label><div class="display-field">${businessDate()}</div></div>
           </div>
         </div>
@@ -3911,6 +3940,14 @@ function normalizeStaffLedgerEntryType(row) {
       if (input.dataset.ddmmyyyyMirrored) {
         const display = input.parentElement?.querySelector('.date-mirror-display');
         if (display) display.value = input.value ? fmtDate(input.value) : (input.getAttribute('placeholder') || 'dd/mm/yyyy');
+        // Self-heal: if the icon somehow didn't render on the first pass,
+        // add it now rather than leaving the field looking unclickable.
+        if (input.parentElement && !input.parentElement.querySelector('.date-mirror-icon')) {
+          const icon = document.createElement('span');
+          icon.className = 'date-mirror-icon';
+          icon.textContent = '📅';
+          input.parentElement.appendChild(icon);
+        }
         return;
       }
       input.dataset.ddmmyyyyMirrored = '1';
@@ -4865,13 +4902,17 @@ function normalizeStaffLedgerEntryType(row) {
       });
       const rows = withBalances.map(({ row, formBase, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(formBase)}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
-      const opBreakdownLive = getStaffOperationalBreakdown(staff.id);
-      if (byId('postingCashFunded')) byId('postingCashFunded').textContent = money(opBreakdownLive.cash);
-      if (byId('postingCashDrawn')) byId('postingCashDrawn').textContent = money(opBreakdownLive.postingCash + otherPendingDraftForms);
-      if (byId('postingCashVariance')) {
-        const el = byId('postingCashVariance');
-        el.textContent = money(dailyRunning);
-        el.classList.toggle('balance-negative', dailyRunning < 0);
+      const openingCashLive = getStaffOperationalBalance(staff.id);
+      const cashReceivedLive = approvedCreditTotalForDateByMode(staff.id, businessDate(), 'cash');
+      const cashWithdrawalLive = approvedDebitTotalForDateByMode(staff.id, businessDate(), 'cash');
+      const tillLive = openingCashLive + cashReceivedLive - cashWithdrawalLive;
+      if (byId('postingOpeningCash')) byId('postingOpeningCash').textContent = money(openingCashLive);
+      if (byId('postingCashReceived')) byId('postingCashReceived').textContent = money(cashReceivedLive);
+      if (byId('postingCashWithdrawal')) byId('postingCashWithdrawal').textContent = money(cashWithdrawalLive);
+      if (byId('postingTill')) {
+        const el = byId('postingTill');
+        el.textContent = money(tillLive);
+        el.classList.toggle('balance-negative', tillLive < 0);
       }
       if (byId('journalFormRunning')) byId('journalFormRunning').textContent = money(Math.max(0, jRunning));
       if (byId('journalFormVariance')) byId('journalFormVariance').textContent = money(Math.max(0, -jRunning));
