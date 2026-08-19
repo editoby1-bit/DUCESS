@@ -3892,26 +3892,29 @@ function normalizeStaffLedgerEntryType(row) {
     return ['form', 'my_close_day'].includes(tool);
   }
 
-  // SURGICAL PATCH 2026-08-18: the `lang="en-GB"` attribute on native
-  // <input type="date"> elements is unreliable across Chrome versions/OS
-  // locale combos — several environments still show the OS-default
-  // mm/dd/yyyy regardless. This forces dd/mm/yyyy unconditionally by hiding
-  // the native input's own text (CSS: color transparent, calendar icon
-  // stays visible/clickable) and overlaying a read-only span we fully
-  // control on top of it, mirroring the input's real value. Zero changes
-  // needed to any existing date-field binding logic anywhere in the app —
-  // every place that reads/writes byId('someDateField').value keeps working
-  // exactly as before; this only touches what's visually displayed.
+  // SURGICAL FIX 2026-08-19: the previous version made the native input's
+  // TEXT transparent and overlaid a mirror on top — but (1) it read the
+  // overlay's color from the input's OWN computed style AFTER already
+  // making that transparent, so the overlay copied the invisibility too
+  // (zero-visibility bug), and (2) color:transparent only hides text, not
+  // Chrome's internal focus-highlight box around the actively-edited date
+  // segment, which kept showing through as a stray blue rectangle (overlap
+  // bug). Replaced with the standard robust pattern instead: the native
+  // input is made FULLY invisible (opacity:0, not just text-transparent, so
+  // nothing internal can leak through) and stacked on top to catch every
+  // click/keyboard interaction; a plain, fully-visible text input sits
+  // underneath showing the formatted value. The native input keeps its
+  // original id, so every existing byId('someDateField').value read/write
+  // anywhere in the app continues to work completely unchanged.
   function overlayDateInputsWithDDMMYYYY(root = document) {
     root.querySelectorAll('input[type="date"]').forEach(input => {
       if (input.dataset.ddmmyyyyMirrored) {
-        // Already wrapped on a previous pass — just refresh the overlay text.
-        const existing = input.parentElement?.querySelector('.date-mirror-overlay');
-        if (existing) existing.textContent = input.value ? fmtDate(input.value) : (input.getAttribute('placeholder') || 'dd/mm/yyyy');
+        const display = input.parentElement?.querySelector('.date-mirror-display');
+        if (display) display.value = input.value ? fmtDate(input.value) : (input.getAttribute('placeholder') || 'dd/mm/yyyy');
         return;
       }
       input.dataset.ddmmyyyyMirrored = '1';
-      input.classList.add('date-mirror-source');
+
       let wrap = input.parentElement;
       if (!wrap || !wrap.classList.contains('date-mirror-wrap')) {
         wrap = document.createElement('span');
@@ -3919,21 +3922,21 @@ function normalizeStaffLedgerEntryType(row) {
         input.parentNode.insertBefore(wrap, input);
         wrap.appendChild(input);
       }
-      const overlay = document.createElement('span');
-      overlay.className = 'date-mirror-overlay';
-      // Copy the real input's computed styling rather than guessing padding
-      // in CSS — this app has ~10 date fields across different screens, each
-      // with its own combination of size/padding classes, so a hardcoded
-      // overlay position would misalign on some of them.
-      const cs = getComputedStyle(input);
-      overlay.style.paddingLeft = cs.paddingLeft;
-      overlay.style.fontSize = cs.fontSize;
-      overlay.style.fontFamily = cs.fontFamily;
-      overlay.style.color = cs.color;
-      overlay.textContent = input.value ? fmtDate(input.value) : 'dd/mm/yyyy';
-      wrap.appendChild(overlay);
-      input.addEventListener('input', () => { overlay.textContent = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
-      input.addEventListener('change', () => { overlay.textContent = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
+
+      // Copy the native input's own classes onto the display input so it
+      // renders identically across the ~10 different screens/size variants
+      // this is used on, rather than guessing one shared style.
+      const display = document.createElement('input');
+      display.type = 'text';
+      display.readOnly = true;
+      display.tabIndex = -1;
+      display.className = input.className + ' date-mirror-display';
+      display.value = input.value ? fmtDate(input.value) : 'dd/mm/yyyy';
+      wrap.insertBefore(display, input);
+
+      input.classList.add('date-mirror-native');
+      input.addEventListener('input', () => { display.value = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
+      input.addEventListener('change', () => { display.value = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
     });
   }
 

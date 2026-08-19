@@ -12844,29 +12844,21 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   white-space: nowrap;
 }
 
-/* SURGICAL PATCH 2026-08-18: date-mirror overlay — forces dd/mm/yyyy
-   display on native <input type="date"> regardless of browser/OS locale.
-   The native input's own text is made invisible (color transparent); its
-   calendar-picker icon stays visible and clickable since only text color is
-   affected. A sibling overlay span (JS-positioned via overlayDateInputsWithDDMMYYYY)
-   sits on top showing the real formatted value, with pointer-events:none so
-   every click still passes through to the native input underneath. */
+/* SURGICAL FIX 2026-08-19: replaces the earlier transparent-text overlay
+   (which leaked Chrome's internal focus-highlight box and had a color bug
+   making both layers invisible). Native date input is now made fully
+   invisible (opacity:0 -- hides everything, not just text) and stacked
+   directly on top to catch all clicks/keyboard interaction; a plain,
+   fully-visible text input underneath shows the formatted dd/mm/yyyy value. */
 .date-mirror-wrap { position: relative; display: inline-block; }
-.date-mirror-wrap input.date-mirror-source { color: transparent; }
-.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit,
-.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-fields-wrapper,
-.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-text,
-.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-month-field,
-.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-day-field,
-.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-year-field {
-  color: transparent;
-}
-.date-mirror-overlay {
+.date-mirror-display { pointer-events: none; }
+input.date-mirror-native {
   position: absolute;
-  left: 0; top: 0; bottom: 0; right: 26px;
-  display: flex;
-  align-items: center;
-  pointer-events: none;
-  white-space: nowrap;
-  overflow: hidden;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  margin: 0;
+  border: none;
+  cursor: pointer;
 }
