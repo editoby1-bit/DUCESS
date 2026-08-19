@@ -13,6 +13,32 @@
   const THEMES = ['classic','ducess-sheet','ocean','dark-slate','neutral-stone'];
   const THEME_LABELS = { classic:'Classic', 'ducess-sheet':'Ducess Sheet', ocean:'Ocean', 'dark-slate':'Dark Slate', 'neutral-stone':'Neutral Stone' };
   const money = (n) => Number(n || 0).toLocaleString();
+  // SURGICAL ADDITION 2026-08-19: amount fields were native type="number",
+  // which can never display thousand-separator commas (a browser
+  // restriction, not something CSS/JS can override on a number input) — so
+  // a value like 500000 was indistinguishable from 50000 at a glance.
+  // Converted to formatted text inputs; parseAmountInput() is the ONLY
+  // correct way to read a numeric value back out of one (every call site
+  // that used to do Number(byId(id).value) on these fields must use this
+  // instead, or commas in the typed value would silently parse as NaN).
+  function parseAmountInput(id) {
+    return Number(String(byId(id)?.value || '').replace(/,/g, '').trim()) || 0;
+  }
+  function bindAmountCommaFormatting(id) {
+    const el = byId(id);
+    if (!el || el.dataset.commaFormatted) return;
+    el.dataset.commaFormatted = '1';
+    el.type = 'text';
+    el.inputMode = 'decimal';
+    el.addEventListener('input', () => {
+      const raw = el.value.replace(/[^\d.]/g, '');
+      const firstDot = raw.indexOf('.');
+      const intPart = (firstDot === -1 ? raw : raw.slice(0, firstDot)).replace(/^0+(?=\d)/, '');
+      const decPart = firstDot === -1 ? '' : '.' + raw.slice(firstDot + 1).replace(/\./g, '').slice(0, 2);
+      const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      el.value = formattedInt + decPart;
+    });
+  }
   const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
   const today = () => new Date().toISOString().slice(0,10);
   const byId = (id) => document.getElementById(id);
@@ -2591,21 +2617,22 @@ function hideProcessing() {
           <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
             <div class="journal-entry-top row-zero journal-form-row" style="display:grid;grid-template-columns:max-content 160px max-content max-content;column-gap:10px;align-items:end;margin-bottom:10px;">
               <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Form Amount</label>
-              <input id="journalFormAmount" class="entry-input sheet-input" type="number" style="margin:0;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}">
+              <input id="journalFormAmount" class="entry-input sheet-input" type="text" inputmode="decimal" style="margin:0;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}">
               <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${(telleringDraft.journalFormMode || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${(telleringDraft.journalFormMode || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
               <div class="posting-kpis-inline">
                 <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL BALANCE</span><span class="mini-kpi-pill-value" id="journalFormRunning">${money(0)}</span></div>
                 <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL VARIANCE</span><span class="mini-kpi-pill-value balance-negative" id="journalFormVariance">${money(0)}</span></div>
+                <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">TOTAL POSTED</span><span class="mini-kpi-pill-value" id="journalTotalPosted">${money(0)}</span></div>
               </div>
             </div>
-            <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Form</th><th>Amount</th><th>Remaining Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
+            <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>Remaining Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 190px;column-gap:6px;align-items:end;justify-content:start;">
                 <label class="sheet-label posting-label-account" for="journalAcc" style="margin:0;white-space:nowrap;align-self:center;">Account Number</label>
                 <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="12" style="width:100px;min-width:100px;margin:0;" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}">
                 <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
                 <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
-                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="number" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount</div></div>
+                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount</div></div>
               </div>
               <div class="journal-entry-top row-two">
                 <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid To'}</div></div>
@@ -4822,7 +4849,7 @@ function normalizeStaffLedgerEntryType(row) {
       return { amount, totalCharges, customerGets };
     };
     const updateSingleCommissionPreview = () => readChargePreview('single', byId('txAmount')?.value || 0);
-    const updateJournalCommissionPreview = () => readChargePreview('journal', byId('journalAmount')?.value || 0);
+    const updateJournalCommissionPreview = () => readChargePreview('journal', parseAmountInput('journalAmount'));
     const collectChargeBreakdownFromUi = (scope, amountValue) => {
       const amount = Math.max(0, Number(amountValue || 0));
       const toggleId = scope === 'single' ? 'txApplyCharges' : 'journalApplyCharges';
@@ -4892,7 +4919,7 @@ function normalizeStaffLedgerEntryType(row) {
       const dailyRunning = opBalance - otherPendingDraftForms;
 
       // This journal's own FORM — entered at journal creation, depleted only by this journal's own rows.
-      const journalForm = Number(telleringDraft.journalFormAmount || 0);
+      const journalForm = Number(String(telleringDraft.journalFormAmount || '').replace(/,/g, '')) || 0;
       let jRunning = journalForm;
       const withBalances = journal.map((row) => {
         jRunning -= Number(row.amount||0);
@@ -4900,8 +4927,10 @@ function normalizeStaffLedgerEntryType(row) {
         const variance = Math.max(0, -remaining);
         return { row, formBase: journalForm, remaining, variance };
       });
-      const rows = withBalances.map(({ row, formBase, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(formBase)}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
+      const rows = withBalances.map(({ row, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="7">No journal entries yet</td></tr>';
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
+      const totalPosted = journal.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      if (byId('journalTotalPosted')) byId('journalTotalPosted').textContent = money(totalPosted);
       const openingCashLive = getStaffOperationalBalance(staff.id);
       const cashReceivedLive = approvedCreditTotalForDateByMode(staff.id, businessDate(), 'cash');
       const cashWithdrawalLive = approvedDebitTotalForDateByMode(staff.id, businessDate(), 'cash');
@@ -5160,6 +5189,7 @@ function normalizeStaffLedgerEntryType(row) {
       updateJournalCommissionPreview();
     };
     if (byId('journalFormAmount')) {
+      bindAmountCommaFormatting('journalFormAmount');
       const journalFormAmountInput = byId('journalFormAmount');
       journalFormAmountInput.oninput = () => {
         telleringDraft.journalFormAmount = journalFormAmountInput.value || '';
@@ -5172,6 +5202,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (radio.checked) { telleringDraft.journalFormMode = radio.value; save(); recalcPreview(); }
     });
     if (byId('journalAmount')) {
+      bindAmountCommaFormatting('journalAmount');
       const journalAmountInput = byId('journalAmount');
       const protectJournalAccountDraft = () => {
         const accountInput = byId('journalAcc');
@@ -5274,7 +5305,7 @@ function normalizeStaffLedgerEntryType(row) {
       }
       if (!journalAccValue || !resolvedCustomer) return showToast('Enter a valid account number');
       if (isCustomerFrozen(resolvedCustomer) || resolvedCustomer.active === false) { freezeInactiveCustomer(resolvedCustomer); save(); return showToast('Frozen account cannot accept transactions'); }
-      const amount = Number(byId('journalAmount')?.value || 0);
+      const amount = parseAmountInput('journalAmount');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       const mode = selectedMode();
       const chargeBreakdown = kind === 'credit' ? collectChargeBreakdownFromUi('journal', amount) : [];
@@ -5442,7 +5473,7 @@ function normalizeStaffLedgerEntryType(row) {
       );
       if (alreadySubmitted) return showToast(`A ${kind} journal has already been submitted for today. Use direct ${kind} for any additions.`);
       if (!journal.length) return showToast('Generate journal first');
-      const journalFormAmount = Number(byId('journalFormAmount')?.value || telleringDraft.journalFormAmount || 0);
+      const journalFormAmount = parseAmountInput('journalFormAmount') || (Number(String(telleringDraft.journalFormAmount || '').replace(/,/g, '')) || 0);
       if (!(journalFormAmount > 0)) return showToast('Enter a journal form amount');
       // Journal must balance: sum of rows must exactly equal the journal form amount
       const rowTotal = journal.reduce((s, r) => s + Number(r.amount || 0), 0);
@@ -6225,7 +6256,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const drafts = state.ui?.telleringDrafts || {};
     const creditKey = `${staffId}:${date}:credit`;
     const debitKey = `${staffId}:${date}:debit`;
-    return Number(drafts[creditKey]?.journalFormAmount || 0) + Number(drafts[debitKey]?.journalFormAmount || 0);
+    const stripCommas = (v) => Number(String(v || '').replace(/,/g, '')) || 0;
+    return stripCommas(drafts[creditKey]?.journalFormAmount) + stripCommas(drafts[debitKey]?.journalFormAmount);
   }
 
   function staffCODRecords(staffId) {
