@@ -704,6 +704,7 @@
       box.appendChild(btn);
     });
     byId('modalBack').classList.remove('hidden');
+    overlayDateInputsWithDDMMYYYY(byId('modalBody') || document);
   }
   function closeModal() {
     byId('modalBack').classList.add('hidden');
@@ -3891,6 +3892,51 @@ function normalizeStaffLedgerEntryType(row) {
     return ['form', 'my_close_day'].includes(tool);
   }
 
+  // SURGICAL PATCH 2026-08-18: the `lang="en-GB"` attribute on native
+  // <input type="date"> elements is unreliable across Chrome versions/OS
+  // locale combos — several environments still show the OS-default
+  // mm/dd/yyyy regardless. This forces dd/mm/yyyy unconditionally by hiding
+  // the native input's own text (CSS: color transparent, calendar icon
+  // stays visible/clickable) and overlaying a read-only span we fully
+  // control on top of it, mirroring the input's real value. Zero changes
+  // needed to any existing date-field binding logic anywhere in the app —
+  // every place that reads/writes byId('someDateField').value keeps working
+  // exactly as before; this only touches what's visually displayed.
+  function overlayDateInputsWithDDMMYYYY(root = document) {
+    root.querySelectorAll('input[type="date"]').forEach(input => {
+      if (input.dataset.ddmmyyyyMirrored) {
+        // Already wrapped on a previous pass — just refresh the overlay text.
+        const existing = input.parentElement?.querySelector('.date-mirror-overlay');
+        if (existing) existing.textContent = input.value ? fmtDate(input.value) : (input.getAttribute('placeholder') || 'dd/mm/yyyy');
+        return;
+      }
+      input.dataset.ddmmyyyyMirrored = '1';
+      input.classList.add('date-mirror-source');
+      let wrap = input.parentElement;
+      if (!wrap || !wrap.classList.contains('date-mirror-wrap')) {
+        wrap = document.createElement('span');
+        wrap.className = 'date-mirror-wrap';
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+      }
+      const overlay = document.createElement('span');
+      overlay.className = 'date-mirror-overlay';
+      // Copy the real input's computed styling rather than guessing padding
+      // in CSS — this app has ~10 date fields across different screens, each
+      // with its own combination of size/padding classes, so a hardcoded
+      // overlay position would misalign on some of them.
+      const cs = getComputedStyle(input);
+      overlay.style.paddingLeft = cs.paddingLeft;
+      overlay.style.fontSize = cs.fontSize;
+      overlay.style.fontFamily = cs.fontFamily;
+      overlay.style.color = cs.color;
+      overlay.textContent = input.value ? fmtDate(input.value) : 'dd/mm/yyyy';
+      wrap.appendChild(overlay);
+      input.addEventListener('input', () => { overlay.textContent = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
+      input.addEventListener('change', () => { overlay.textContent = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
+    });
+  }
+
   function bindToolHandlers() {
     switch (state.ui.tool) {
       case 'check_balance': bindCheckBalance(); break;
@@ -3920,6 +3966,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'operational_balance': bindBalanceFilters('operational'); break;
       case 'teller_balances': bindTellerBalances(); break;
     }
+    overlayDateInputsWithDDMMYYYY(byId('workspace') || document);
   }
 
   function canAssignFloatTopUp(staff=currentStaff()) {

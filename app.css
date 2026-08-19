@@ -151,7 +151,7 @@ button:disabled { opacity: .55; cursor:not-allowed; }
   width: 110px; height: 110px; border-radius: 18px; background:#eef2f6; border:1px dashed #cdd5df;
   display:flex; align-items:center; justify-content:center; color: var(--muted); overflow:hidden;
 }
-.photo-box img { width:100%; height:100%; object-fit:cover; }
+.photo-box img { width:100%; height:100%; object-fit:contain; }
 .info-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; }
 .info-item { background: white; border:1px solid var(--line); border-radius: 14px; padding: 12px; }
 .info-item .k { font-size: 12px; color: var(--muted); margin-bottom: 5px; }
@@ -12842,4 +12842,31 @@ label.tx-toggle-pill span { font-size: 10px !important; }
 .journal-entry-top.row-two .journal-cell.action .sheet-btn{
   min-width: 0 !important;
   white-space: nowrap;
+}
+
+/* SURGICAL PATCH 2026-08-18: date-mirror overlay — forces dd/mm/yyyy
+   display on native <input type="date"> regardless of browser/OS locale.
+   The native input's own text is made invisible (color transparent); its
+   calendar-picker icon stays visible and clickable since only text color is
+   affected. A sibling overlay span (JS-positioned via overlayDateInputsWithDDMMYYYY)
+   sits on top showing the real formatted value, with pointer-events:none so
+   every click still passes through to the native input underneath. */
+.date-mirror-wrap { position: relative; display: inline-block; }
+.date-mirror-wrap input.date-mirror-source { color: transparent; }
+.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit,
+.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-fields-wrapper,
+.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-text,
+.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-month-field,
+.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-day-field,
+.date-mirror-wrap input.date-mirror-source::-webkit-datetime-edit-year-field {
+  color: transparent;
+}
+.date-mirror-overlay {
+  position: absolute;
+  left: 0; top: 0; bottom: 0; right: 26px;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
 }
