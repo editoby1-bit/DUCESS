@@ -12480,6 +12480,15 @@ label.tx-toggle-pill span { font-size: 10px !important; }
   min-height: 33px !important;
 }
 
+/* SURGICAL PATCH 2026-08-19: Details / Received-Paid By fields cut to half
+   width. Deliberately NOT reusing .value-wide's sibling "half" variant —
+   that class is shared across many differently-configured grid layouts
+   elsewhere in the app (Account Opening, Check Balance, etc.) and changing
+   it globally risks breaking those. This is scoped to just these two rows. */
+.posting-input-half {
+  max-width: 50% !important;
+}
+
 /* Cash / Posting Cash / Variance box — occupies the same footprint the
    old free-text Details box used to. */
 .posting-row-opbox {
@@ -12488,10 +12497,9 @@ label.tx-toggle-pill span { font-size: 10px !important; }
 }
 .op-breakdown-box {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   width: 100%;
   box-sizing: border-box;
-  height: 33px;
   min-height: 33px;
   border: 1px solid var(--line);
   border-radius: 6px;

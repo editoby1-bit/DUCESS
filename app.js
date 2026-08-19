@@ -2530,12 +2530,12 @@ function hideProcessing() {
 
             <div class="posting-row posting-row-details">
               <label class="sheet-label posting-label-name" for="txDetails">Details</label>
-              <input id="txDetails" class="entry-input sheet-input value-wide" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}" placeholder="What is this transaction for?">
+              <input id="txDetails" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}" placeholder="What is this transaction for?">
             </div>
 
             <div class="posting-row posting-row-counterparty">
               <label class="sheet-label posting-label-name" for="txCounterparty">${kind === 'credit' ? 'Received By' : 'Paid By'}</label>
-              <input id="txCounterparty" class="entry-input sheet-input value-wide" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}">
+              <input id="txCounterparty" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}">
             </div>
 
             <div class="posting-row posting-row-balance">
