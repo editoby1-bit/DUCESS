@@ -3934,6 +3934,16 @@ function normalizeStaffLedgerEntryType(row) {
       display.value = input.value ? fmtDate(input.value) : 'dd/mm/yyyy';
       wrap.insertBefore(display, input);
 
+      // Making the native input fully opacity:0 (needed to hide its internal
+      // focus-highlight box — see 2026-08-19 fix note above) also hides its
+      // calendar icon, removing any visible sign the field is clickable.
+      // Add our own decorative icon back — pointer-events:none so clicks
+      // still reach the native input underneath, not this icon.
+      const icon = document.createElement('span');
+      icon.className = 'date-mirror-icon';
+      icon.textContent = '📅';
+      wrap.appendChild(icon);
+
       input.classList.add('date-mirror-native');
       input.addEventListener('input', () => { display.value = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
       input.addEventListener('change', () => { display.value = input.value ? fmtDate(input.value) : 'dd/mm/yyyy'; });
