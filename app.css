@@ -4973,8 +4973,18 @@ body[data-theme="ducess-sheet"] .journal-sheet .forced-amount-label{
 }
 
 /* phase 2 final tweaks */
+/* SURGICAL FIX 2026-08-20: this was a stale 3-column layout (82px account-
+   number search box + 158px From + 158px To) left over from BEFORE the
+   2026-08-14 redesign that removed Account Statement's own account-number
+   search field entirely. With only 2 fields now (From/To Date), the grid
+   still forced them into 3 fixed columns — squeezing From Date into the
+   82px column meant for the old short search box, so its content
+   physically overflowed into To Date's column. Every icon-position tweak
+   in prior fixes was correctly styling a field that was fundamentally too
+   narrow to hold its own content. Updated to 2 equal, flexible columns
+   matching the actual current field count. */
 .polished-statement-grid{
-  grid-template-columns:82px 158px 158px !important;
+  grid-template-columns:1fr 1fr !important;
   column-gap:12px !important;
 }
 .polished-statement-grid .stmt-field label{
@@ -12918,5 +12928,34 @@ input.date-mirror-native {
    this applies universally and wins regardless of which older rule matches. */
 .account-statement-filter-grid .stmt-date-field,
 .account-statement-filter-grid .stmt-field {
+  min-width: 0 !important;
+}
+
+/* SURGICAL FIX 2026-08-20 (final/authoritative): there are FIVE separate
+   stale grid-template-columns declarations for .account-statement-filter-grid
+   across different media-query breakpoints (lines ~4935, 6011, 9640, 9698),
+   all left over from BEFORE Account Statement's own account-number search
+   field was removed in the 2026-08-14 redesign. All still define 3 columns
+   (a narrow ~80-120px slot for the old search box + two ~150-170px date
+   slots), so with only 2 fields now, "From Date" gets squeezed into the
+   narrow leftover slot and visibly overflows into "To Date". Editing the
+   .polished-statement-grid rule alone did not fix this because the same
+   container also carries .account-statement-filter-grid, and several of
+   ITS conflicting rules appear later in the cascade and won on ties.
+   This is placed at the true end of the file so it wins regardless of
+   which breakpoint-specific rule above also matches. */
+.account-statement-filter-grid,
+.polished-statement-grid {
+  grid-template-columns: 1fr 1fr !important;
+  column-gap: 12px !important;
+}
+.account-statement-filter-grid .stmt-acc-field {
+  display: none !important;
+}
+.account-statement-filter-grid .stmt-date-field,
+.account-statement-filter-grid .polished-date-input,
+.polished-statement-grid .stmt-date-input {
+  width: 100% !important;
+  max-width: 100% !important;
   min-width: 0 !important;
 }
