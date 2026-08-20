@@ -12858,7 +12858,7 @@ label.tx-toggle-pill span { font-size: 10px !important; }
    invisible (opacity:0 -- hides everything, not just text) and stacked
    directly on top to catch all clicks/keyboard interaction; a plain,
    fully-visible text input underneath shows the formatted dd/mm/yyyy value. */
-.date-mirror-wrap { position: relative; display: block; width: 100%; overflow: visible; }
+.date-mirror-wrap { position: relative; display: block; width: 100%; max-width: 100%; overflow: hidden; box-sizing: border-box; }
 .date-mirror-display { pointer-events: none; padding-right: 34px !important; box-sizing: border-box; width: 100%; }
 .date-mirror-icon {
   position: absolute;
@@ -12906,4 +12906,17 @@ input.date-mirror-native {
   text-decoration: none;
   color: var(--text);
   font-size: 0.85em;
+}
+
+/* SURGICAL FIX 2026-08-20: From/To Date fields kept visually bleeding into
+   each other despite several icon-position tweaks. Root cause: CSS Grid
+   items default to min-width:auto, so a grid cell won't shrink below its
+   content's natural width even when the track itself is narrower — letting
+   the From Date field's box render wider than its column and overlap into
+   To Date. There are several older, conflicting .stmt-date-field rules
+   across different breakpoints in this file; rather than untangle every one,
+   this applies universally and wins regardless of which older rule matches. */
+.account-statement-filter-grid .stmt-date-field,
+.account-statement-filter-grid .stmt-field {
+  min-width: 0 !important;
 }
