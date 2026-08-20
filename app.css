@@ -12887,3 +12887,23 @@ input.date-mirror-native {
   padding: 0 !important;
   cursor: pointer;
 }
+
+/* SURGICAL ADDITION 2026-08-19: field note preview after upload. */
+.field-note-preview { margin-top: 8px; }
+.field-note-preview img {
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  display: block;
+  object-fit: contain;
+}
+.field-note-pdf-link {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--text);
+  font-size: 0.85em;
+}

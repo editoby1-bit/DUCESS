@@ -101,6 +101,28 @@
       };
     }
   }
+  // SURGICAL ADDITION 2026-08-19: Check Balance's "Field Note (Form)" button
+  // shows the CURRENT staff's own field note — today's upload if there is
+  // one (checking both credit and debit journals for today), otherwise the
+  // most recently uploaded one overall. This is staff/session-level, not
+  // tied to whichever customer happens to be pulled up — field notes are
+  // attached to a journal submission (which can span several customers),
+  // not to any single customer's account.
+  function getLatestFieldNoteForStaff(staffId) {
+    const attachments = state.ui.staffJournalAttachments || {};
+    const today = businessDate();
+    let todayMatch = null;
+    let latestOverall = null;
+    Object.entries(attachments).forEach(([key, val]) => {
+      if (!val?.fieldNote) return;
+      const [sid, date] = key.split(':');
+      if (sid !== staffId) return;
+      if (date === today && !todayMatch) todayMatch = val.fieldNote;
+      if (!latestOverall || new Date(val.fieldNote.uploadedAt || 0) > new Date(latestOverall.uploadedAt || 0)) latestOverall = val.fieldNote;
+    });
+    return todayMatch || latestOverall || null;
+  }
+
   async function readFieldNoteFile(file) {
     if (!file) return null;
     if (String(file.type || '').startsWith('image/')) {
@@ -155,7 +177,7 @@
       title: 'Approval',
       desc: 'Approve or reject submitted requests and review approval history.',
       icon: '✅',
-      tools: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history']
+      tools: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history']
     },
     administration: {
       title: 'Administration',
@@ -188,6 +210,7 @@
     approval_queue: 'Approval Queue',
     approval_customer_service: 'Customer Service',
     approval_tellering: 'Teller',
+    approval_non_cash: 'Non Cash',
     approval_others: 'Others',
     approval_history: 'Approval History',
     permissions: 'Permissions Matrix',
@@ -207,8 +230,8 @@
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
-    approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_close_day','transaction_summary'],
+    approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts','staff_directory']
   };
 
@@ -2184,6 +2207,7 @@ function hideProcessing() {
         }
         if (nextTool === 'approval_customer_service') state.ui.approvalsSection = 'customer_service';
         if (nextTool === 'approval_tellering') state.ui.approvalsSection = 'tellering';
+        if (nextTool === 'approval_non_cash') state.ui.approvalsSection = 'non_cash';
         if (nextTool === 'approval_others') state.ui.approvalsSection = 'others';
       }
       if (state.ui.tool === 'check_balance') state.ui.checkBalanceLoaded = false;
@@ -2194,7 +2218,7 @@ function hideProcessing() {
       if (nextTool === 'my_close_day' && state.ui.tool === 'my_close_day') openMyCODModal();
       if (nextTool === 'central_close_day' && state.ui.tool === 'central_close_day') openCODModal();
       if (['my_close_day','central_close_day'].includes(nextTool)) return;
-      if (['approval_customer_service','approval_tellering','approval_others'].includes(nextTool) && state.ui.tool === nextTool) {
+      if (['approval_customer_service','approval_tellering','approval_non_cash','approval_others'].includes(nextTool) && state.ui.tool === nextTool) {
         smoothScrollToOpenedSegment('#approvalsSectionTabs');
         return;
       }
@@ -2221,6 +2245,7 @@ function hideProcessing() {
       case 'central_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">Central Close of Day</div><div class="tool-empty-note">Central close-of-day opens in a modal when this heading is selected.</div></div>`;
       case 'approval_customer_service':
       case 'approval_tellering':
+      case 'approval_non_cash':
       case 'approval_others':
       case 'approval_queue': return renderApprovals();
       case 'approval_history': return renderApprovalHistory();
@@ -2270,6 +2295,7 @@ function hideProcessing() {
           <div class="cs2-button-row">
             <button id="searchPhotoBtn" class="sheet-btn cs2-btn cs2-btn-ghost">Photo</button>
             <button id="openStatementBtn" class="sheet-btn cs2-btn cs2-btn-ghost">Statement</button>
+            <button id="openFieldNoteBtn" class="sheet-btn cs2-btn cs2-btn-ghost">Field Note (Form)</button>
           </div>
           <div class="sheet-photo-row hidden" id="checkBalancePhotoRow">
             <div class="photo-box inline-photo" data-fill="photo"><span>No Photo</span></div>
@@ -2643,6 +2669,7 @@ function hideProcessing() {
               ${kind === 'credit' ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
             </div>
             <div class="action-row journal-submit-row"><button id="journalSubmit">Submit Journal</button><button class="secondary" id="journalClear">Clear Journal</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note</label><input id="journalFieldNoteInput" type="file" accept="image/*,.pdf,application/pdf" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
+            <div id="journalFieldNotePreview" class="field-note-preview hidden"></div>
           </div>
         </div>
         </div>
@@ -2748,7 +2775,7 @@ function hideProcessing() {
     }
     state.ui.selectedApprovalIds ||= [];
     cleanupApprovalReviewLocks();
-    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
+    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'], non_cash: ['intra_bank_transfer'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
     reconcileBusinessDateFromClosures();
     const openDate = businessDate();
     const currentSection = state.ui.approvalsSection || 'tellering';
@@ -2822,7 +2849,7 @@ function hideProcessing() {
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
   }
 
   function renderApprovalHistory() {
@@ -4031,6 +4058,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'approval_queue':
       case 'approval_customer_service':
       case 'approval_tellering':
+      case 'approval_non_cash':
       case 'approval_others':
       case 'approval_history': bindApprovals(); break;
       case 'permissions': bindPermissions(); break;
@@ -4116,6 +4144,19 @@ function normalizeStaffLedgerEntryType(row) {
     byId('lookupAcc').onchange = () => doLookup(true);
     byId('lookupAcc').onkeyup = (e) => { if (e.key === "Enter") doLookup(false); };
     byId('openStatementBtn').onclick = () => { state.ui.tool = 'account_statement'; renderWorkspace(); };
+    const fieldNoteBtn = byId('openFieldNoteBtn'); if (fieldNoteBtn) fieldNoteBtn.onclick = () => {
+      const staff = currentStaff();
+      const note = staff ? getLatestFieldNoteForStaff(staff.id) : null;
+      if (!note) return showToast('No field note uploaded yet — upload one from Generate Journal');
+      const isImage = String(note.type || '').startsWith('image/');
+      const body = `<div class="stack">
+        <div class="note">${String(note.uploadedAt || '').slice(0,10) === businessDate() ? "Today's field note" : `Last uploaded field note (${fmtDate(note.uploadedAt)})`}</div>
+        ${isImage
+          ? `<img src="${note.dataUrl}" alt="Field note" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">`
+          : `<a href="${note.dataUrl}" target="_blank" rel="noopener" class="field-note-pdf-link">📄 ${escapeHtml(note.name || 'Field note.pdf')}</a>`}
+      </div>`;
+      openModal('Field Note (Form)', body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+    };
     const photoBtn = byId('searchPhotoBtn'); if (photoBtn) photoBtn.onclick = ()=> {
       const row = byId('checkBalancePhotoRow');
       const selected = getSelectedCustomer();
@@ -4329,18 +4370,18 @@ function normalizeStaffLedgerEntryType(row) {
           <div class="cs2-row">
             <div class="cs2-label">Debit Account</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off"></div>
-            <button id="itrLookupSource" class="sheet-btn secondary tiny-btn">Look Up</button>
+            <button id="itrLookupSource" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
           <div class="cs2-row">
             <div class="cs2-label">Credit Account</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrDestAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number to credit" autocomplete="off"></div>
-            <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Look Up</button>
+            <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
           <div class="cs2-row">
             <div class="cs2-label">Amount</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="number" value="${escapeHtml(String(draft.amount || ''))}"></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(draft.amount || ''))}"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Details / Narration</div>
@@ -4361,7 +4402,7 @@ function normalizeStaffLedgerEntryType(row) {
     const detailsInput = byId('itrDetails');
     if (sourceInput) sourceInput.oninput = () => { draft.sourceAcct = sourceInput.value; draft.sourceName = ''; draft.sourceId = ''; };
     if (destInput) destInput.oninput = () => { draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; };
-    if (amtInput) amtInput.oninput = () => { draft.amount = amtInput.value; };
+    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
     if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
 
     const lookupAcct = async (acctNum, nameElId, idKey, nameKey) => {
@@ -4379,7 +4420,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('itrLookupDest')) byId('itrLookupDest').onclick = () => lookupAcct((byId('itrDestAcct')?.value||'').trim(), 'itrDestName', 'destId', 'destName');
 
     if (byId('submitIntraTransfer')) byId('submitIntraTransfer').onclick = async () => {
-      const amount = Number(byId('itrAmount')?.value || 0);
+      const amount = parseAmountInput('itrAmount');
       if (!draft.sourceId) return showToast('Look up the source account first');
       if (!draft.destId) return showToast('Look up the destination account first');
       if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
@@ -4949,6 +4990,23 @@ function normalizeStaffLedgerEntryType(row) {
       if (fileNameEl) fileNameEl.textContent = attachmentState.loading ? 'Reading file…' : (attachmentState.fieldNote?.name ? `${attachmentState.fieldNote.name} (${formatFileSize(attachmentState.fieldNote.size)})` : 'No file selected');
       const inputEl = byId('journalFieldNoteInput');
       if (inputEl) inputEl.disabled = attachmentState.loading;
+      // SURGICAL ADDITION 2026-08-19: field note previously only showed its
+      // filename after upload — no way to confirm the right document was
+      // attached before submitting. Render an actual preview (thumbnail for
+      // images, a named link for PDFs since those can't inline-preview).
+      const previewEl = byId('journalFieldNotePreview');
+      if (previewEl) {
+        const fn = attachmentState.fieldNote;
+        if (!fn || attachmentState.loading) {
+          previewEl.classList.add('hidden');
+          previewEl.innerHTML = '';
+        } else {
+          previewEl.classList.remove('hidden');
+          previewEl.innerHTML = String(fn.type || '').startsWith('image/')
+            ? `<img src="${fn.dataUrl}" alt="Field note preview">`
+            : `<a href="${fn.dataUrl}" target="_blank" rel="noopener" class="field-note-pdf-link">📄 ${escapeHtml(fn.name || 'Field note.pdf')}</a>`;
+        }
+      }
       qq('[data-remove-row]').forEach(el => el.onclick = () => {
         const idx = journal.findIndex(r => r.id === el.dataset.removeRow);
         if (idx >= 0) {
