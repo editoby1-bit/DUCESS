@@ -12859,10 +12859,10 @@ label.tx-toggle-pill span { font-size: 10px !important; }
    directly on top to catch all clicks/keyboard interaction; a plain,
    fully-visible text input underneath shows the formatted dd/mm/yyyy value. */
 .date-mirror-wrap { position: relative; display: block; width: 100%; overflow: visible; }
-.date-mirror-display { pointer-events: none; padding-right: 26px !important; box-sizing: border-box; width: 100%; }
+.date-mirror-display { pointer-events: none; padding-right: 34px !important; box-sizing: border-box; width: 100%; }
 .date-mirror-icon {
   position: absolute;
-  right: 8px;
+  right: 16px;
   top: 50%;
   transform: translateY(-50%);
   pointer-events: none;
