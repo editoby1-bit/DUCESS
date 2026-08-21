@@ -2561,12 +2561,13 @@ function hideProcessing() {
       <div class="tellering-stack">
         <div class="tellering-sheet journal-sheet standalone-posting-sheet">
           <div class="posting-modal-rows polished-posting-modal">
-            <div class="posting-row posting-row-acc-kpi">
+            <div class="posting-row posting-row-acc-kpi" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <div class="posting-acc-search-inline">
                 <label class="sheet-label posting-label-account" for="txAcc">Acct No.</label>
                 <input id="txAcc" class="entry-input sheet-input short-code" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                 <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
               </div>
+              <div class="posting-business-date-corner"><span class="sheet-label">Business Date</span> <strong>${businessDate()}</strong></div>
             </div>
 
             <div class="posting-row posting-row-name">
@@ -2608,11 +2609,6 @@ function hideProcessing() {
                 <div class="op-breakdown-cell"><span class="op-breakdown-label">Till</span><span class="op-breakdown-value ${tillBreakdown.till < 0 ? 'balance-negative' : ''}" id="postingTill">${money(tillBreakdown.till)}</span></div>
               </div>
             </div>
-          </div>
-        </div>
-        <div class="tellering-inline-meta form-card compact-left tellering-entry-card">
-          <div class="form-grid tellering-meta-line compact-fields-inline">
-            <div class="field"><label>Business Date</label><div class="display-field">${businessDate()}</div></div>
           </div>
         </div>
       </div>`;

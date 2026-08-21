@@ -12959,3 +12959,15 @@ input.date-mirror-native {
   max-width: 100% !important;
   min-width: 0 !important;
 }
+
+/* SURGICAL ADDITION 2026-08-20: Business Date moved to top-right corner of
+   the Credit/Debit posting card, opposite Account Number on the left. */
+.posting-business-date-corner {
+  font-size: 0.82em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.posting-business-date-corner strong {
+  color: var(--text);
+  margin-left: 4px;
+}
