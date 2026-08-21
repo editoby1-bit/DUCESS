@@ -2567,7 +2567,7 @@ function hideProcessing() {
                 <input id="txAcc" class="entry-input sheet-input short-code" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                 <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
               </div>
-              <div class="posting-business-date-corner"><span class="sheet-label">Business Date</span> <strong>${businessDate()}</strong></div>
+              <div class="posting-business-date-corner"><span class="sheet-label">Business Date</span> <strong>${fmtDate(businessDate())}</strong></div>
             </div>
 
             <div class="posting-row posting-row-name">
