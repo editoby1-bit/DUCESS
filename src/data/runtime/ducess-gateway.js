@@ -1456,13 +1456,41 @@ if (inserted.error) {
 
     async function listApprovalRequests(filters = {}) {
       if (!canUseSupabase()) return local.approvals.listApprovalRequests(filters);
-      let query = client.from(approvalRequestsTable).select(approvalRequestsSelect).order('requested_at', { ascending: false });
+      // SURGICAL FIX 2026-08-22 (Supabase egress overage — org hit 141% of
+      // free-tier quota): this is the routine list/poll query, called by
+      // every client on every sync — it does NOT need the full base64
+      // photo/field-note bytes that account_opening and journal payloads
+      // can carry (each 40KB-several-hundred-KB), it only needs list-level
+      // fields (type, status, dates, amounts, etc.) for rendering the
+      // queue/badges. Reads from a lightweight view that replaces those two
+      // heavy keys with small placeholders (keeping "has a photo"/"has a
+      // note" truthiness and filename/type intact for list badges) instead
+      // of the raw table. getApprovalRequestById and fetchApprovalRequestRow
+      // (used by the actual approve/reject/posting path and by the detail
+      // modal) are UNCHANGED — they still read the raw table with the real
+      // full payload, so nothing here can cause a stripped photo to ever
+      // get posted to a customer record.
+      const listSource = config?.supabase?.approvalRequestsListView || 'approval_requests_list_view';
+      let query = client.from(listSource).select(approvalRequestsSelect).order('requested_at', { ascending: false });
       if (filters?.status) query = query.eq('status', filters.status);
       if (filters?.requestType) query = query.eq('request_type', filters.requestType);
       if (filters?.requestedByStaffId) query = query.eq('requested_by_staff_id', filters.requestedByStaffId);
       const limit = Number(filters?.limit || 100);
       if (Number.isFinite(limit) && limit > 0) query = query.limit(Math.min(limit, 500));
-      const { data, error: queryError } = await query;
+      let { data, error: queryError } = await query;
+      if (queryError && isMissingColumnOrRelationError(queryError)) {
+        // View not created yet (migration not run) — fall back to the raw
+        // table so the app keeps working; just without the egress savings
+        // until the SQL migration is applied.
+        let fallbackQuery = client.from(approvalRequestsTable).select(approvalRequestsSelect).order('requested_at', { ascending: false });
+        if (filters?.status) fallbackQuery = fallbackQuery.eq('status', filters.status);
+        if (filters?.requestType) fallbackQuery = fallbackQuery.eq('request_type', filters.requestType);
+        if (filters?.requestedByStaffId) fallbackQuery = fallbackQuery.eq('requested_by_staff_id', filters.requestedByStaffId);
+        if (Number.isFinite(limit) && limit > 0) fallbackQuery = fallbackQuery.limit(Math.min(limit, 500));
+        const fallbackResult = await fallbackQuery;
+        data = fallbackResult.data;
+        queryError = fallbackResult.error;
+      }
       if (queryError) return defaultResult.err('APPROVAL_LIST_FAILED', 'Could not load approval requests from Supabase.', queryError);
       return defaultResult.ok((data || []).map(normalizeApprovalRecord).filter(Boolean));
     }
