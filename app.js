@@ -50,8 +50,14 @@
   const isSupportedFieldNoteFile = (file) => !!file && (String(file.type || '').startsWith('image/') || String(file.type || '').toLowerCase() === 'application/pdf' || /\.(pdf|png|jpe?g|gif|webp|bmp)$/i.test(String(file.name || '')));
   const FIELD_NOTE_MAX_BYTES = 2 * 1024 * 1024;
   const CUSTOMER_PHOTO_MAX_BYTES = 1024 * 1024;
-  const COMPRESSED_IMAGE_MAX_SIDE = 700;
-  const COMPRESSED_IMAGE_QUALITY = 0.55;
+  // SURGICAL PATCH 2026-08-22 (Supabase egress overage — see the polling and
+  // list-view fixes elsewhere): reduced from 700px/0.55 quality significantly.
+  // The actual on-screen display size for these photos is a small thumbnail
+  // (~260x110px in Check Balance, similar in the approval review panel), so
+  // 480px max side is still comfortably larger than anything the UI ever
+  // renders it at, while cutting typical file size roughly 60-65%.
+  const COMPRESSED_IMAGE_MAX_SIDE = 480;
+  const COMPRESSED_IMAGE_QUALITY = 0.45;
   const estimateDataUrlBytes = (dataUrl) => {
     const value = String(dataUrl || '');
     const base64 = value.includes(',') ? value.split(',')[1] : value;
@@ -2985,9 +2991,31 @@ function hideProcessing() {
     return Number.isFinite(num) ? num : 0;
   }
 
-  function openRequestDetailModal(reqId) {
-  const req = state.approvals.find(r => r.id === reqId);
+  async function openRequestDetailModal(reqId) {
+  let req = state.approvals.find(r => r.id === reqId);
   if (!req) return;
+
+  // SURGICAL FIX 2026-08-22: the routine list/poll sync now reads from a
+  // stripped-down view (egress fix) that replaces photo/field-note bytes
+  // with lightweight placeholders — the in-memory copy from state.approvals
+  // may not carry the real image data. Fetch the single full record fresh
+  // before showing details/wiring the Approve action, so the photo preview
+  // AND the actual payload used to approve are always complete — this is
+  // also what keeps the approve flow from ever posting a stripped photo to
+  // a customer record. Scoped to only the request types that can actually
+  // carry these heavy fields, so other types don't pay an extra round trip.
+  if (gateway.approvals?.getApprovalRequestById && (req.type === 'account_opening' || req.type === 'customer_credit_journal' || req.type === 'customer_debit_journal')) {
+    try {
+      const full = await gateway.approvals.getApprovalRequestById(reqId);
+      if (full?.ok && full.data) {
+        req = { ...req, ...full.data };
+        const idx = state.approvals.findIndex(r => r.id === reqId);
+        if (idx !== -1) state.approvals[idx] = req;
+      }
+    } catch (err) {
+      console.warn('[DUCESS] Full request fetch failed, showing list-level data', err);
+    }
+  }
 
   const p = req.payload || {};
   const esc = (v) => String(v ?? '—')
