@@ -291,11 +291,11 @@
       dayClosures: [],
       activeStaffId: 'st4'
     };
-    s.operations.incomeAccounts.push({ id:'ia1', name:'Commission', accountNumber:'INC-2000', createdAt:new Date().toISOString() });
-    s.operations.incomeAccounts.push({ id:'ia2', name:'Registration Fee', accountNumber:'INC-2001', createdAt:new Date().toISOString() });
-    s.operations.incomeAccounts.push({ id:'ia3', name:'Security Fee', accountNumber:'INC-2002', createdAt:new Date().toISOString() });
-    s.operations.incomeAccounts.push({ id:'ia4', name:'Passbook Sold', accountNumber:'INC-2003', createdAt:new Date().toISOString() });
-    s.operations.expenseAccounts.push({ id:'ea1', name:'Transport Expense', accountNumber:'EXP-3000', createdAt:new Date().toISOString() });
+    s.operations.incomeAccounts.push({ id:'ia1', name:'Commission', accountNumber:'I1', createdAt:new Date().toISOString() });
+    s.operations.incomeAccounts.push({ id:'ia2', name:'Registration Fee', accountNumber:'I2', createdAt:new Date().toISOString() });
+    s.operations.incomeAccounts.push({ id:'ia3', name:'Security Fee', accountNumber:'I3', createdAt:new Date().toISOString() });
+    s.operations.incomeAccounts.push({ id:'ia4', name:'Passbook Sold', accountNumber:'I4', createdAt:new Date().toISOString() });
+    s.operations.expenseAccounts.push({ id:'ea1', name:'Transport Expense', accountNumber:'E1', createdAt:new Date().toISOString() });
     s.staff.forEach(st => ensureStaffAccount(st.id, s));
     s.audit.push({ id: uid('aud'), at: new Date().toISOString(), actorId: 'system', actor: 'System', action: 'seed', details: 'Initial demo data created' });
     return s;
@@ -615,10 +615,10 @@
     targetState.operations ||= { incomeAccounts: [], expenseAccounts: [], entries: [] };
     targetState.operations.incomeAccounts ||= [];
     const map = {
-      'Commission': 'INC-2000',
-      'Registration Fee': 'INC-2001',
-      'Security Fee': 'INC-2002',
-      'Passbook Sold': 'INC-2003'
+      'Commission': 'I1',
+      'Registration Fee': 'I2',
+      'Security Fee': 'I3',
+      'Passbook Sold': 'I4'
     };
     Object.entries(map).forEach(([name, accountNumber], idx) => {
       if (!targetState.operations.incomeAccounts.some(a => String(a.name || '').trim().toLowerCase() === name.toLowerCase())) {
@@ -1778,7 +1778,7 @@ if (approvalRecord.type === 'float_topup') {
             });
             state.businessExtras.unshift({
               date: `${req.payload.date}T12:00:00.000Z`,
-              accountNumber: incomeAccount?.accountNumber || 'INC-2000',
+              accountNumber: incomeAccount?.accountNumber || 'I1',
               accountName: incomeAccount?.name || row.accountName || row.label,
               details: cleanOperationalNote(`${row.label} from ${c.accountNumber}`),
               kind: 'credit',
@@ -2277,7 +2277,7 @@ function hideProcessing() {
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(lookupVal)}" placeholder="e.g. 1024, T0012, EXP-3001"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(lookupVal)}" placeholder="e.g. 1024, T1, E1"></div>
             <button id="lookupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Search</button>
           </div>
           <div class="cs2-row">
@@ -2319,10 +2319,10 @@ function hideProcessing() {
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${s.name} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '"T" + 4-digit number — system-generated automatically when approved. Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
-      staff_salary:      '4-digit number starting with 0 (system-assigned on approval).',
-      expense:           'EXP-3xxx format (system-assigned on approval)',
-      income:            'INC-3xxx format (system-assigned on approval)'
+      staff_operational: '"T" + number (T1, T2 ... T9) — system-generated automatically when approved. Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
+      staff_salary:      '2-digit number (system-assigned on approval).',
+      expense:           '"E" + number (E1, E2, ...) — system-assigned on approval',
+      income:            '"I" + number (I1, I2, ...) — system-assigned on approval'
     }[acctType] || '';
     return `
       <div class="form-card cs2-card opening-card">
@@ -5763,9 +5763,14 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function nextOperationalNumber(category) {
+    // SURGICAL PATCH 2026-08-21: simplified per client request — plain
+    // single-letter-prefix + sequential number (I1, I2... / E1, E2...)
+    // instead of the old INC-2000/EXP-3000 style. Still client-generated
+    // (not a DB sequence, unlike Teller/Staff Salary) since this was
+    // already just a local array-length counter.
     const list = category === 'income' ? state.operations.incomeAccounts : state.operations.expenseAccounts;
-    const base = category === 'income' ? 2000 : 3000;
-    return `${category === 'income' ? 'INC' : 'EXP'}-${base + list.length}`;
+    const prefix = category === 'income' ? 'I' : 'E';
+    return `${prefix}${list.length + 1}`;
   }
 
   function bindOperationalAccounts() {
