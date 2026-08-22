@@ -1210,10 +1210,25 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) refreshRealtimeState('visibility-return').catch(err => console.warn('[DUCESS realtime sync failed]', err));
     });
+    // SURGICAL FIX 2026-08-22 (Supabase egress overage — org hit 141% of
+    // free-tier quota, grace period ends Sep 20 2026): this was labeled a
+    // "fallback" but ran completely unconditionally — every 8 seconds, on
+    // every open tab, regardless of whether the realtime websocket
+    // subscription above was already connected and delivering updates live.
+    // state.__realtimeStatus IS already tracked (via onStatus above) but was
+    // never actually checked here. Each tick runs 6 full-table queries
+    // (refreshRealtimeState), so an 8-hour shift with one tab open was
+    // ~450 ticks/hour x 6 queries — the single largest contributor to the
+    // overage. Now: (1) only polls when realtime is NOT confirmed connected
+    // — a true fallback, not a duplicate channel; (2) interval stretched
+    // from 8s to 45s, since its only job is catching a dropped/missed
+    // realtime event, not driving routine updates.
     if (!realtimePollingTimer) {
       realtimePollingTimer = setInterval(() => {
-        if (!document.hidden) refreshRealtimeState('polling-fallback').catch(err => console.warn('[DUCESS realtime polling failed]', err));
-      }, 8000);
+        if (!document.hidden && state.__realtimeStatus !== 'SUBSCRIBED') {
+          refreshRealtimeState('polling-fallback').catch(err => console.warn('[DUCESS realtime polling failed]', err));
+        }
+      }, 45000);
     }
     realtimeBound = true;
   }
