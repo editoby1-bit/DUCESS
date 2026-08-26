@@ -1229,9 +1229,28 @@
     // — a true fallback, not a duplicate channel; (2) interval stretched
     // from 8s to 45s, since its only job is catching a dropped/missed
     // realtime event, not driving routine updates.
+    //
+    // ROBUSTNESS ADDITION (same date, deeper pass): onStatus only reflects
+    // the websocket CHANNEL connecting — it does NOT confirm Postgres
+    // replication is actually delivering row-change events for these
+    // tables (that depends on the tables being added to the
+    // supabase_realtime publication, a separate DB-level config). If that
+    // publication were ever missing/misconfigured, the channel could
+    // legitimately report 'SUBSCRIBED' while zero events ever arrive —
+    // and with the gate above alone, that would silently suppress polling
+    // forever, leaving the UI permanently stale with NO fallback, which is
+    // worse than the original bug. So the gate now also force-polls if
+    // it's been more than STALE_DATA_MS since the last successful refresh
+    // of ANY kind (poll, realtime event, or focus/visibility trigger — all
+    // already update state.__lastRealtimeRefresh), regardless of what the
+    // channel status claims. This makes the poll self-healing: cheap when
+    // realtime genuinely works, but never silently stuck if it doesn't.
+    const STALE_DATA_MS = 90000;
     if (!realtimePollingTimer) {
       realtimePollingTimer = setInterval(() => {
-        if (!document.hidden && state.__realtimeStatus !== 'SUBSCRIBED') {
+        const lastAt = state.__lastRealtimeRefresh?.at ? new Date(state.__lastRealtimeRefresh.at).getTime() : 0;
+        const isStale = (Date.now() - lastAt) > STALE_DATA_MS;
+        if (!document.hidden && (state.__realtimeStatus !== 'SUBSCRIBED' || isStale)) {
           refreshRealtimeState('polling-fallback').catch(err => console.warn('[DUCESS realtime polling failed]', err));
         }
       }, 45000);
@@ -1980,7 +1999,7 @@ if (approvalRecord.type === 'float_topup') {
     const photo = q('[data-fill="photo"]', root);
     if (photo) photo.innerHTML = customer?.photo ? `<img src="${customer.photo}" alt="photo">` : '<span>No Photo</span>';
     const nm = q('[data-fill="name"]', root);
-    if (nm && customer && customerStatusLabel(customer) === 'Frozen') nm.innerHTML = `${customer.name} <span class="badge rejected">Frozen</span>`;
+    if (nm && customer && customerStatusLabel(customer) === 'Frozen') nm.innerHTML = `${escapeHtml(customer.name || '')} <span class="badge rejected">Frozen</span>`;
   }
 
   let _renderScheduled = false;
@@ -2298,7 +2317,7 @@ function hideProcessing() {
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(lookupVal)}" placeholder="e.g. 1024, T1, E1"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(lookupVal)}" placeholder="e.g. 1024, T0012, S1"></div>
             <button id="lookupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Search</button>
           </div>
           <div class="cs2-row">
@@ -2337,13 +2356,13 @@ function hideProcessing() {
       .filter(s => s.is_active !== false)
       .filter(s => !isStaffOp || s.role === 'teller')
       .map(s =>
-      `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${s.name} (${ROLE_LABELS[s.role] || s.role})</option>`
+      `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '"T" + number (T1, T2 ... T9) — system-generated automatically when approved. Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
-      staff_salary:      '2-digit number (system-assigned on approval).',
-      expense:           '"E" + number (E1, E2, ...) — system-assigned on approval',
-      income:            '"I" + number (I1, I2, ...) — system-assigned on approval'
+      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
+      staff_salary:      '"S" + number (S1, S2, S3, ...) — assigned automatically when you submit.',
+      expense:           '"E" + number (E1, E2, ...) — assigned automatically when you submit',
+      income:            '"I" + number (I1, I2, ...) — assigned automatically when you submit'
     }[acctType] || '';
     return `
       <div class="form-card cs2-card opening-card">
@@ -2498,22 +2517,22 @@ function hideProcessing() {
       }).map((tx, i) => `<tr>
         <td>${i+1}</td>
         <td>${fmtDate(tx.date)}</td>
-        <td>${tx.details || ''}</td>
+        <td>${escapeHtml(tx.details || '')}</td>
         <td>${tx.type==='debit'?money(tx.amount):''}</td>
         <td>${tx.type==='credit'?money(tx.amount):''}</td>
         <td>${money(tx.balanceAfter)}</td>
-        <td>${tx.receivedOrPaidBy || '—'}</td>
-        <td>${tx.postedBy || tx.postedById || '—'}</td>
-        <td>${tx.approvedBy || '—'}</td>
+        <td>${escapeHtml(tx.receivedOrPaidBy || '—')}</td>
+        <td>${escapeHtml(tx.postedBy || tx.postedById || '—')}</td>
+        <td>${escapeHtml(tx.approvedBy || '—')}</td>
       </tr>`).join('');
       statementHtml = `
         <div class="record-card statement-record-minimal" id="statementPrintArea">
           <div class="lookup-card statement-lookup-minimal">
             <div class="stack">
               <div class="info-grid">
-                <div class="info-item"><div class="k">A/C Name</div><div class="v">${customer.name || customer.full_name || customer.display_name}</div></div>
+                <div class="info-item"><div class="k">A/C Name</div><div class="v">${escapeHtml(customer.name || customer.full_name || customer.display_name || '')}</div></div>
                 <div class="info-item"><div class="k">Account Number</div><div class="v">${customer.accountNumber || '—'}</div></div>
-                <div class="info-item"><div class="k">Phone No</div><div class="v">${customer.phone || '—'}</div></div>
+                <div class="info-item"><div class="k">Phone No</div><div class="v">${escapeHtml(customer.phone || '—')}</div></div>
                 <div class="info-item"><div class="k">Available Balance</div><div class="v">${money(customer.balance)}</div></div>
               </div>
             </div>
@@ -2536,7 +2555,7 @@ function hideProcessing() {
           <h3>Statement of Account</h3>
           ${customer ? `
           <div class="info-grid" style="margin-bottom:10px">
-            <div class="info-item"><div class="k">A/C Name</div><div class="v">${customer.name || customer.full_name || customer.display_name}</div></div>
+            <div class="info-item"><div class="k">A/C Name</div><div class="v">${escapeHtml(customer.name || customer.full_name || customer.display_name || '')}</div></div>
             <div class="info-item"><div class="k">Account Number</div><div class="v">${customer.accountNumber || '—'}</div></div>
           </div>` : `<div class="note">No customer selected. Go to Check Balance, search an account, then open Statement from there.</div>`}
           <div class="form-grid two account-statement-filter-grid polished-statement-grid">
@@ -2648,6 +2667,15 @@ function hideProcessing() {
     telleringDraft.journalCharges.checked ||= {};
     telleringDraft.journalCharges.values ||= {};
     if (!journalVisible) {
+      // SURGICAL PATCH 2026-08-24 (client request): Journal Form Amount is
+      // no longer something the teller types — it IS their operational
+      // balance, always. If that balance is zero or negative, there's
+      // nothing to post against, so journal creation stops here rather
+      // than letting them generate a journal they can never balance/submit.
+      const opBalanceForStart = getStaffOperationalBalance(st?.id);
+      if (!(opBalanceForStart > 0)) {
+        return `<div class="tellering-sheet journal-start-sheet form-card"><div class="note warning-note" style="text-align:center;padding:24px 0">Your operational balance is ${money(opBalanceForStart)}. You need a positive balance before you can post a ${kind === 'credit' ? 'Credit' : 'Debit'} Journal — ask Treasury to fund your operational account.</div></div>`;
+      }
       return `<div class="tellering-sheet journal-start-sheet form-card"><div class="action-row" style="justify-content:center;padding:24px 0"><button id="genJournalStartBtn" class="sheet-btn">Generate ${kind === 'credit' ? 'Credit' : 'Debit'} Journal</button></div></div>`;
     }
     return `<div class="w-full flex justify-center journal-center-wrap" id="journalPaneWrap">
@@ -2660,7 +2688,7 @@ function hideProcessing() {
           <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
             <div class="journal-entry-top row-zero journal-form-row" style="display:grid;grid-template-columns:max-content 160px max-content max-content;column-gap:10px;align-items:end;margin-bottom:10px;">
               <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Form Amount</label>
-              <input id="journalFormAmount" class="entry-input sheet-input" type="text" inputmode="decimal" style="margin:0;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}">
+              <div id="journalFormAmount" class="display-field" data-op-balance="${getStaffOperationalBalance(st?.id)}" style="margin:0;">${money(getStaffOperationalBalance(st?.id))}</div>
               <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${(telleringDraft.journalFormMode || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${(telleringDraft.journalFormMode || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
               <div class="posting-kpis-inline">
                 <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL BALANCE</span><span class="mini-kpi-pill-value" id="journalFormRunning">${money(0)}</span></div>
@@ -2859,10 +2887,10 @@ function hideProcessing() {
       const statusBadge = isAnomaly
         ? `<span class="badge flagged">Anomaly</span>`
         : (recomputedVariance > 0 ? `<span class="badge">Variance</span>` : `<span class="badge balanced">Balanced</span>`);
-      return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${c.staffName}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${c.resolutionNote || c.note || '—'}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
+      return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.staffName || '')}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${escapeHtml(c.resolutionNote || c.note || '—')}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
-    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
+    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
@@ -2879,7 +2907,7 @@ function hideProcessing() {
       const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
         ? approvalAccountHeadingsInline(a)
         : approvalDetails(a);
-      return `<tr><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${a.approvedBy || a.approvedByName || '—'}</td></tr>`;
+      return `<tr><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${escapeHtml(a.approvedBy || a.approvedByName || '—')}</td></tr>`;
     }).join('');
     const moreLess = `<div class="action-row">${decided.length > limit ? `<button id="approvalHistoryMore" class="secondary">Show More</button>`:''}${limit > 30 ? `<button id="approvalHistoryLess" class="secondary">Show Less</button>`:''}</div>`;
     return `<div class="stack"><div class="table-card"><h3>Approval History</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Decided By</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No decided requests yet</td></tr>'}</tbody></table></div>${moreLess}</div></div>`;
@@ -2892,16 +2920,16 @@ function hideProcessing() {
     const roleLabel = ROLE_LABELS[staff.role] || staff.role || '';
     const name = a.requestedByName || staffName(staffId);
     const routedNote = p.assignedApproverName ? `<div class="muted" style="font-size:0.85em">→ ${escapeHtml(p.assignedApproverName)}</div>` : '';
-    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') return `${name} • ${roleLabel || 'Staff'} • Journal${routedNote}`;
-    return `${name} • ${roleLabel || 'Staff'}${routedNote}`;
+    if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') return `${escapeHtml(name)} • ${roleLabel || 'Staff'} • Journal${routedNote}`;
+    return `${escapeHtml(name)} • ${roleLabel || 'Staff'}${routedNote}`;
   }
   function approvalDetails(a) {
     const p = a.payload || {};
-    if (a.type === 'customer_credit') return `${money(p.amount)} to ${customerName(p.customerId) || p.accountNumber}${chargeSummaryText(p)}${p.details ? ' • ' + p.details : ''}`;
-    if (a.type === 'customer_debit') return `${money(p.amount)} from ${customerName(p.customerId) || p.accountNumber}${p.details ? ' • ' + p.details : ''}`;
+    if (a.type === 'customer_credit') return `${money(p.amount)} to ${escapeHtml(customerName(p.customerId) || p.accountNumber || '')}${chargeSummaryText(p)}${p.details ? ' • ' + escapeHtml(p.details) : ''}`;
+    if (a.type === 'customer_debit') return `${money(p.amount)} from ${escapeHtml(customerName(p.customerId) || p.accountNumber || '')}${p.details ? ' • ' + escapeHtml(p.details) : ''}`;
     if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') { const rows = p.rows || p.entries || []; const total = rows.reduce((s,r)=>s+Number(r.amount||0),0); const totalCharges = rows.reduce((s,r)=>s+getTotalChargeAmount(r),0); const attachmentTag = p.fieldNote ? ' • Note attached' : ''; const chargeTag = a.type === 'customer_credit_journal' && totalCharges > 0 ? ` • Total Charge ${money(totalCharges)}` : ''; const formTag = ` • Form ${money(p.formAmount || 0)}`; return `${rows.length} item${rows.length===1?'':'s'} • Total ${money(total)}${formTag}${chargeTag}${attachmentTag}`; }
-    if (a.type === 'wallet_fund') return `${staffName(p.staffId)} • Wallet fund • ${money(p.amount)}`;
-    if (a.type === 'debt_repayment') return `${staffName(p.staffId)} • Debt repayment • ${money(p.amount)}`;
+    if (a.type === 'wallet_fund') return `${escapeHtml(staffName(p.staffId) || '')} • Wallet fund • ${money(p.amount)}`;
+    if (a.type === 'debt_repayment') return `${escapeHtml(staffName(p.staffId) || '')} • Debt repayment • ${money(p.amount)}`;
     return requestSummary(a);
   }
 
@@ -2918,11 +2946,11 @@ function hideProcessing() {
       // officer only SEES it here, never assigns or edits it. Previously a
       // pending customer request showed an editable input letting the
       // approver type/overwrite the number themselves.
-      const assignInput = isCustomer
-        ? line('Account Number', p.generatedAccountNumber || 'Not assigned — return to Customer Service')
-        : (a.status === 'pending'
-            ? `<span class="approval-heading-item approval-heading-item-wrap"><strong>Account Number:</strong> <em>Generated automatically by the system on approval — no manual entry needed for this account type.</em></span>`
-            : `<span class="approval-heading-item"><strong>Account Number:</strong> <strong style="color:var(--success, #16a34a)">${esc(p.generatedAccountNumber || 'assigned — check the account directory')}</strong></span>`);
+      // SURGICAL PATCH 2026-08-24: system-assigned types (Teller/Staff
+      // Salary/Expense/Income) now also get their number at creation time,
+      // same as customer accounts — so the approver sees the real number
+      // here too, not a "generated on approval" placeholder.
+      const assignInput = line('Account Number', p.generatedAccountNumber || (isCustomer ? 'Not assigned — return to Customer Service' : 'Not yet assigned — return to Customer Service'));
       return `<div class="approval-heading-inline">
         ${line('Type', acctTypeLabels[acctType] || acctType)}
         ${line('Name', p.fullName || p.name)}
@@ -2969,20 +2997,20 @@ function hideProcessing() {
 
   function requestSummary(a) {
     const p = a.payload || {};
-    if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${p.sourceAccountName||p.sourceAccountNumber||'—'} → ${p.destAccountName||p.destAccountNumber||'—'} • ${p.date}`;
-    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${p.staffName || 'Treasury'} • ${p.paymentMode || 'cash'} • ${p.date}`;
-    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${p.targetAccountName || p.targetAccountNumber || 'staff account'} • ${p.paymentMode || 'cash'} • ${p.date}`;
-    if (a.type === 'float_topup') return `${money(p.amount)} to ${p.staffName || 'staff'} for ${p.date}`;
-    if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${p.accountNumber} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
-    if (a.type === 'account_opening') return `${p.name} • Phone ${p.phone || '—'} • NIN ${p.nin || '—'} • BVN ${p.bvn || '—'}`;
-    if (a.type === 'account_maintenance') return `${p.accountNumber} • update`; 
-    if (a.type === 'account_reactivation') return `${p.accountNumber} • reactivate`; 
-    if (a.type === 'operational_entry') return `${p.accountName} • ${money(p.amount)}`;
-    if (a.type === 'create_operational_account') return `${p.category} • ${p.name}`;
-    if (a.type === 'close_of_day') return `${p.staffName} • ${p.date} • Form ${money(p.formAmount ?? p.openingBalance ?? 0)} • Remaining ${money(p.remainingBalance ?? p.runningFloat ?? 0)}`;
-    if (a.type === 'temp_grant') return `${staffName(p.staffId)} • ${TOOL_LABELS[p.tool]} = ${p.enabled ? 'ON' : 'OFF'}`;
-    if (a.type === 'wallet_fund') return `${staffName(p.staffId)} • Wallet fund • ${money(p.amount)}`;
-    if (a.type === 'debt_repayment') return `${staffName(p.staffId)} • Debt repayment • ${money(p.amount)}`;
+    if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${escapeHtml(p.sourceAccountName||p.sourceAccountNumber||'—')} → ${escapeHtml(p.destAccountName||p.destAccountNumber||'—')} • ${p.date}`;
+    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
+    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
+    if (a.type === 'float_topup') return `${money(p.amount)} to ${escapeHtml(p.staffName || 'staff')} for ${p.date}`;
+    if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${escapeHtml(p.accountNumber || '')} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
+    if (a.type === 'account_opening') return `${escapeHtml(p.name || '')} • Phone ${escapeHtml(p.phone || '—')} • NIN ${escapeHtml(p.nin || '—')} • BVN ${escapeHtml(p.bvn || '—')}`;
+    if (a.type === 'account_maintenance') return `${escapeHtml(p.accountNumber || '')} • update`;
+    if (a.type === 'account_reactivation') return `${escapeHtml(p.accountNumber || '')} • reactivate`;
+    if (a.type === 'operational_entry') return `${escapeHtml(p.accountName || '')} • ${money(p.amount)}`;
+    if (a.type === 'create_operational_account') return `${escapeHtml(p.category || '')} • ${escapeHtml(p.name || '')}`;
+    if (a.type === 'close_of_day') return `${escapeHtml(p.staffName || '')} • ${p.date} • Form ${money(p.formAmount ?? p.openingBalance ?? 0)} • Remaining ${money(p.remainingBalance ?? p.runningFloat ?? 0)}`;
+    if (a.type === 'temp_grant') return `${escapeHtml(staffName(p.staffId) || '')} • ${TOOL_LABELS[p.tool]} = ${p.enabled ? 'ON' : 'OFF'}`;
+    if (a.type === 'wallet_fund') return `${escapeHtml(staffName(p.staffId) || '')} • Wallet fund • ${money(p.amount)}`;
+    if (a.type === 'debt_repayment') return `${escapeHtml(staffName(p.staffId) || '')} • Debt repayment • ${money(p.amount)}`;
     return '—';
   }
 
@@ -3041,9 +3069,9 @@ function hideProcessing() {
     // SURGICAL PATCH 2026-08-14: same change as approvalAccountHeadingsInline
     // above — approver sees the number Customer Service already assigned,
     // never types or edits it here.
-    const assignBlock = isCustomer
-      ? field('Account Number', p.generatedAccountNumber || 'Not assigned — return to Customer Service', 'field-account')
-      : field('Account Number', req.status === 'pending' ? 'System-assigned on approval' : (p.generatedAccountNumber || 'System-assigned'), 'field-account');
+    // SURGICAL PATCH 2026-08-24: system-assigned types now get their number
+    // at creation time too, same as customer accounts.
+    const assignBlock = field('Account Number', p.generatedAccountNumber || 'Not assigned — return to Customer Service', 'field-account');
 
     html = `<div class="stack approval-opening-linear">
       ${field('Account Type', acctTypeLabels[acctType] || acctType, 'field-wide')}
@@ -3232,12 +3260,12 @@ function nextPaint() {
         <div class="table-card">
           <h3>Administrative Working Tools</h3>
           <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th>${tools.map(t=>`<th>${TOOL_LABELS[t]}</th>`).join('')}</tr></thead>
-          <tbody>${state.staff.map((s,i)=>`<tr><td>${i+1}</td><td>${s.name}</td><td>${ROLE_LABELS[s.role] || s.role}</td>${tools.map(t=>`<td>${hasPermission(t,s)?'YES':'NO'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+          <tbody>${state.staff.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role] || s.role}</td>${tools.map(t=>`<td>${hasPermission(t,s)?'YES':'NO'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
         </div>
         <div class="form-card">
           <h3>Temporary Access Grant</h3>
           <div class="form-grid three">
-            <div class="field"><label>Staff</label><select id="grantStaff" class="entry-input">${state.staff.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+            <div class="field"><label>Staff</label><select id="grantStaff" class="entry-input">${state.staff.map(s=>`<option value="${s.id}">${escapeHtml(s.name || '')}</option>`).join('')}</select></div>
             <div class="field"><label>Tool</label><select id="grantTool" class="entry-input">${Object.keys(TOOL_LABELS).map(t=>`<option value="${t}">${TOOL_LABELS[t]}</option>`).join('')}</select></div>
             <div class="field"><label>Switch</label><select id="grantEnabled" class="entry-input"><option value="true">Grant Access</option><option value="false">Switch Off</option></select></div>
           </div>
@@ -3256,7 +3284,7 @@ function nextPaint() {
         <div class="form-card">
           <h3>Income & Expense Posting</h3>
           <div class="form-grid three">
-            <div class="field"><label>Account</label><select id="oeAccount" class="entry-input">${allAccts.map(a=>`<option value="${a.id}">${a.accountNumber} — ${a.name}</option>`).join('')}</select></div>
+            <div class="field"><label>Account</label><select id="oeAccount" class="entry-input">${allAccts.map(a=>`<option value="${a.id}">${escapeHtml(a.accountNumber || '')} — ${escapeHtml(a.name || '')}</option>`).join('')}</select></div>
             <div class="field"><label>Amount</label><input id="oeAmount" class="entry-input" type="number"></div>
             <div class="field"><label>Date</label><input id="oeDate" class="entry-input" type="date" lang="en-GB" value="${businessDate()}"></div>
             <div class="field"><label>Note</label><input id="oeNote" class="entry-input"></div>
@@ -3298,14 +3326,14 @@ function nextPaint() {
             <div class="form-grid three">
               <div class="field"><label>Category</label><select id="oaCategory" class="entry-input"><option value="income">Income</option><option value="expense">Expense</option></select></div>
               <div class="field"><label>Account Name</label><input id="oaName" class="entry-input"></div>
-              <div class="field"><label>Account Number</label><div class="display-field" id="oaNumberPreview">INC-2001</div></div>
+              <div class="field"><label>Account Number</label><div class="display-field" id="oaNumberPreview">I1</div></div>
             </div>
             <div class="action-row compact-action-row"><button id="oaCreate" class="tiny-btn">Submit for Approval</button></div>
           </div>` : ''}
           <div class="form-card">
             <h3>Post into Account</h3>
             <div class="form-grid three">
-              <div class="field"><label>Account</label><select id="oeAccount" class="entry-input">${allAccts.map(a=>`<option value="${a.id}">${a.accountNumber} — ${a.name}</option>`).join('')}</select></div>
+              <div class="field"><label>Account</label><select id="oeAccount" class="entry-input">${allAccts.map(a=>`<option value="${a.id}">${escapeHtml(a.accountNumber || '')} — ${escapeHtml(a.name || '')}</option>`).join('')}</select></div>
               <div class="field"><label>Amount</label><input id="oeAmount" class="entry-input" type="number"></div>
               <div class="field"><label>Date</label><input id="oeDate" class="entry-input" type="date" lang="en-GB" value="${businessDate()}"></div>
               <div class="field"><label>Note</label><input id="oeNote" class="entry-input"></div>
@@ -3472,7 +3500,7 @@ function nextPaint() {
           <div class="kpi compact-page-kpi"><div class="label">Entries</div><div class="number">${filtered.length}</div></div>
           <div class="kpi compact-page-kpi"><div class="label">Net Book Balance</div><div class="number">${money(credits-debits)}</div></div>
         </div>
-        <div class="table-card"><h3>Business Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.businessEntriesLimit || 20).map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${t.accountNumber || '—'}</td><td>${t.details}</td><td>${t.kind==='debit'?money(t.amount):''}</td><td>${t.kind==='credit'?money(t.amount):''}</td><td>${money(t.balanceAfter || 0)}</td><td>${t.receivedOrPaidBy || '—'}</td><td>${t.postedBy || '—'}</td><td>${t.approvedBy || '—'}</td></tr>`).join('') || '<tr><td colspan="9">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.businessEntriesLimit || 20) ? `<button id="businessMore" class="secondary">Show More</button>` : ''}${(state.ui.businessEntriesLimit || 20) > 20 ? `<button id="businessLess" class="secondary">Show Less</button>` : ''}</div></div>
+        <div class="table-card"><h3>Business Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.businessEntriesLimit || 20).map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${escapeHtml(t.accountNumber || '—')}</td><td>${escapeHtml(t.details || '')}</td><td>${t.kind==='debit'?money(t.amount):''}</td><td>${t.kind==='credit'?money(t.amount):''}</td><td>${money(t.balanceAfter || 0)}</td><td>${escapeHtml(t.receivedOrPaidBy || '—')}</td><td>${escapeHtml(t.postedBy || '—')}</td><td>${escapeHtml(t.approvedBy || '—')}</td></tr>`).join('') || '<tr><td colspan="9">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.businessEntriesLimit || 20) ? `<button id="businessMore" class="secondary">Show More</button>` : ''}${(state.ui.businessEntriesLimit || 20) > 20 ? `<button id="businessLess" class="secondary">Show Less</button>` : ''}</div></div>
       </div>`;
   }
 
@@ -3489,7 +3517,7 @@ function nextPaint() {
           <div class="kpi compact-page-kpi"><div class="label">Net Operational</div><div class="number">${money(income.reduce((s,e)=>s+Number(e.amount||0),0)-expense.reduce((s,e)=>s+Number(e.amount||0),0))}</div></div>
           <div class="kpi compact-page-kpi"><div class="label">Entries</div><div class="number">${filtered.length}</div></div>
         </div>
-        <div class="table-card"><h3>Operational Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Amount</th><th>Note</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.operationalEntriesLimit || 20).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${e.accountName}</td><td>${e.kind}</td><td>${money(e.amount)}</td><td>${cleanOperationalNote(e.note || e.details) || '—'}</td><td>${e.postedBy}</td><td>${e.approvedBy}</td></tr>`).join('') || '<tr><td colspan="7">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.operationalEntriesLimit || 20) ? `<button id="operationalMore" class="secondary">Show More</button>` : ''}${(state.ui.operationalEntriesLimit || 20) > 20 ? `<button id="operationalLess" class="secondary">Show Less</button>` : ''}</div></div>
+        <div class="table-card"><h3>Operational Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Amount</th><th>Note</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.operationalEntriesLimit || 20).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.accountName || '')}</td><td>${escapeHtml(e.kind || '')}</td><td>${money(e.amount)}</td><td>${escapeHtml(cleanOperationalNote(e.note || e.details) || '—')}</td><td>${escapeHtml(e.postedBy || '')}</td><td>${escapeHtml(e.approvedBy || '')}</td></tr>`).join('') || '<tr><td colspan="7">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.operationalEntriesLimit || 20) ? `<button id="operationalMore" class="secondary">Show More</button>` : ''}${(state.ui.operationalEntriesLimit || 20) > 20 ? `<button id="operationalLess" class="secondary">Show Less</button>` : ''}</div></div>
       </div>`;
   }
 
@@ -3577,13 +3605,13 @@ function nextPaint() {
       <tr>
         <td>${r.sn}</td>
         <td>${r.date}</td>
-        <td>${String(r.type || '').toUpperCase()}</td>
-        <td>${r.accountName}</td>
+        <td>${escapeHtml(String(r.type || '').toUpperCase())}</td>
+        <td>${escapeHtml(r.accountName || '')}</td>
         <td>${money(r.amount)}</td>
-        <td>${r.note}</td>
+        <td>${escapeHtml(r.note || '')}</td>
         <td>${money(r.balanceAfter)}</td>
-        <td>${r.postedBy}</td>
-        <td>${r.approvedBy || '—'}</td>
+        <td>${escapeHtml(r.postedBy || '')}</td>
+        <td>${escapeHtml(r.approvedBy || '—')}</td>
       </tr>
     `).join('');
 
@@ -3703,14 +3731,14 @@ function nextPaint() {
       <tr>
         <td>${r.sn}</td>
         <td>${r.date}</td>
-        <td>${r.type}</td>
-        <td>${r.accountName}</td>
+        <td>${escapeHtml(r.type || '')}</td>
+        <td>${escapeHtml(r.accountName || '')}</td>
         <td>${money(r.amount)}</td>
-        <td>${r.details}</td>
+        <td>${escapeHtml(r.details || '')}</td>
         <td>${money(r.balanceAfter)}</td>
-        <td>${r.receivedOrPaidBy}</td>
-        <td>${r.postedBy}</td>
-        <td>${r.approvedBy || '—'}</td>
+        <td>${escapeHtml(r.receivedOrPaidBy || '')}</td>
+        <td>${escapeHtml(r.postedBy || '')}</td>
+        <td>${escapeHtml(r.approvedBy || '—')}</td>
       </tr>
     `).join('');
     const html = `
@@ -3997,7 +4025,7 @@ function normalizeStaffLedgerEntryType(row) {
       const totalCreditReceived = Number(summary.totalCreditReceived || 0);
       const totalDebitsPaid = Number(summary.totalDebitsPaid || 0);
       const balance = Number(summary.balance ?? acc.balance ?? 0);
-      return `<tr><td>${s.name}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${acc.accountNumber}</td><td>${money(balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
+      return `<tr><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${escapeHtml(acc.accountNumber || '')}</td><td>${money(balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
     }).join('');
     return `<div class="table-card"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Teller and Posting Accounts</h3><div class="note" style="margin:0">Business Date: <strong>${businessDate()}</strong></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Account Number</th><th>Balance</th><th>Debt Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Ledger</th></tr></thead><tbody>${rows}</tbody></table></div><div class="action-row">${state.staff.length > (state.ui.tellerEntriesLimit || 20) ? `<button id="tellerMore" class="secondary">Show More</button>` : ''}${(state.ui.tellerEntriesLimit || 20) > 20 ? `<button id="tellerLess" class="secondary">Show Less</button>` : ''}</div></div>`;
   }
@@ -4134,7 +4162,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (!defaultStaff) return showToast('No eligible staff found');
     openModal('Assign Float Top-Up', `
       <div class="form-grid three">
-        <div class="field"><label>Staff</label><select id="floatTopupStaff" class="entry-input">${postingStaff.map(st => `<option value="${st.id}" ${st.id===defaultStaff.id?'selected':''}>${st.name} — ${ROLE_LABELS[st.role] || st.role}</option>`).join('')}</select></div>
+        <div class="field"><label>Staff</label><select id="floatTopupStaff" class="entry-input">${postingStaff.map(st => `<option value="${st.id}" ${st.id===defaultStaff.id?'selected':''}>${escapeHtml(st.name || '')} — ${ROLE_LABELS[st.role] || st.role}</option>`).join('')}</select></div>
         <div class="field"><label>Date</label><div class="display-field">${businessDate()}</div></div>
         <div class="field"><label>Amount</label><input id="floatTopupAmount" class="entry-input" type="number"></div>
       </div>
@@ -4348,7 +4376,29 @@ function normalizeStaffLedgerEntryType(row) {
         payload = { accountType: acctType, name, systemAssigned: true, generatedAccountNumber: '' };
       }
 
-      confirmAction(`Submit ${acctType.replace('_',' ')} account opening request?`, async () => {
+      // SURGICAL PATCH 2026-08-24 (client request): system-assigned numbers
+      // (Teller/Staff Salary/Expense/Income) are now generated HERE, at the
+      // point Customer Service actually submits — not later at approval
+      // time. The approving officer will see this exact number read-only,
+      // same as they already do for customer accounts; Customer Service
+      // sees and can note it right now, in the confirmation prompt below,
+      // before the request even goes out for approval.
+      if (payload.systemAssigned) {
+        showProcessing('Assigning account number...'); await nextPaint();
+        try {
+          const numResult = await gateway.customers.generateSystemAccountNumber(acctType);
+          if (!numResult?.ok || !numResult.data) {
+            return showToast(numResult?.error?.message || 'Could not assign an account number — try again');
+          }
+          payload.generatedAccountNumber = numResult.data;
+        } finally { hideProcessing(); }
+      }
+
+      const confirmMessage = payload.systemAssigned
+        ? `Submit ${acctType.replace('_',' ')} account opening request? Assigned account number: <strong>${escapeHtml(payload.generatedAccountNumber)}</strong> — please note this before confirming.`
+        : `Submit ${acctType.replace('_',' ')} account opening request?`;
+
+      confirmAction(confirmMessage, async () => {
         showProcessing('Sending request...'); await nextPaint();
         try {
           const result = await submitApprovalThroughGateway('account_opening', payload);
@@ -4356,7 +4406,7 @@ function normalizeStaffLedgerEntryType(row) {
           state.ui.accountOpeningDraft = {};
           state.ui.accountOpeningFocusedField = '';
           render();
-          showToast('Account opening sent for approval');
+          showToast(payload.systemAssigned ? `Account opening sent for approval — account number ${payload.generatedAccountNumber}` : 'Account opening sent for approval');
         } finally { hideProcessing(); }
       });
     };
@@ -4998,8 +5048,15 @@ function normalizeStaffLedgerEntryType(row) {
       const otherPendingDraftForms = pendingJournalTotal(staff.id, businessDate());
       const dailyRunning = opBalance - otherPendingDraftForms;
 
-      // This journal's own FORM — entered at journal creation, depleted only by this journal's own rows.
-      const journalForm = Number(String(telleringDraft.journalFormAmount || '').replace(/,/g, '')) || 0;
+      // This journal's own FORM — no longer typed; it IS the teller's
+      // current operational balance, always. Also update the display in
+      // case the balance changed since this journal was opened (e.g. a
+      // Treasury credit landed mid-session).
+      const journalForm = opBalance;
+      if (byId('journalFormAmount')) {
+        byId('journalFormAmount').textContent = money(journalForm);
+        byId('journalFormAmount').dataset.opBalance = journalForm;
+      }
       let jRunning = journalForm;
       const withBalances = journal.map((row) => {
         jRunning -= Number(row.amount||0);
@@ -5007,7 +5064,7 @@ function normalizeStaffLedgerEntryType(row) {
         const variance = Math.max(0, -remaining);
         return { row, formBase: journalForm, remaining, variance };
       });
-      const rows = withBalances.map(({ row, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${row.customerName}${chargeMeta}</td><td>${row.accountNumber}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="7">No journal entries yet</td></tr>';
+      const rows = withBalances.map(({ row, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${escapeHtml(row.customerName || '')}${chargeMeta}</td><td>${escapeHtml(row.accountNumber || '')}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="7">No journal entries yet</td></tr>';
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
       const totalPosted = journal.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       if (byId('journalTotalPosted')) byId('journalTotalPosted').textContent = money(totalPosted);
@@ -5285,16 +5342,9 @@ function normalizeStaffLedgerEntryType(row) {
       save();
       updateJournalCommissionPreview();
     };
-    if (byId('journalFormAmount')) {
-      bindAmountCommaFormatting('journalFormAmount');
-      const journalFormAmountInput = byId('journalFormAmount');
-      journalFormAmountInput.oninput = () => {
-        telleringDraft.journalFormAmount = journalFormAmountInput.value || '';
-        save();
-        recalcPreview();
-      };
-      journalFormAmountInput.onchange = () => { telleringDraft.journalFormAmount = journalFormAmountInput.value || ''; save(); };
-    }
+    // journalFormAmount is now a derived display (teller's operational
+    // balance), not a typed input — no bind handler needed, it's rendered
+    // fresh from getStaffOperationalBalance() on every render.
     qq('input[name="journalFormMode"]').forEach(radio => radio.onchange = () => {
       if (radio.checked) { telleringDraft.journalFormMode = radio.value; save(); recalcPreview(); }
     });
@@ -5562,7 +5612,13 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('journalSubmit')) byId('journalSubmit').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (kind === 'debit' && getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance to debit from — request a credit from Treasury first');
+      // SURGICAL PATCH 2026-08-24 (client request): Journal Form Amount is
+      // no longer typed — it's always the teller's current operational
+      // balance. Applies to both credit and debit now (previously this
+      // guard only checked debit): if the balance is zero or negative,
+      // there's nothing to post against, so submission stops here.
+      const journalFormAmount = getStaffOperationalBalance(staff.id);
+      if (!(journalFormAmount > 0)) return showToast('No operational balance to post against — request a credit from Treasury first');
       const alreadySubmitted = (state.approvals || []).some(r =>
         r.type === (kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal') &&
         r.payload?.staffId === staff.id && r.payload?.date === businessDate() &&
@@ -5570,16 +5626,13 @@ function normalizeStaffLedgerEntryType(row) {
       );
       if (alreadySubmitted) return showToast(`A ${kind} journal has already been submitted for today. Use direct ${kind} for any additions.`);
       if (!journal.length) return showToast('Generate journal first');
-      const journalFormAmount = parseAmountInput('journalFormAmount') || (Number(String(telleringDraft.journalFormAmount || '').replace(/,/g, '')) || 0);
-      if (!(journalFormAmount > 0)) return showToast('Enter a journal form amount');
       // Journal must balance: sum of rows must exactly equal the journal form amount
       const rowTotal = journal.reduce((s, r) => s + Number(r.amount || 0), 0);
-      if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal journal form amount ${money(journalFormAmount)}`);
-      // Journal form amount must not exceed remaining operational balance — debit only.
-      // Credits are allowed to push the operational balance negative; Treasury
-      // reconciles it later (see the operational-account model).
-      const opBalance = getStaffOperationalBalance(staff.id);
-      if (kind === 'debit' && journalFormAmount > opBalance + 0.01) return showToast(`Journal form amount ${money(journalFormAmount)} exceeds your operational balance ${money(opBalance)}`);
+      if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal your operational balance ${money(journalFormAmount)}`);
+      // NOTE: journalFormAmount IS getStaffOperationalBalance(staff.id) now
+      // (see above) — the old "form amount can't exceed balance" check is
+      // gone because it can no longer be anything other than the balance;
+      // there's nothing left for it to exceed.
       const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
@@ -5877,7 +5930,7 @@ function normalizeStaffLedgerEntryType(row) {
     );
     openModal('Cash Receipt', `
       <div class="form-grid two compact-modal-grid">
-        <div class="field"><label>Treasury</label><div class="display-field">${st.name}</div></div>
+        <div class="field"><label>Treasury</label><div class="display-field">${escapeHtml(st.name || '')}</div></div>
         <div class="field"><label>Amount Received</label><input id="cashReceiptAmount" class="entry-input" type="number"></div>
       </div>
       <div class="form-grid two compact-modal-grid" style="margin-top:8px">
@@ -5886,7 +5939,7 @@ function normalizeStaffLedgerEntryType(row) {
         </div>
         <div class="field"><label>Note (optional)</label><input id="cashReceiptNote" class="entry-input" type="text"></div>
       </div>
-      ${myOpAccount ? `<div class="note">This will credit your operational account: <strong>${myOpAccount.name || myOpAccount.account_number || 'your account'}</strong></div>` : '<div class="note warning-note">No operational account linked to your staff profile. Ask admin to open one.</div>'}
+      ${myOpAccount ? `<div class="note">This will credit your operational account: <strong>${escapeHtml(myOpAccount.name || myOpAccount.account_number || 'your account')}</strong></div>` : '<div class="note warning-note">No operational account linked to your staff profile. Ask admin to open one.</div>'}
     `, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       {
@@ -5925,7 +5978,7 @@ function normalizeStaffLedgerEntryType(row) {
     // Cash Officer credits a Teller's staff operational account
     const staffOpAccounts = (state.customers || []).filter(c => c.accountType === 'staff_operational');
     const accountOptions = staffOpAccounts.map(a =>
-      `<option value="${a.id}">${a.name || a.displayName || a.display_name} (${a.accountNumber || a.account_number})</option>`
+      `<option value="${a.id}">${escapeHtml(a.name || a.displayName || a.display_name || '')} (${escapeHtml(a.accountNumber || a.account_number || '')})</option>`
     ).join('');
     const draft = state.ui.staffCreditDraft ||= {};
     return `
@@ -5981,7 +6034,7 @@ function normalizeStaffLedgerEntryType(row) {
       const netBook = credits - debits;
       const remaining = opBalance;
       const variance = Math.max(0, -remaining);
-      return `<tr><td>${st.name}</td><td>${money(opBalance)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
+      return `<tr><td>${escapeHtml(st.name || '')}</td><td>${money(opBalance)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
     openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Operational Balance is the total funded by Treasury. Remaining Balance reduces as staff disburse funds. Net Balance is Total Credits minus Total Debits.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Op. Balance</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining</th><th>Variance</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
       closeModal();
