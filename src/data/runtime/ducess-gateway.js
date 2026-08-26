@@ -764,6 +764,16 @@ async function submitDebtRepayment(_payload) {
         submitAccountMaintenance: () => notYet('customers.submitAccountMaintenance'),
         submitAccountReactivation: () => notYet('customers.submitAccountReactivation'),
         listStaffSalaryAccounts: async () => ({ ok: true, data: [] }),
+        generateSystemAccountNumber: async (acctType) => {
+          // Local (non-Supabase) fallback — no DB sequence available, so
+          // derive a simple counter from however many of this type already
+          // exist locally. Consistent format with the Supabase RPCs (T#,
+          // S#, E#, I#), just not a durable sequence.
+          const prefix = { staff_operational: 'T', staff_salary: 'S', expense: 'E', income: 'I' }[acctType];
+          if (!prefix) return { ok: false, error: { code: 'INVALID_ACCOUNT_TYPE', message: `No system-assigned number generator for account type "${acctType}".` } };
+          const count = (Array.isArray(getLocalState().customers) ? getLocalState().customers : []).filter(c => c.accountType === acctType).length;
+          return { ok: true, data: `${prefix}${count + 1}` };
+        },
       },
       accounts: {
         getAccountByNumber,
@@ -2487,6 +2497,30 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     // other customer read) — if the staff_role_code column hasn't been
     // migrated in yet, this function degrades gracefully on its own instead
     // of breaking every other customer-related screen in the app.
+    // SURGICAL ADDITION 2026-08-24 (client request): system-assigned account
+    // numbers (Teller/Staff Salary/Expense/Income) used to only be generated
+    // at APPROVAL time, deep inside performDirectPostingForApproval. Client
+    // now wants Customer Service to see the number at the point of
+    // CREATION, before the request is even sent for approval. This exposes
+    // the same RPCs performDirectPostingForApproval already calls, but
+    // callable directly from the Account Opening submit flow. Approval-time
+    // logic is untouched — it already checks "is a number already present?"
+    // before generating one, so passing a pre-generated number through the
+    // payload is handled correctly with zero changes needed there.
+    async function generateSystemAccountNumber(acctType) {
+      if (!canUseSupabase()) return defaultResult.err('NOT_SUPPORTED', 'System account number generation requires Supabase mode.');
+      const rpcName = {
+        staff_operational: 'generate_staff_operational_account_number',
+        staff_salary: 'generate_staff_salary_account_number',
+        expense: 'generate_expense_account_number',
+        income: 'generate_income_account_number',
+      }[acctType];
+      if (!rpcName) return defaultResult.err('INVALID_ACCOUNT_TYPE', `No system-assigned number generator for account type "${acctType}".`);
+      const { data, error: rpcError } = await client.rpc(rpcName);
+      if (rpcError || !data) return defaultResult.err('ACCOUNT_NUMBER_GENERATION_FAILED', 'Could not generate account number — check database sequences.', rpcError);
+      return defaultResult.ok(data);
+    }
+
     async function listStaffSalaryAccounts() {
       if (!canUseSupabase()) return defaultResult.ok([]);
       const cols = 'id, account_number, full_name, display_name, status, is_active, created_at, staff_role_code';
@@ -2992,6 +3026,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         submitAccountMaintenance,
         submitAccountReactivation,
         listStaffSalaryAccounts,
+        generateSystemAccountNumber,
       },
       accounts: {
         getAccountByNumber,
