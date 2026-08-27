@@ -774,6 +774,16 @@ async function submitDebtRepayment(_payload) {
           const count = (Array.isArray(getLocalState().customers) ? getLocalState().customers : []).filter(c => c.accountType === acctType).length;
           return { ok: true, data: `${prefix}${count + 1}` };
         },
+        peekSystemAccountNumber: async (acctType) => {
+          // Local fallback: same non-consuming preview counter as the real
+          // generator above (local mode has no sequence to distinguish
+          // "peek" from "consume" — the local generator is already
+          // effectively a peek since it just counts existing rows).
+          const prefix = { staff_operational: 'T', staff_salary: 'S', expense: 'E', income: 'I' }[acctType];
+          if (!prefix) return { ok: false, error: { code: 'INVALID_ACCOUNT_TYPE', message: `No system-assigned number preview for account type "${acctType}".` } };
+          const count = (Array.isArray(getLocalState().customers) ? getLocalState().customers : []).filter(c => c.accountType === acctType).length;
+          return { ok: true, data: `${prefix}${count + 1}` };
+        },
       },
       accounts: {
         getAccountByNumber,
@@ -2521,6 +2531,29 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(data);
     }
 
+    // SURGICAL ADDITION 2026-08-26 (client correction): the function above
+    // is number-CONSUMING (nextval) — calling it just to show a preview on
+    // the form burned a real number every time, even on cancelled/abandoned
+    // requests (this is why testing produced numbers like "I3008" instead
+    // of starting at 1). This is the non-consuming counterpart: it shows
+    // what the NEXT number would be without reserving it, safe to call
+    // repeatedly for a live on-form preview. The REAL number is only
+    // assigned by generateSystemAccountNumber above, called once, at
+    // actual submission — never for preview purposes.
+    async function peekSystemAccountNumber(acctType) {
+      if (!canUseSupabase()) return defaultResult.err('NOT_SUPPORTED', 'System account number preview requires Supabase mode.');
+      const rpcName = {
+        staff_operational: 'peek_staff_operational_account_number',
+        staff_salary: 'peek_staff_salary_account_number',
+        expense: 'peek_expense_account_number',
+        income: 'peek_income_account_number',
+      }[acctType];
+      if (!rpcName) return defaultResult.err('INVALID_ACCOUNT_TYPE', `No system-assigned number preview for account type "${acctType}".`);
+      const { data, error: rpcError } = await client.rpc(rpcName);
+      if (rpcError || !data) return defaultResult.err('ACCOUNT_NUMBER_PREVIEW_FAILED', 'Could not preview account number.', rpcError);
+      return defaultResult.ok(data);
+    }
+
     async function listStaffSalaryAccounts() {
       if (!canUseSupabase()) return defaultResult.ok([]);
       const cols = 'id, account_number, full_name, display_name, status, is_active, created_at, staff_role_code';
@@ -3027,6 +3060,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         submitAccountReactivation,
         listStaffSalaryAccounts,
         generateSystemAccountNumber,
+        peekSystemAccountNumber,
       },
       accounts: {
         getAccountByNumber,
