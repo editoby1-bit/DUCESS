@@ -2430,7 +2430,7 @@ function hideProcessing() {
             <input id="openPhoto" class="entry-input cs-sheet-input hidden-photo-input" type="file" accept="image/*">
             <div id="openPhotoStatus" class="cs2-note-box">No photo selected</div>
           </div>
-          ${isStaffSalary ? `<div class="cs2-note-box">${systemNote}</div>` : ''}` : `<div class="cs2-note-box">${systemNote}</div>`}
+          ${isStaffSalary ? `<div class="cs2-note-box">${systemNote}</div><div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number: <strong>Loading…</strong></div>` : ''}` : `<div class="cs2-note-box">${systemNote}</div>${(acctType === 'staff_operational' || acctType === 'expense' || acctType === 'income') ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number: <strong>Loading…</strong></div>` : ''}`}
           <div class="cs2-button-row">
             <button id="submitOpening" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
           </div>
@@ -4239,6 +4239,30 @@ function normalizeStaffLedgerEntryType(row) {
     state.ui.accountOpeningDraft ||= {};
     const openingDraft = state.ui.accountOpeningDraft;
 
+    // SURGICAL ADDITION 2026-08-26 (client correction): show the account
+    // number preview inline on the form, before submission — using the
+    // non-consuming peek RPC, never the real number-consuming generator.
+    // Fetches fresh on every bind (i.e. every render/type-change) so the
+    // preview stays current; harmless to call repeatedly since it never
+    // reserves anything.
+    const previewEl = byId('openAccountNumberPreview');
+    if (previewEl) {
+      const previewType = previewEl.dataset.previewType;
+      (async () => {
+        try {
+          const result = await gateway.customers.peekSystemAccountNumber(previewType);
+          const el = byId('openAccountNumberPreview');
+          if (!el || el.dataset.previewType !== previewType) return; // form moved on since the fetch started
+          el.innerHTML = result?.ok && result.data
+            ? `Account Number (preview): <strong>${escapeHtml(result.data)}</strong> — assigned when you submit`
+            : `Account Number: <strong>Unavailable</strong> — will be assigned on submit`;
+        } catch (err) {
+          const el = byId('openAccountNumberPreview');
+          if (el) el.innerHTML = `Account Number: <strong>Unavailable</strong> — will be assigned on submit`;
+        }
+      })();
+    }
+
     // Re-render when account type changes
     const typeSelect = byId('openAccountType');
     if (typeSelect) typeSelect.onchange = () => {
@@ -4376,31 +4400,26 @@ function normalizeStaffLedgerEntryType(row) {
         payload = { accountType: acctType, name, systemAssigned: true, generatedAccountNumber: '' };
       }
 
-      // SURGICAL PATCH 2026-08-24 (client request): system-assigned numbers
-      // (Teller/Staff Salary/Expense/Income) are now generated HERE, at the
-      // point Customer Service actually submits — not later at approval
-      // time. The approving officer will see this exact number read-only,
-      // same as they already do for customer accounts; Customer Service
-      // sees and can note it right now, in the confirmation prompt below,
-      // before the request even goes out for approval.
-      if (payload.systemAssigned) {
-        showProcessing('Assigning account number...'); await nextPaint();
-        try {
-          const numResult = await gateway.customers.generateSystemAccountNumber(acctType);
-          if (!numResult?.ok || !numResult.data) {
-            return showToast(numResult?.error?.message || 'Could not assign an account number — try again');
-          }
-          payload.generatedAccountNumber = numResult.data;
-        } finally { hideProcessing(); }
-      }
-
-      const confirmMessage = payload.systemAssigned
-        ? `Submit ${acctType.replace('_',' ')} account opening request? Assigned account number: <strong>${escapeHtml(payload.generatedAccountNumber)}</strong> — please note this before confirming.`
-        : `Submit ${acctType.replace('_',' ')} account opening request?`;
+      // SURGICAL FIX 2026-08-26 (client correction): the real, number-
+      // CONSUMING generator used to be called right here, before the user
+      // had even confirmed — every click (including cancelled ones) burned
+      // a real sequence value, which is exactly why testing produced
+      // numbers like "I3008" instead of starting at 1. The number is now
+      // only generated AFTER the user clicks Confirm below. They've already
+      // seen the (non-consuming) preview inline on the form before this
+      // point, so the confirm prompt itself can stay plain.
+      const confirmMessage = `Submit ${acctType.replace('_',' ')} account opening request?`;
 
       confirmAction(confirmMessage, async () => {
-        showProcessing('Sending request...'); await nextPaint();
+        showProcessing(payload.systemAssigned ? 'Assigning account number...' : 'Sending request...'); await nextPaint();
         try {
+          if (payload.systemAssigned) {
+            const numResult = await gateway.customers.generateSystemAccountNumber(acctType);
+            if (!numResult?.ok || !numResult.data) {
+              return showToast(numResult?.error?.message || 'Could not assign an account number — try again');
+            }
+            payload.generatedAccountNumber = numResult.data;
+          }
           const result = await submitApprovalThroughGateway('account_opening', payload);
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
           state.ui.accountOpeningDraft = {};
