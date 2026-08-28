@@ -7606,40 +7606,57 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       btn.disabled = true;
       btn.textContent = 'Signing in…';
       errEl.classList.add('hidden');
-      const result = await gateway.auth.loginWithStaffId({ staffId, password });
-      if (!result.ok) {
-        errEl.textContent = result.error?.message || 'Invalid Staff ID or password.';
+      // SURGICAL FIX 2026-08-27: this had no try/catch around it — if
+      // loginWithStaffId (or anything it calls) THREW instead of cleanly
+      // resolving to {ok:false}, e.g. a network hiccup or timeout, the
+      // button never got reset. It stayed stuck on "Signing in…" forever,
+      // with the actual error going out as an unhandled promise rejection
+      // that doesn't show up as a normal console message — exactly what
+      // the screenshot showed (a red error-count badge, no visible auth
+      // error). Now every path — success, a clean error, or an unexpected
+      // throw — always resets the button and always shows something to
+      // the person trying to log in.
+      try {
+        const result = await gateway.auth.loginWithStaffId({ staffId, password });
+        if (!result.ok) {
+          errEl.textContent = result.error?.message || 'Invalid Staff ID or password.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        // Login success — wipe typed credentials from the DOM immediately.
+        if (passInput) passInput.value = '';
+        if (staffInput) staffInput.value = '';
+        // Login success — set active staff from session
+        const sessionStaff = result.data?.staff;
+        if (sessionStaff?.id) {
+          state.activeStaffId = sessionStaff.id;
+          save();
+        }
+        // SURGICAL PATCH 2026-08-18: state.ui.selectedCustomerId is shared
+        // across Check Balance / Maintenance / Reactivation / Statement and
+        // was never cleared on login — so a customer looked up in a PREVIOUS
+        // session (possibly days earlier, by a different staff member on a
+        // shared device) would silently resurface on Statement of Account
+        // looking like a hardcoded "default customer". Reset per-session state
+        // on every fresh login so nothing carries over.
+        state.ui.selectedCustomerId = null;
+        state.ui.checkBalanceLoaded = false;
+        state.ui.accountStatementGenerated = false;
+        save();
+        hideLoginScreen();
+        await syncStaffFromGateway();
+        await syncApprovalsFromGateway();
+        await syncCodFromGateway();
+        render();
+        await enforceAdminRecoveryKeySetup();
+      } catch (err) {
+        console.warn('[DUCESS] Login failed with an unexpected error', err);
+        errEl.textContent = 'Sign-in failed unexpectedly — check your connection and try again.';
         errEl.classList.remove('hidden');
+      } finally {
         btn.disabled = false;
         btn.textContent = 'Sign In';
-        return;
       }
-      // Login success — wipe typed credentials from the DOM immediately.
-      if (passInput) passInput.value = '';
-      if (staffInput) staffInput.value = '';
-      // Login success — set active staff from session
-      const sessionStaff = result.data?.staff;
-      if (sessionStaff?.id) {
-        state.activeStaffId = sessionStaff.id;
-        save();
-      }
-      // SURGICAL PATCH 2026-08-18: state.ui.selectedCustomerId is shared
-      // across Check Balance / Maintenance / Reactivation / Statement and
-      // was never cleared on login — so a customer looked up in a PREVIOUS
-      // session (possibly days earlier, by a different staff member on a
-      // shared device) would silently resurface on Statement of Account
-      // looking like a hardcoded "default customer". Reset per-session state
-      // on every fresh login so nothing carries over.
-      state.ui.selectedCustomerId = null;
-      state.ui.checkBalanceLoaded = false;
-      state.ui.accountStatementGenerated = false;
-      save();
-      hideLoginScreen();
-      await syncStaffFromGateway();
-      await syncApprovalsFromGateway();
-      await syncCodFromGateway();
-      render();
-      await enforceAdminRecoveryKeySetup();
     }
 
     btn.onclick = attemptLogin;
