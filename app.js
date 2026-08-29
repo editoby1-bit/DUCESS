@@ -4206,7 +4206,11 @@ function normalizeStaffLedgerEntryType(row) {
     byId('lookupAcc').oninput = debounce(() => {
       const v = (byId('lookupAcc')?.value || '').trim();
       if (!v) return doLookup(true);
-      if (/^\d{4}$/.test(v)) doLookup(true);
+      // SURGICAL FIX 2026-08-28: same stale /^\d{4}$/ regex bug as
+      // txAcc/journalAcc — silently blocked live lookup for anything that
+      // isn't a plain 4-digit number (T1/S1/E1/I1-style, or any
+      // variable-length customer number). Now triggers on any genuine match.
+      if (getCustomerByAccountNo(v)) doLookup(true);
     }, 200);
     byId('lookupAcc').onchange = () => doLookup(true);
     byId('lookupAcc').onkeyup = (e) => { if (e.key === "Enter") doLookup(false); };
@@ -4508,11 +4512,6 @@ function normalizeStaffLedgerEntryType(row) {
     const destInput = byId('itrDestAcct');
     const amtInput = byId('itrAmount');
     const detailsInput = byId('itrDetails');
-    if (sourceInput) sourceInput.oninput = () => { draft.sourceAcct = sourceInput.value; draft.sourceName = ''; draft.sourceId = ''; };
-    if (destInput) destInput.oninput = () => { draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; };
-    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
-    if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
-
     const lookupAcct = async (acctNum, nameElId, idKey, nameKey) => {
       const match = (state.customers || []).find(c => c.accountNumber === acctNum || c.account_number === acctNum);
       if (match) {
@@ -4523,6 +4522,25 @@ function normalizeStaffLedgerEntryType(row) {
         if (byId(nameElId)) byId(nameElId).innerHTML = `<span style="color:var(--accent-red)">Account not found</span>`;
       }
     };
+
+    // SURGICAL ADDITION 2026-08-28: account number fields should insert the
+    // customer live as you type — Search is only meant as a fallback for
+    // when you don't know the exact number (name search). Non Cash never
+    // had this at all before, only the explicit Search button.
+    if (sourceInput) sourceInput.oninput = () => {
+      const v = sourceInput.value.trim();
+      draft.sourceAcct = sourceInput.value; draft.sourceName = ''; draft.sourceId = '';
+      if (byId('itrSourceName')) byId('itrSourceName').innerHTML = '';
+      if (v && getCustomerByAccountNo(v)) lookupAcct(v, 'itrSourceName', 'sourceId', 'sourceName');
+    };
+    if (destInput) destInput.oninput = () => {
+      const v = destInput.value.trim();
+      draft.destAcct = destInput.value; draft.destName = ''; draft.destId = '';
+      if (byId('itrDestName')) byId('itrDestName').innerHTML = '';
+      if (v && getCustomerByAccountNo(v)) lookupAcct(v, 'itrDestName', 'destId', 'destName');
+    };
+    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
+    if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
 
     if (byId('itrLookupSource')) byId('itrLookupSource').onclick = () => lookupAcct((byId('itrSourceAcct')?.value||'').trim(), 'itrSourceName', 'sourceId', 'sourceName');
     if (byId('itrLookupDest')) byId('itrLookupDest').onclick = () => lookupAcct((byId('itrDestAcct')?.value||'').trim(), 'itrDestName', 'destId', 'destName');
@@ -5203,16 +5221,23 @@ function normalizeStaffLedgerEntryType(row) {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
         if (!v) { clearSingleCustomer(); return; }
-        if (!/^\d{4}$/.test(v)) {
+        // Avoid repaint/save races while typing/selecting. Only perform the
+        // quiet lookup once a genuine account exists for whatever's typed so
+        // far. SURGICAL FIX 2026-08-28: this used to require exactly 4 plain
+        // digits (/^\d{4}$/) before even checking for a match — a leftover
+        // from when every account number was 4 digits. Since then this app
+        // gained Teller (T1), Staff Salary (S1), Expense (E1), Income (I1),
+        // and variable-length customer numbers — none of which are 4 plain
+        // digits, so live-as-you-type lookup silently never fired for any
+        // of them. Now it checks for a real match directly instead of
+        // pattern-matching a specific format.
+        if (!getCustomerByAccountNo(v)) {
           if (byId('txName')) byId('txName').textContent = '—';
           if (byId('txBalance')) byId('txBalance').innerHTML = '—';
           state.ui.selectedCustomerId = null;
           save();
           return;
         }
-        // Avoid repaint/save races while typing/selecting. Only perform the
-        // quiet lookup once the full 4-digit account number is present and the
-        // selection is not already active for this account.
         const existing = state.ui.selectedCustomerId ? state.customers.find(c => c.id === state.ui.selectedCustomerId) : null;
         if (!existing || String(existing.accountNumber || '') !== v) {
           searchSingle({ quiet: true });
@@ -5329,13 +5354,14 @@ function normalizeStaffLedgerEntryType(row) {
           state.ui.selectedJournalCustomerId = null;
           if (byId('journalName')) byId('journalName').textContent = '—';
         }
-        // Auto-lookup on exactly 4 digits — only update DOM, save AFTER
-        if (/^\d{4}$/.test(v)) {
-          const found = getCustomerByAccountNo(v);
-          if (found && !isCustomerFrozen(found) && found.active !== false) {
-            state.ui.selectedJournalCustomerId = found.id;
-            if (byId('journalName')) byId('journalName').textContent = found.name;
-          }
+        // SURGICAL FIX 2026-08-28: same stale-regex bug as txAcc above —
+        // used to only auto-lookup on exactly 4 plain digits, silently never
+        // firing for T1/S1/E1/I1-style or variable-length account numbers.
+        // Now triggers on any genuine match.
+        const found = getCustomerByAccountNo(v);
+        if (found && !isCustomerFrozen(found) && found.active !== false) {
+          state.ui.selectedJournalCustomerId = found.id;
+          if (byId('journalName')) byId('journalName').textContent = found.name;
         }
         // Do not save while typing; saving through the gateway can repaint the journal row and steal focus.
       };
