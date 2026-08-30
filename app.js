@@ -4542,8 +4542,15 @@ function normalizeStaffLedgerEntryType(row) {
     if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
     if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
 
-    if (byId('itrLookupSource')) byId('itrLookupSource').onclick = () => lookupAcct((byId('itrSourceAcct')?.value||'').trim(), 'itrSourceName', 'sourceId', 'sourceName');
-    if (byId('itrLookupDest')) byId('itrLookupDest').onclick = () => lookupAcct((byId('itrDestAcct')?.value||'').trim(), 'itrDestName', 'destId', 'destName');
+    // SURGICAL FIX 2026-08-28 (client correction): Search used to just
+    // re-run the account-NUMBER lookup on whatever was already typed — no
+    // way to find a customer by NAME when the number isn't known, unlike
+    // Credit/Debit's Search which opens the picker. Now matches that
+    // behavior. nonCashSearchTarget tells applySelectedCustomerToActiveTool
+    // which of the two fields (source/dest) to fill when a customer is
+    // picked, since Non Cash is the only screen with two account fields.
+    if (byId('itrLookupSource')) byId('itrLookupSource').onclick = () => { state.ui.nonCashSearchTarget = 'source'; openCustomerSearchModal(state.customers); };
+    if (byId('itrLookupDest')) byId('itrLookupDest').onclick = () => { state.ui.nonCashSearchTarget = 'dest'; openCustomerSearchModal(state.customers); };
 
     if (byId('submitIntraTransfer')) byId('submitIntraTransfer').onclick = async () => {
       const amount = parseAmountInput('itrAmount');
@@ -6899,6 +6906,29 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       if (byId('txAcc')) byId('txAcc').value = c.accountNumber || '';
       if (byId('txName')) byId('txName').textContent = c.name || '—';
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
+      save();
+      return;
+    }
+    if (state.ui.tool === 'intra_transfer') {
+      // Non Cash has two account fields on one screen (source/dest), unlike
+      // every other tool here which only has one — nonCashSearchTarget is
+      // set right before opening the modal so the selection routes to
+      // whichever field's Search button was actually clicked.
+      const target = state.ui.nonCashSearchTarget;
+      const draft = state.ui.intraTransferDraft ||= {};
+      if (target === 'dest') {
+        draft.destAcct = c.accountNumber || '';
+        draft.destName = c.name || '';
+        draft.destId = c.id;
+        if (byId('itrDestAcct')) byId('itrDestAcct').value = c.accountNumber || '';
+        if (byId('itrDestName')) byId('itrDestName').innerHTML = `<strong>${escapeHtml(c.name || '')}</strong>`;
+      } else {
+        draft.sourceAcct = c.accountNumber || '';
+        draft.sourceName = c.name || '';
+        draft.sourceId = c.id;
+        if (byId('itrSourceAcct')) byId('itrSourceAcct').value = c.accountNumber || '';
+        if (byId('itrSourceName')) byId('itrSourceName').innerHTML = `<strong>${escapeHtml(c.name || '')}</strong>`;
+      }
       save();
       return;
     }
