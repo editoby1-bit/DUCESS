@@ -1712,17 +1712,24 @@ if (approvalRecord.type === 'float_topup') {
         break;
       }
       case 'intra_bank_transfer': {
-        // Debit source account
+        // SURGICAL FIX 2026-09-04: this called a non-existent
+        // ensureCustomerAccount() — approving a Non Cash transaction threw
+        // here and silently never moved either balance. Switched to the
+        // same txObj()+recalcCustomerBalance() pattern every other real
+        // balance change in this file uses (see customer_credit above).
         const src = (state.customers || []).find(c => c.id === req.payload.sourceAccountId || c.accountNumber === req.payload.sourceAccountNumber);
         const dst = (state.customers || []).find(c => c.id === req.payload.destAccountId || c.accountNumber === req.payload.destAccountNumber);
+        const transferAmount = Number(req.payload.amount || 0);
+        const transferDetails = String(req.payload.details || '').trim();
         if (src) {
-          const srcAcc = ensureCustomerAccount(src.id);
-          srcAcc.balance = (Number(srcAcc.balance) || 0) - Number(req.payload.amount || 0);
+          src.transactions ||= [];
+          src.transactions.push(txObj('debit', transferAmount, transferDetails, req.requestedByName, req.requestedBy, currentStaff()?.name || '', dst?.name || req.payload.destAccountName || '', req.payload.date));
+          recalcCustomerBalance(src);
         }
-        // Credit destination account
         if (dst) {
-          const dstAcc = ensureCustomerAccount(dst.id);
-          dstAcc.balance = (Number(dstAcc.balance) || 0) + Number(req.payload.amount || 0);
+          dst.transactions ||= [];
+          dst.transactions.push(txObj('credit', transferAmount, transferDetails, req.requestedByName, req.requestedBy, currentStaff()?.name || '', src?.name || req.payload.sourceAccountName || '', req.payload.date));
+          recalcCustomerBalance(dst);
         }
         break;
       }
@@ -1735,15 +1742,23 @@ if (approvalRecord.type === 'float_topup') {
       case 'inter_staff_credit': {
         // Cash Officer credits a Teller's operational account.
         // getStaffOperationalBalance reads from state.approvals directly, so no ledger entry needed in local mode.
-        // "Fund My Operational Balance" (Credit Journal) uses this same approval
-        // type but also supplies a sourceAccountId/sourceAccountNumber — debit
-        // that real account the same way intra_bank_transfer does. Ordinary
-        // Treasury-initiated credits have no source and are unaffected.
-        if (req.payload?.sourceAccountId || req.payload?.sourceAccountNumber) {
+        // SURGICAL ADDITION 2026-09-04 (client request): funding a teller's
+        // operational balance no longer has to come from Treasury cash —
+        // any staff or customer account can be the source. When one is
+        // given, this is a REAL transfer: the source account's actual
+        // balance is debited here, same as any other posting (same
+        // txObj()+recalcCustomerBalance() pattern as intra_bank_transfer
+        // above). The credit side of a teller's op balance stays derived
+        // live from approved requests (see getStaffOperationalBreakdown),
+        // so no separate credit-side entry is needed here.
+        if (req.payload.sourceAccountId || req.payload.sourceAccountNumber) {
           const src = (state.customers || []).find(c => c.id === req.payload.sourceAccountId || c.accountNumber === req.payload.sourceAccountNumber);
           if (src) {
-            const srcAcc = ensureCustomerAccount(src.id);
-            srcAcc.balance = (Number(srcAcc.balance) || 0) - Number(req.payload.amount || 0);
+            const fundAmount = Number(req.payload.amount || 0);
+            const fundDetails = String(req.payload.note || '').trim() || `Funding transfer to ${req.payload.targetAccountName || 'teller operational account'}`;
+            src.transactions ||= [];
+            src.transactions.push(txObj('debit', fundAmount, fundDetails, req.requestedByName, req.requestedBy, currentStaff()?.name || '', req.payload.targetAccountName || '', req.payload.date));
+            recalcCustomerBalance(src);
           }
         }
         break;
@@ -2694,7 +2709,6 @@ function hideProcessing() {
         <div class="journal-pane form-card spacious-journal-pane standalone-journal-pane" id="journalPane">
           <div class="journal-pane-head compact-journal-head">
             <h3>Journal Generated</h3>
-            ${kind === 'credit' ? `<button id="fundOperationalBalanceBtn" type="button" class="sheet-btn secondary tiny-btn">Fund My Operational Balance</button>` : ''}
             <div class="journal-pane-actions ${journalCollapsed ? "" : "journal-pane-actions-hidden"}"><button id="journalCollapseTopBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
           </div>
           <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
@@ -2708,9 +2722,11 @@ function hideProcessing() {
                 <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">TOTAL POSTED</span><span class="mini-kpi-pill-value" id="journalTotalPosted">${money(0)}</span></div>
               </div>
             </div>
-            <div class="journal-entry-top row-counterparty journal-form-row" style="display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
-              <div class="journal-cell"><input id="journalCounterparty" class="entry-input" value="${escapeHtml(String(telleringDraft.journalCounterparty || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid To'}</div></div>
-              <div class="journal-cell"><div class="display-field" id="journalTxDate">${fmtDate(businessDate())}</div><div class="journal-cell-label">Date of Transaction</div></div>
+            <!-- SURGICAL FIX 2026-09-03: Received By / Paid To applies to the whole
+                 journal, not one row — moved above the table so it's set once per
+                 journal instead of re-typed for every entry added. -->
+            <div class="journal-entry-top row-counterparty-top" style="display:grid;grid-template-columns:max-content 240px;column-gap:10px;align-items:end;margin-bottom:10px;">
+              <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.journalCounterpartyDraft || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid To'}</div></div>
             </div>
             <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>Details</th><th>Amount</th><th>Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
@@ -3014,7 +3030,7 @@ function hideProcessing() {
     const p = a.payload || {};
     if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${escapeHtml(p.sourceAccountName||p.sourceAccountNumber||'—')} → ${escapeHtml(p.destAccountName||p.destAccountNumber||'—')} • ${p.date}`;
     if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
-    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')}${(p.sourceAccountName || p.sourceAccountNumber) ? ` from ${escapeHtml(p.sourceAccountName || p.sourceAccountNumber)}` : ''} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
+    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${escapeHtml(p.staffName || 'staff')} for ${p.date}`;
     if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${escapeHtml(p.accountNumber || '')} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
     if (a.type === 'account_opening') return `${escapeHtml(p.name || '')} • Phone ${escapeHtml(p.phone || '—')} • NIN ${escapeHtml(p.nin || '—')} • BVN ${escapeHtml(p.bvn || '—')}`;
@@ -4218,12 +4234,13 @@ function normalizeStaffLedgerEntryType(row) {
       lookupFill(byId('workspace'), c);
     };
     byId('lookupBtn').onclick = () => openCustomerSearchModal(state.customers);
-    // Enter/Search-only lookup, matching every other account-number field
-    // in the app — typing alone just clears any stale result so it can't
-    // be mistaken for a match on what's currently typed.
+    // SURGICAL FIX 2026-09-03: client does not want the account fetched
+    // live as-you-type or on blur/tab — only on explicit Enter. Typing now
+    // only clears a stale display when the field is emptied; doLookup()
+    // itself runs solely from the Enter keyup below.
     byId('lookupAcc').oninput = () => {
       const v = (byId('lookupAcc')?.value || '').trim();
-      if (!v) { state.ui.checkBalanceLoaded = false; hidePhoto(); lookupFill(byId('workspace'), null); }
+      if (!v) doLookup(true);
     };
     byId('lookupAcc').onkeyup = (e) => { if (e.key === "Enter") doLookup(false); };
     byId('openStatementBtn').onclick = () => { state.ui.tool = 'account_statement'; renderWorkspace(); };
@@ -4454,6 +4471,45 @@ function normalizeStaffLedgerEntryType(row) {
     if (amtInput) amtInput.oninput = () => { draft.amount = amtInput.value; };
     if (noteInput) noteInput.oninput = () => { draft.note = noteInput.value; };
     qq('input[name="staffCreditMode"]').forEach(r => r.onchange = () => { if (r.checked) draft.mode = r.value; });
+    // SURGICAL ADDITION 2026-09-04 (client request): funding source toggle —
+    // Treasury (existing cash injection) vs Debit an Account (real transfer,
+    // debits the source account for real on approval — see the
+    // inter_staff_credit approval case). Switching source re-renders since
+    // it shows/hides a whole field group (Source Account vs Payment Mode).
+    qq('input[name="staffCreditSource"]').forEach(r => r.onchange = () => {
+      if (!r.checked) return;
+      draft.source = r.value;
+      if (r.value !== 'account') { draft.sourceAcct = ''; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0; }
+      save();
+      renderWorkspace();
+    });
+    const sourceAccInput = byId('staffCreditSourceAcc');
+    if (sourceAccInput) {
+      const lookupSourceAcct = (quiet = false) => {
+        const v = (byId('staffCreditSourceAcc')?.value || '').trim();
+        // Funding source is limited to accounts that actually live in
+        // state.customers (customers, staff_wallet, staff_operational,
+        // etc.) — the same set the approval-time debit above can act on.
+        const match = (state.customers || []).find(c => String(c.accountNumber || '') === v);
+        if (!match) {
+          draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0;
+          if (byId('staffCreditSourceInfo')) byId('staffCreditSourceInfo').innerHTML = v ? `<span style="color:var(--accent-red)">Account not found</span>` : '';
+          if (!quiet && v) showToast('Account not found');
+          return;
+        }
+        draft.sourceId = match.id;
+        draft.sourceName = match.name || '';
+        draft.sourceBalance = Number(match.balance || 0);
+        if (byId('staffCreditSourceInfo')) byId('staffCreditSourceInfo').innerHTML = `<strong>${escapeHtml(draft.sourceName)}</strong> <span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance)}`;
+      };
+      // Enter-to-fetch only, same as every other account number field.
+      sourceAccInput.oninput = () => {
+        draft.sourceAcct = sourceAccInput.value; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0;
+        if (byId('staffCreditSourceInfo')) byId('staffCreditSourceInfo').innerHTML = '';
+      };
+      sourceAccInput.onkeyup = (e) => { if (e.key === 'Enter') lookupSourceAcct(); };
+      if (byId('staffCreditSourceSearch')) byId('staffCreditSourceSearch').onclick = () => { state.ui.nonCashSearchTarget = 'staffCreditSource'; openCustomerSearchModal(state.customers); };
+    }
     const submitBtn = byId('submitStaffCredit');
     if (!submitBtn) return;
     submitBtn.onclick = async () => {
@@ -4462,11 +4518,23 @@ function normalizeStaffLedgerEntryType(row) {
       const amount = Number(byId('staffCreditAmount')?.value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      const paymentMode = q('input[name="staffCreditMode"]:checked')?.value || 'cash';
       const note = (byId('staffCreditNote')?.value || '').trim();
       const targetAccount = (state.customers || []).find(c => c.id === accountId);
       const st = currentStaff();
-      confirmAction(`Credit ${targetAccount?.name || 'staff account'} ${money(amount)}?`, async () => {
+      const fundingSource = draft.source === 'account' ? 'account' : 'treasury';
+      let sourceAccount = null;
+      if (fundingSource === 'account') {
+        if (!draft.sourceId) return showToast('Look up the source account first');
+        sourceAccount = (state.customers || []).find(c => c.id === draft.sourceId);
+        if (!sourceAccount) return showToast('Source account not found — look it up again');
+        if (sourceAccount.id === targetAccount?.id) return showToast('Source and destination cannot be the same account');
+        if (amount > Number(sourceAccount.balance || 0) + 0.01) return showToast(`Amount exceeds the source account's balance (${money(sourceAccount.balance || 0)})`);
+      }
+      const paymentMode = fundingSource === 'account' ? 'transfer' : (q('input[name="staffCreditMode"]:checked')?.value || 'cash');
+      const confirmMessage = fundingSource === 'account'
+        ? `Debit ${sourceAccount.name} ${money(amount)} to fund ${targetAccount?.name || 'staff account'}?`
+        : `Credit ${targetAccount?.name || 'staff account'} ${money(amount)}?`;
+      confirmAction(confirmMessage, async () => {
         showProcessing('Sending for approval...'); await nextPaint();
         try {
           const result = await submitApprovalThroughGateway('inter_staff_credit', {
@@ -4474,7 +4542,11 @@ function normalizeStaffLedgerEntryType(row) {
             targetAccountId: accountId,
             targetAccountNumber: targetAccount?.accountNumber || targetAccount?.account_number,
             targetAccountName: targetAccount?.name || targetAccount?.displayName || targetAccount?.display_name,
-            amount, paymentMode, date: businessDate(), note
+            amount, paymentMode, date: businessDate(), note,
+            fundingSource,
+            sourceAccountId: sourceAccount?.id || '',
+            sourceAccountNumber: sourceAccount?.accountNumber || '',
+            sourceAccountName: sourceAccount?.name || ''
           });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit');
           state.ui.staffCreditDraft = {};
@@ -4492,48 +4564,27 @@ function normalizeStaffLedgerEntryType(row) {
         <div class="cs2-title">Non Cash Transaction</div>
         <div class="cs2-stack">
           <div class="cs2-row">
+            <div class="cs2-label">Debit Account</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off"></div>
+            <button id="itrLookupSource" class="sheet-btn secondary tiny-btn">Search</button>
+          </div>
+          <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
+          <div id="itrSourceBalance" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
+          <div class="cs2-row">
+            <div class="cs2-label">Credit Account</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrDestAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number to credit" autocomplete="off"></div>
+            <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Search</button>
+          </div>
+          <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
+          <div id="itrDestBalance" class="cs2-note-box" style="min-height:24px">${draft.destId ? `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.destBalance || 0)}` : ''}</div>
+          <div class="cs2-row">
             <div class="cs2-label">Amount</div>
             <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(draft.amount || ''))}"></div>
           </div>
-
-          <div class="cs2-block-title">Debit</div>
           <div class="cs2-row">
-            <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off"></div>
-            <button id="itrLookupSource" type="button" class="sheet-btn secondary tiny-btn">Search</button>
+            <div class="cs2-label">Details / Narration</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
           </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Account Name</div>
-            <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Details</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrDetailsDebit" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Balance</div>
-            <div id="itrSourceBalance" class="cs2-note-box">${draft.sourceId ? money(draft.sourceBalance || 0) : '—'}</div>
-          </div>
-
-          <div class="cs2-block-title">Credit</div>
-          <div class="cs2-row">
-            <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrDestAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number to credit" autocomplete="off"></div>
-            <button id="itrLookupDest" type="button" class="sheet-btn secondary tiny-btn">Search</button>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Account Name</div>
-            <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Details</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrDetailsCredit" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Balance</div>
-            <div id="itrDestBalance" class="cs2-note-box">${draft.destId ? money(draft.destBalance || 0) : '—'}</div>
-          </div>
-
           <div class="cs2-button-row">
             <button id="submitIntraTransfer" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
           </div>
@@ -4546,59 +4597,57 @@ function normalizeStaffLedgerEntryType(row) {
     const sourceInput = byId('itrSourceAcct');
     const destInput = byId('itrDestAcct');
     const amtInput = byId('itrAmount');
-    const detailsDebitInput = byId('itrDetailsDebit');
-    const detailsCreditInput = byId('itrDetailsCredit');
-    const lookupAcct = (acctNum, nameElId, balanceElId, idKey, nameKey, balanceKey) => {
+    const detailsInput = byId('itrDetails');
+    const lookupAcct = async (acctNum, nameElId, idKey, nameKey, balanceElId, balanceKey) => {
       const match = (state.customers || []).find(c => c.accountNumber === acctNum || c.account_number === acctNum);
       if (match) {
         draft[idKey] = match.id;
         draft[nameKey] = match.name || match.full_name || match.display_name || acctNum;
-        draft[balanceKey] = Number(match.balance) || 0;
+        draft[balanceKey] = Number(match.balance || 0);
         if (byId(nameElId)) byId(nameElId).innerHTML = `<strong>${escapeHtml(draft[nameKey])}</strong>`;
-        if (byId(balanceElId)) byId(balanceElId).textContent = money(draft[balanceKey]);
+        if (byId(balanceElId)) byId(balanceElId).innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft[balanceKey])}`;
       } else {
-        draft[idKey] = ''; draft[nameKey] = ''; draft[balanceKey] = 0;
         if (byId(nameElId)) byId(nameElId).innerHTML = `<span style="color:var(--accent-red)">Account not found</span>`;
-        if (byId(balanceElId)) byId(balanceElId).textContent = '—';
+        if (byId(balanceElId)) byId(balanceElId).innerHTML = '';
       }
     };
 
-    // SURGICAL FIX (client correction, reversed 2026-08-28's live-as-you-type
-    // change): account number fields fetch ONLY on Enter or the Search
-    // button, matching every other account-number field in the app. Typing
-    // only persists the draft and clears any stale name/balance display.
-    if (sourceInput) {
-      sourceInput.oninput = () => {
-        draft.sourceAcct = sourceInput.value; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0;
-        if (byId('itrSourceName')) byId('itrSourceName').innerHTML = '';
-        if (byId('itrSourceBalance')) byId('itrSourceBalance').textContent = '—';
-      };
-      sourceInput.onkeyup = (e) => { if (e.key === 'Enter') lookupAcct(sourceInput.value.trim(), 'itrSourceName', 'itrSourceBalance', 'sourceId', 'sourceName', 'sourceBalance'); };
-    }
-    if (destInput) {
-      destInput.oninput = () => {
-        draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; draft.destBalance = 0;
-        if (byId('itrDestName')) byId('itrDestName').innerHTML = '';
-        if (byId('itrDestBalance')) byId('itrDestBalance').textContent = '—';
-      };
-      destInput.onkeyup = (e) => { if (e.key === 'Enter') lookupAcct(destInput.value.trim(), 'itrDestName', 'itrDestBalance', 'destId', 'destName', 'destBalance'); };
-    }
-    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
-    // One shared narration, shown in both the Debit and Credit blocks —
-    // keep the two inputs in sync so it reads as a single Details value.
-    const syncDetails = (value, source) => {
-      draft.details = value;
-      if (source !== 'debit' && detailsDebitInput) detailsDebitInput.value = value;
-      if (source !== 'credit' && detailsCreditInput) detailsCreditInput.value = value;
+    // SURGICAL FIX 2026-09-03 (client correction, supersedes the 2026-08-28
+    // addition below): client does not want the account fetched live as
+    // you type — only on explicit Enter, same as every other account
+    // number field in the app. Typing now only persists the draft and
+    // clears the stale name/id/balance when the number is edited;
+    // lookupAcct() runs solely from the Enter keyup handlers below.
+    if (sourceInput) sourceInput.oninput = () => {
+      draft.sourceAcct = sourceInput.value; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0;
+      if (byId('itrSourceName')) byId('itrSourceName').innerHTML = '';
+      if (byId('itrSourceBalance')) byId('itrSourceBalance').innerHTML = '';
     };
-    if (detailsDebitInput) detailsDebitInput.oninput = () => syncDetails(detailsDebitInput.value, 'debit');
-    if (detailsCreditInput) detailsCreditInput.oninput = () => syncDetails(detailsCreditInput.value, 'credit');
+    if (destInput) destInput.oninput = () => {
+      draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; draft.destBalance = 0;
+      if (byId('itrDestName')) byId('itrDestName').innerHTML = '';
+      if (byId('itrDestBalance')) byId('itrDestBalance').innerHTML = '';
+    };
+    if (sourceInput) sourceInput.onkeyup = (e) => {
+      if (e.key !== 'Enter') return;
+      const v = sourceInput.value.trim();
+      if (v) lookupAcct(v, 'itrSourceName', 'sourceId', 'sourceName', 'itrSourceBalance', 'sourceBalance');
+    };
+    if (destInput) destInput.onkeyup = (e) => {
+      if (e.key !== 'Enter') return;
+      const v = destInput.value.trim();
+      if (v) lookupAcct(v, 'itrDestName', 'destId', 'destName', 'itrDestBalance', 'destBalance');
+    };
+    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
+    if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
 
-    // Search opens the picker (for finding a customer by name when the
-    // number isn't known). nonCashSearchTarget tells
-    // applySelectedCustomerToActiveTool which of the two fields (source/
-    // dest) to fill when a customer is picked, since Non Cash is the only
-    // screen with two account fields.
+    // SURGICAL FIX 2026-08-28 (client correction): Search used to just
+    // re-run the account-NUMBER lookup on whatever was already typed — no
+    // way to find a customer by NAME when the number isn't known, unlike
+    // Credit/Debit's Search which opens the picker. Now matches that
+    // behavior. nonCashSearchTarget tells applySelectedCustomerToActiveTool
+    // which of the two fields (source/dest) to fill when a customer is
+    // picked, since Non Cash is the only screen with two account fields.
     if (byId('itrLookupSource')) byId('itrLookupSource').onclick = () => { state.ui.nonCashSearchTarget = 'source'; openCustomerSearchModal(state.customers); };
     if (byId('itrLookupDest')) byId('itrLookupDest').onclick = () => { state.ui.nonCashSearchTarget = 'dest'; openCustomerSearchModal(state.customers); };
 
@@ -4617,7 +4666,7 @@ function normalizeStaffLedgerEntryType(row) {
             staffId: st.id, staffName: st.name, date: businessDate(),
             sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
             destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
-            amount, details: (byId('itrDetailsDebit')?.value || byId('itrDetailsCredit')?.value || '').trim()
+            amount, details: (byId('itrDetails')?.value||'').trim()
           });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
           state.ui.intraTransferDraft = {};
@@ -4867,11 +4916,14 @@ function normalizeStaffLedgerEntryType(row) {
     };
     const accInput = byId(`${prefix}Acc`);
     if (accInput) {
+      // SURGICAL FIX 2026-09-03: client does not want the account fetched
+      // live as-you-type — only on explicit Enter. oninput now only
+      // persists the draft account number; doLookup() runs solely from
+      // the Enter keyup below.
       accInput.oninput = () => {
         const v = (accInput.value || '').trim();
         draft.accountNumber = v;
         save();
-        if (!v) clearFilledCustomer();
       };
       accInput.onkeyup = (e) => { if (e.key === 'Enter') doLookup(false); };
     }
@@ -5114,10 +5166,9 @@ function normalizeStaffLedgerEntryType(row) {
       updateSingleCommissionPreview();
     };
     const resetJournalEntryFields = (clearAccount = false) => {
-      // Always clear amount/details after each entry. Received By/Paid To
-      // (journalCounterparty) now lives once at the top of the journal and
-      // is deliberately NOT cleared here — it applies to every row added
-      // until the journal itself is cleared/submitted.
+      // Always clear amount/details after each entry. journalCounterparty is
+      // deliberately NOT cleared here — Received By/Paid To now applies to
+      // the whole journal (set once above the table), not re-typed per row.
       ['journalAmount','journalDetails'].forEach(id=>{ if(byId(id)) byId(id).value=''; });
       telleringDraft.journalAmount = '';
       telleringDraft.journalCharges = { apply: false, checked: {}, values: {} };
@@ -5128,12 +5179,10 @@ function normalizeStaffLedgerEntryType(row) {
         if (check) check.checked = false;
         if (input) input.value = '';
       });
-      // Only clear account/name/counterparty when explicitly requested (e.g. journal cleared/submitted)
+      // Only clear account/name when explicitly requested (e.g. journal cleared/submitted)
       if (clearAccount) {
         if (byId('journalAcc')) byId('journalAcc').value = '';
         if (byId('journalName')) byId('journalName').textContent = '—';
-        if (byId('journalCounterparty')) byId('journalCounterparty').value = '';
-        telleringDraft.journalCounterparty = '';
         state.ui.journalAccDraft = '';
         state.ui.selectedJournalCustomerId = null;
       }
@@ -5162,6 +5211,10 @@ function normalizeStaffLedgerEntryType(row) {
         const variance = Math.max(0, -remaining);
         return { row, formBase: journalForm, remaining, variance };
       });
+      // SURGICAL FIX 2026-09-03: reordered to client spec — S/N, Account
+      // Number, Account Name, Details, Amount, Balance — then the existing
+      // Variance/Action columns kept as-is (not part of the client's list,
+      // but still functionally needed here).
       const rows = withBalances.map(({ row, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${escapeHtml(row.accountNumber || '')}</td><td>${escapeHtml(row.customerName || '')}${chargeMeta}</td><td>${escapeHtml(row.details || '')}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
       const totalPosted = journal.reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -5278,26 +5331,20 @@ function normalizeStaffLedgerEntryType(row) {
         state.ui.collapsedJournals[visibilityKey] = false;
         save();
       };
+      // SURGICAL FIX 2026-09-03: client does not want the account fetched
+      // live as-you-type or on blur/tab — only on explicit Enter. oninput
+      // and onchange now do draft persistence (and clearing when the field
+      // is emptied) only; searchSingle() runs solely from the Enter keyup
+      // below.
       byId('txAcc').oninput = () => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
         if (!v) { clearSingleCustomer(); return; }
-        // Enter/Search-only lookup (client correction) — typing alone no
-        // longer auto-fetches. If what's typed no longer matches the
-        // currently selected customer, clear the stale display so it can't
-        // be mistaken for a match on what's now in the field.
-        const existing = state.ui.selectedCustomerId ? state.customers.find(c => c.id === state.ui.selectedCustomerId) : null;
-        if (!existing || String(existing.accountNumber || '') !== v) {
-          if (byId('txName')) byId('txName').textContent = '—';
-          if (byId('txBalance')) byId('txBalance').innerHTML = '—';
-          state.ui.selectedCustomerId = null;
-        }
       };
       byId('txAcc').onchange = () => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
         if (!v) { clearSingleCustomer(); return; }
-        save();
       };
       byId('txAcc').onkeyup = e => { if(e.key==='Enter') searchSingle(); };
     }
@@ -5378,41 +5425,28 @@ function normalizeStaffLedgerEntryType(row) {
         state.ui.selectedJournalCustomerId = null;
         // Do NOT call save() here — it can trigger re-renders that wipe the account field
       };
+      // SURGICAL FIX 2026-09-03: client does not want the account fetched
+      // live as-you-type or on blur/tab — only on explicit Enter. oninput
+      // and onchange now do draft persistence (and clearing when the field
+      // is emptied) only; searchJournal() runs solely from the Enter keyup
+      // below.
       byId('journalAcc').oninput = () => {
         if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
         // CRITICAL: set journalAccDraft immediately so any re-render restores this value
         state.ui.journalAccDraft = v;
-        if (!v) {
-          state.ui.selectedJournalCustomerId = null;
-          if (byId('journalName')) byId('journalName').textContent = '—';
-          // Do not save while editing the journal account field; saving can repaint and steal focus.
-          return;
-        }
-        // Enter/Search-only lookup (client correction) — typing alone no
-        // longer auto-fetches. If what's typed no longer matches the
-        // currently selected customer, clear the stale display so it can't
-        // be mistaken for a match on what's now in the field.
+        if (!v) { clearJournalCustomer(); return; }
         const selected = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
         if (selected && String(selected.accountNumber || '') !== v) {
           state.ui.selectedJournalCustomerId = null;
           if (byId('journalName')) byId('journalName').textContent = '—';
         }
-        // Do not save while typing; saving through the gateway can repaint the journal row and steal focus.
       };
       byId('journalAcc').onchange = () => {
         if (byId('journalAcc')?.dataset?.restoring === '1') return;
         const v = (byId('journalAcc').value || '').trim();
         state.ui.journalAccDraft = v;
         if (!v) { clearJournalCustomer(); return; }
-        // Check if already resolved (works for both customers and staff accounts)
-        const alreadyInCustomers = state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null;
-        const alreadyByAccNo = !alreadyInCustomers ? getCustomerByAccountNo(v) : null;
-        const already = alreadyInCustomers || alreadyByAccNo;
-        if (already && String(already.accountNumber || '') === v) {
-          if (byId('journalName')) byId('journalName').textContent = already.name || '—';
-          if (already.id !== state.ui.selectedJournalCustomerId) state.ui.selectedJournalCustomerId = already.id;
-        }
       };
       byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
     }
@@ -5446,11 +5480,14 @@ function normalizeStaffLedgerEntryType(row) {
       journalAmountInput.onchange = () => { protectJournalAccountDraft(); telleringDraft.journalAmount = journalAmountInput.value || ''; };
     }
     if (byId('journalCounterparty')) {
-      const counterpartyInput = byId('journalCounterparty');
-      counterpartyInput.oninput = () => { telleringDraft.journalCounterparty = counterpartyInput.value || ''; };
-      counterpartyInput.onchange = () => { telleringDraft.journalCounterparty = counterpartyInput.value || ''; save(); };
+      // SURGICAL FIX 2026-09-03: persist the whole-journal Received By/Paid
+      // To value so it survives re-renders across multiple "Add to Journal"
+      // clicks, same pattern as journalAccDraft/telleringDraft.journalAmount.
+      byId('journalCounterparty').oninput = () => {
+        if (byId('journalCounterparty')?.dataset?.restoring === '1') return;
+        state.ui.journalCounterpartyDraft = byId('journalCounterparty').value || '';
+      };
     }
-    if (byId('fundOperationalBalanceBtn')) byId('fundOperationalBalanceBtn').onclick = () => openFundOperationalBalanceModal();
     CHARGE_DEFS.forEach(def => {
       const check = q(`[data-charge-check="${def.key}"][data-charge-scope="journal"]`);
       const input = q(`[data-charge-input="${def.key}"][data-charge-scope="journal"]`);
@@ -5612,11 +5649,11 @@ function normalizeStaffLedgerEntryType(row) {
       attachmentState.loading = false;
       state.ui.generatedJournals[visibilityKey] = false;
       state.ui.journalAccDraft = '';
+      state.ui.journalCounterpartyDraft = '';
       state.ui.selectedJournalCustomerId = null;
       telleringDraft.journalAmount = '';
       telleringDraft.journalFormAmount = '';
       telleringDraft.journalFormMode = 'cash';
-      telleringDraft.journalCounterparty = '';
       const input = byId('journalFieldNoteInput');
       if (input) input.value = '';
       save();
@@ -5760,6 +5797,7 @@ function normalizeStaffLedgerEntryType(row) {
           attachmentState.fieldNote = null;
           attachmentState.loading = false;
           state.ui.generatedJournals[visibilityKey] = false;
+          state.ui.journalCounterpartyDraft = '';
           telleringDraft.journalFormAmount = '';
           telleringDraft.journalFormMode = 'cash';
           const input = byId('journalFieldNoteInput');
@@ -5779,118 +5817,6 @@ function normalizeStaffLedgerEntryType(row) {
     updateSingleCommissionPreview();
     updateJournalCommissionPreview();
     recalcPreview();
-  }
-
-  // Teller's own operational account (the "staff_operational" customer row
-  // linked to them) — the same account getStaffOperationalBreakdown reads
-  // from. Used as the fixed credit destination for the Fund modal below.
-  function getStaffOperationalAccount(staffId) {
-    return (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId) || null;
-  }
-
-  // "Fund My Operational Balance" (Credit Journal only): lets a teller debit
-  // ANY account — staff or customer — and credit their own operational
-  // balance with it, so it can be used as the Journal Form Amount for
-  // disbursement. Reuses the existing 'inter_staff_credit' approval type
-  // (already what funds a teller's operational balance — see
-  // getStaffOperationalBreakdown's "cash" filter) and adds an optional
-  // source-account debit, applied in the approval-processing switch only
-  // when sourceAccountId/sourceAccountNumber is present, so ordinary
-  // Treasury-initiated staff credits (no source) are unaffected.
-  function openFundOperationalBalanceModal() {
-    const draft = state.ui.fundOperationalDraft ||= {};
-    const body = `
-      <div class="stack">
-        <div class="cs2-row">
-          <div class="cs2-label">Source Account</div>
-          <div class="cs2-input-wrap cs2-wide"><input id="fundSourceAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off"></div>
-          <button id="fundSourceSearch" type="button" class="sheet-btn secondary tiny-btn">Search</button>
-        </div>
-        <div id="fundSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
-        <div id="fundSourceBalance" class="cs2-note-box">${draft.sourceId ? `Available balance: ${money(draft.sourceBalance || 0)}` : ''}</div>
-        <div class="cs2-row">
-          <div class="cs2-label">Amount</div>
-          <div class="cs2-input-wrap cs2-medium"><input id="fundAmount" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(draft.amount || ''))}"></div>
-        </div>
-        <div class="cs2-row">
-          <div class="cs2-label">Details</div>
-          <div class="cs2-input-wrap cs2-wide"><input id="fundDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="Reason for funding"></div>
-        </div>
-      </div>`;
-    openModal('Fund My Operational Balance', body, [
-      { label: 'Cancel', className: 'secondary', onClick: closeModal },
-      { label: 'Fund', className: '', onClick: submitFundOperationalBalance }
-    ]);
-    bindFundOperationalBalanceModal();
-  }
-
-  function bindFundOperationalBalanceModal() {
-    const draft = state.ui.fundOperationalDraft ||= {};
-    const srcInput = byId('fundSourceAcct');
-    const doLookup = (quiet = false) => {
-      const v = (byId('fundSourceAcct')?.value || '').trim();
-      if (!v) return;
-      const c = getCustomerByAccountNo(v);
-      if (!c) { if (!quiet) showToast('Account not found'); return; }
-      draft.sourceId = c.id;
-      draft.sourceAcct = c.accountNumber || v;
-      draft.sourceName = c.name || c.displayName || v;
-      draft.sourceBalance = Number(c.balance) || 0;
-      if (byId('fundSourceName')) byId('fundSourceName').innerHTML = `<strong>${escapeHtml(draft.sourceName)}</strong>`;
-      if (byId('fundSourceBalance')) byId('fundSourceBalance').textContent = `Available balance: ${money(draft.sourceBalance)}`;
-    };
-    // Enter-only lookup, matching the account-number-field convention used
-    // everywhere else in the app — no live-as-you-type fetch.
-    if (srcInput) {
-      srcInput.oninput = () => {
-        const v = srcInput.value;
-        draft.sourceAcct = v;
-        draft.sourceId = ''; draft.sourceName = ''; draft.sourceBalance = 0;
-        if (byId('fundSourceName')) byId('fundSourceName').innerHTML = '';
-        if (byId('fundSourceBalance')) byId('fundSourceBalance').textContent = '';
-      };
-      srcInput.onkeyup = (e) => { if (e.key === 'Enter') doLookup(false); };
-    }
-    if (byId('fundSourceSearch')) byId('fundSourceSearch').onclick = () => {
-      // Dedicated routing flag checked first in applySelectedCustomerToActiveTool,
-      // so picking a customer here fills THIS modal's source field instead of
-      // whatever workspace tool happens to be active underneath it.
-      state.ui.fundModalSearchActive = true;
-      openCustomerSearchModal(state.customers);
-    };
-    const amtInput = byId('fundAmount');
-    if (amtInput) { bindAmountCommaFormatting('fundAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
-    const detInput = byId('fundDetails');
-    if (detInput) detInput.oninput = () => { draft.details = detInput.value; };
-  }
-
-  function submitFundOperationalBalance() {
-    const draft = state.ui.fundOperationalDraft || {};
-    const amount = parseAmountInput('fundAmount');
-    if (!draft.sourceId) return showToast('Look up the source account first');
-    if (!(amount > 0)) return showToast('Enter a valid amount');
-    if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-    const st = currentStaff();
-    const opAccount = getStaffOperationalAccount(st?.id);
-    if (!opAccount) return showToast('Your operational account could not be found');
-    if (draft.sourceId === opAccount.id) return showToast('Choose a different source account');
-    const details = (byId('fundDetails')?.value || '').trim();
-    confirmAction(`Fund your operational balance with ${money(amount)} from ${draft.sourceName}?`, async () => {
-      showProcessing('Submitting funding request...'); await nextPaint();
-      try {
-        const result = await submitApprovalThroughGateway('inter_staff_credit', {
-          staffId: st.id, staffName: st.name,
-          targetAccountId: opAccount.id, targetAccountNumber: opAccount.accountNumber, targetAccountName: opAccount.name,
-          sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
-          amount, paymentMode: 'transfer', note: details, date: businessDate()
-        });
-        if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit funding request');
-        state.ui.fundOperationalDraft = {};
-        closeModal();
-        render();
-        showToast('Funding request sent for approval');
-      } finally { hideProcessing(); }
-    });
   }
 
   function bindApprovals() {
@@ -6180,6 +6106,7 @@ function normalizeStaffLedgerEntryType(row) {
       `<option value="${a.id}">${escapeHtml(a.name || a.displayName || a.display_name || '')} (${escapeHtml(a.accountNumber || a.account_number || '')})</option>`
     ).join('');
     const draft = state.ui.staffCreditDraft ||= {};
+    const fundingSource = draft.source === 'account' ? 'account' : 'treasury';
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Credit Teller Account</div>
@@ -6194,9 +6121,25 @@ function normalizeStaffLedgerEntryType(row) {
             </div>
           </div>
           <div class="cs2-row">
+            <div class="cs2-label">Funding Source</div>
+            <div class="tx-mode-toggle">
+              <label class="tx-toggle-pill"><input type="radio" name="staffCreditSource" value="treasury" ${fundingSource === 'treasury' ? 'checked' : ''}> <span>Treasury</span></label>
+              <label class="tx-toggle-pill"><input type="radio" name="staffCreditSource" value="account" ${fundingSource === 'account' ? 'checked' : ''}> <span>Debit an Account</span></label>
+            </div>
+          </div>
+          ${fundingSource === 'account' ? `
+          <div class="cs2-row">
+            <div class="cs2-label">Source Account</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="staffCreditSourceAcc" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit — Enter to fetch" autocomplete="off"></div>
+            <button id="staffCreditSourceSearch" class="sheet-btn secondary tiny-btn">Search</button>
+          </div>
+          <div id="staffCreditSourceInfo" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<strong>${escapeHtml(draft.sourceName || '')}</strong> <span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
+          ` : ''}
+          <div class="cs2-row">
             <div class="cs2-label">Amount</div>
             <div class="cs2-input-wrap cs2-medium"><input id="staffCreditAmount" class="entry-input cs2-input" type="number" value="${escapeHtml(String(draft.amount || ''))}"></div>
           </div>
+          ${fundingSource === 'treasury' ? `
           <div class="cs2-row">
             <div class="cs2-label">Payment Mode</div>
             <div class="tx-mode-toggle">
@@ -6204,6 +6147,7 @@ function normalizeStaffLedgerEntryType(row) {
               <label class="tx-toggle-pill"><input type="radio" name="staffCreditMode" value="transfer" ${(draft.mode||'')==='transfer'?'checked':''}> <span>Transfer</span></label>
             </div>
           </div>
+          ` : ''}
           <div class="cs2-row">
             <div class="cs2-label">Note</div>
             <div class="cs2-input-wrap cs2-wide"><input id="staffCreditNote" class="entry-input cs2-input" value="${escapeHtml(String(draft.note || ''))}"></div>
@@ -7040,17 +6984,6 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function applySelectedCustomerToActiveTool() {
     const c = getSelectedCustomer();
     if (!c) return;
-    if (state.ui.fundModalSearchActive) {
-      state.ui.fundModalSearchActive = false;
-      const draft = state.ui.fundOperationalDraft ||= {};
-      draft.sourceId = c.id;
-      draft.sourceAcct = c.accountNumber || '';
-      draft.sourceName = c.name || '';
-      draft.sourceBalance = Number(c.balance) || 0;
-      save();
-      openFundOperationalBalanceModal();
-      return;
-    }
     if (state.ui.tool === 'check_balance') {
       state.ui.checkBalanceLoaded = true;
       save();
@@ -7078,20 +7011,31 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         draft.destAcct = c.accountNumber || '';
         draft.destName = c.name || '';
         draft.destId = c.id;
-        draft.destBalance = Number(c.balance) || 0;
+        draft.destBalance = Number(c.balance || 0);
         if (byId('itrDestAcct')) byId('itrDestAcct').value = c.accountNumber || '';
         if (byId('itrDestName')) byId('itrDestName').innerHTML = `<strong>${escapeHtml(c.name || '')}</strong>`;
-        if (byId('itrDestBalance')) byId('itrDestBalance').textContent = money(draft.destBalance);
+        if (byId('itrDestBalance')) byId('itrDestBalance').innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.destBalance)}`;
       } else {
         draft.sourceAcct = c.accountNumber || '';
         draft.sourceName = c.name || '';
         draft.sourceId = c.id;
-        draft.sourceBalance = Number(c.balance) || 0;
+        draft.sourceBalance = Number(c.balance || 0);
         if (byId('itrSourceAcct')) byId('itrSourceAcct').value = c.accountNumber || '';
         if (byId('itrSourceName')) byId('itrSourceName').innerHTML = `<strong>${escapeHtml(c.name || '')}</strong>`;
-        if (byId('itrSourceBalance')) byId('itrSourceBalance').textContent = money(draft.sourceBalance);
+        if (byId('itrSourceBalance')) byId('itrSourceBalance').innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance)}`;
       }
       save();
+      return;
+    }
+    if (state.ui.tool === 'staff_credit' && state.ui.nonCashSearchTarget === 'staffCreditSource') {
+      const draft = state.ui.staffCreditDraft ||= {};
+      draft.sourceAcct = c.accountNumber || '';
+      draft.sourceName = c.name || '';
+      draft.sourceId = c.id;
+      draft.sourceBalance = Number(c.balance || 0);
+      state.ui.nonCashSearchTarget = '';
+      save();
+      renderWorkspace();
       return;
     }
     if (state.ui.tool === 'account_statement') {

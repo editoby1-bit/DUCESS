@@ -8202,17 +8202,6 @@ body[data-theme="ducess-sheet"] .module-hub{
   margin:0 0 18px;
 }
 .cs2-stack{display:flex;flex-direction:column;gap:11px;}
-.cs2-block-title{
-  font-size:12.5px;
-  font-weight:700;
-  letter-spacing:.03em;
-  text-transform:uppercase;
-  color:#3a5a58;
-  margin:6px 0 -2px;
-  padding-top:8px;
-  border-top:.5px solid #c5d4d0;
-}
-.cs2-block-title:first-of-type{border-top:none;padding-top:0;margin-top:0;}
 .cs2-row{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:nowrap;}
 .cs2-label{width:108px;flex:0 0 108px;font-size:11.5px;color:#5a7a78;}
 .cs2-inline-label{font-size:11.5px;color:#5a7a78;margin-left:5px;min-width:max-content;}
