@@ -1440,12 +1440,19 @@ if (inserted.error) {
       const journalFormAmount = normalizeNumber(payload.formAmount);
       const directTotalAmount = results.reduce((sum, item) => sum + normalizeNumber(item?.sourceAmount || item?.amount), 0);
       const ledgerAmount = isJournal ? journalFormAmount : directTotalAmount;
+      // SURGICAL FIX 2026-09-04 (client-confirmed bug): delta was hardcoded
+      // negative for BOTH customer_credit (a deposit — should INCREASE what
+      // the teller has to work with) and customer_debit (a withdrawal —
+      // should decrease it), so every deposit silently reduced a teller's
+      // operational balance/ledger balance instead of increasing it. Now
+      // signed by txType, matching postSingleCustomerTransaction's delta
+      // convention above (credit=+, debit=-).
       const ledgerResult = await insertStaffCashLedgerEntry({
         approvalRequestId: requestRow.id,
         staffId: payload.staffId || payload.requestedByStaffId || requestRow.requested_by_staff_id || null,
         entryType: type,
         amount: ledgerAmount,
-        delta: ledgerAmount ? -Math.abs(ledgerAmount) : 0,
+        delta: ledgerAmount ? (txType === 'credit' ? Math.abs(ledgerAmount) : -Math.abs(ledgerAmount)) : 0,
         note: payload.note || `${type}${isJournal ? ' form' : ''} posted from approval ${requestRow.id}`,
         floatDate: payload.date || payload.businessDate || null,
         createdByStaffId: requestRow.requested_by_staff_id || null,
