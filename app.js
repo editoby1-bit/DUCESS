@@ -157,7 +157,8 @@
     cash_officer: 'Treasury',
     approving_officer: 'Approving Officer',
     admin_officer: 'Administrative Officer',
-    report_officer: 'Report Officer'
+    report_officer: 'Report Officer',
+    collector: 'Field Collector'
   };
 
   const MODULES = {
@@ -165,7 +166,11 @@
       title: 'Customer Service',
       desc: 'Check balance, open, maintain, reactivate accounts and print statements.',
       icon: '👤',
-      tools: ['check_balance','account_opening','account_maintenance','account_reactivation']
+      // SURGICAL ADDITION 2026-09-04 (client request): "my_statement" is
+      // universal (see hasPermission's free-tool list) — every staff role,
+      // including Collector, needs somewhere to reach it, and this module
+      // is already the one every role can open (via check_balance).
+      tools: ['check_balance','account_opening','account_maintenance','account_reactivation','my_statement']
     },
     cash_officer: {
       title: 'Treasury',
@@ -189,18 +194,30 @@
       title: 'Administration',
       desc: 'Manage working tools, operational postings, temporary grants, staff settings, and central close of day.',
       icon: '🛠️',
-      tools: ['central_close_day','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','teller_balances','transaction_summary','overall_balance','permissions']
+      // SURGICAL FIX 2026-09-04: cash_receipt and staff_credit had full
+      // permissions/render/bind logic (admin_officer is already granted
+      // both in DEFAULT_PERMS) but were never listed in ANY module's
+      // tools array — so no tab button rendered for either, on any role,
+      // anywhere. Wiring them in here (Administration uses the generic
+      // tool-tab loop, not a hardcoded button row) is what actually makes
+      // "Credit Staff Account" reachable for the first time.
+      tools: ['central_close_day','cash_receipt','staff_credit','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','teller_balances','transaction_summary','overall_balance','permissions']
     },
     balances: {
       title: 'Balances',
       desc: 'Review business balance and operational balance with filters and teller summaries.',
       icon: '📊',
-      tools: ['business_balance','operational_balance','teller_balances']
+      // SURGICAL ADDITION 2026-09-04 (client request): read-only Collector
+      // Totals report — sits alongside teller_balances, does NOT feed
+      // business_balance/renderOverallBalance in any way (see
+      // renderCollectorBalance's own comment).
+      tools: ['business_balance','operational_balance','teller_balances','collector_balance']
     }
   };
 
   const TOOL_LABELS = {
     check_balance: 'Check Balance',
+    my_statement: 'My Statement',
     account_opening: 'Account Opening',
     account_maintenance: 'Account Maintenance',
     account_reactivation: 'Account Reactivation',
@@ -229,6 +246,7 @@
     operational_balance: 'Operational Balance',
     overall_balance: 'Overall Balance',
     teller_balances: 'Teller Balances',
+    collector_balance: 'Collector Totals',
     transaction_summary: 'Transaction Summary'
   };
 
@@ -237,8 +255,12 @@
     cash_officer: ['intra_transfer'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','my_close_day','transaction_summary'],
-    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','operational_accounts','staff_directory']
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary'],
+    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory'],
+    // Collector's job ends at handing cash to Treasury — they never disburse,
+    // credit, or debit anything themselves, so no tools beyond the universal
+    // check_balance (already free to every role via hasPermission() above).
+    collector: []
   };
 
   let realtimeBound = false;
@@ -725,7 +747,7 @@
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
-    if (['check_balance','account_statement','operational_accounts','my_close_day'].includes(tool)) return true;
+    if (['check_balance','account_statement','operational_accounts','my_close_day','my_statement'].includes(tool)) return true;
     const base = DEFAULT_PERMS[staff.role] || [];
     const grantOn = state.tempGrants.some(g => g.staffId === staff.id && g.tool === tool && g.enabled);
     return base.includes(tool) || grantOn;
@@ -1822,7 +1844,10 @@ if (approvalRecord.type === 'float_topup') {
         // dispatched from a journal (sourceRowKey !== 'direct') already get a
         // single lump FORM deduction posted once, in the journal case below.
         if (sourceRowKey === 'direct') {
-          addStaffEntry(req.payload.staffId, 'customer_credit', totalAmount, -totalAmount, `Customer credit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z`, chargeBreakdown, totalChargeAmount: totalCharges, chargeTraceId, customerCreditAmount });
+          // SURGICAL FIX 2026-09-04 (client-confirmed bug): delta was -totalAmount
+          // here — a customer credit (deposit, cash coming IN) was reducing the
+          // teller's operational balance instead of increasing it. Now +totalAmount.
+          addStaffEntry(req.payload.staffId, 'customer_credit', totalAmount, totalAmount, `Customer credit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z`, chargeBreakdown, totalChargeAmount: totalCharges, chargeTraceId, customerCreditAmount });
         }
         if (totalCharges > 0) {
           state.operations.entries ||= [];
@@ -1883,7 +1908,11 @@ if (approvalRecord.type === 'float_topup') {
         }));
         recalcCustomerBalance(c);
         if (sourceRowKey === 'direct' && req.payload.payoutSource === 'teller') {
-          addStaffEntry(req.payload.staffId, 'customer_debit', req.payload.amount, req.payload.amount, `Customer debit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z` });
+          // SURGICAL FIX 2026-09-04 (client-confirmed bug): delta was +amount
+          // here — a customer debit (withdrawal, cash going OUT) was
+          // increasing the teller's operational balance instead of reducing
+          // it. Now -amount.
+          addStaffEntry(req.payload.staffId, 'customer_debit', req.payload.amount, -req.payload.amount, `Customer debit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z` });
         }
         break;
       }
@@ -1899,7 +1928,10 @@ if (approvalRecord.type === 'float_topup') {
         // the staff's daily FORM, posted once per journal.
         const journalFormAmount = Number(req.payload.formAmount || 0);
         if (journalFormAmount > 0 && !ensureStaffAccount(req.payload.staffId).entries.some(e => e.sourceApprovalId === req.id && e.type === 'customer_credit_journal')) {
-          addStaffEntry(req.payload.staffId, 'customer_credit_journal', journalFormAmount, -journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
+          // SURGICAL FIX 2026-09-04 (client-confirmed bug): same direction fix
+          // as plain customer_credit above — a credit journal's FORM amount
+          // was reducing the operational balance instead of increasing it.
+          addStaffEntry(req.payload.staffId, 'customer_credit_journal', journalFormAmount, journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
         }
         break;
       }
@@ -2296,6 +2328,7 @@ function hideProcessing() {
   function renderTool(tool) {
     switch(tool) {
       case 'check_balance': return renderCheckBalance();
+      case 'my_statement': return renderMyStatement();
       case 'account_opening': return renderAccountOpening();
       case 'account_maintenance': return renderAccountMaintenance();
       case 'account_reactivation': return renderAccountReactivation();
@@ -2325,6 +2358,7 @@ function hideProcessing() {
       case 'operational_balance': return renderOperationalBalance();
       case 'overall_balance': return renderOverallBalance();
       case 'teller_balances': return renderTellerBalances();
+      case 'collector_balance': return renderCollectorBalance();
       default: return '<div class="note">Tool not found.</div>';
     }
   }
@@ -2607,7 +2641,13 @@ function hideProcessing() {
     // for this, so the numbers stay consistent across screens); Till is what
     // should physically be in the drawer right now.
     const tillBreakdown = (() => {
-      const openingCash = getStaffOperationalBalance(st?.id);
+      // SURGICAL FIX 2026-09-04: Opening Cash here must exclude today's own
+      // customer postings — they're already added back below as Cash
+      // Received/Cash Withdrawal (cash-mode only). Passing businessDate()
+      // gives "balance as of the start of today," so the Till math below
+      // adds today's activity exactly once (client-confirmed: at a new
+      // business date, Till = Opening Cash, then adjusts from there).
+      const openingCash = getStaffOperationalBalance(st?.id, businessDate());
       const cashReceived = approvedCreditTotalForDateByMode(st?.id, businessDate(), 'cash');
       const cashWithdrawal = approvedDebitTotalForDateByMode(st?.id, businessDate(), 'cash');
       return { openingCash, cashReceived, cashWithdrawal, till: openingCash + cashReceived - cashWithdrawal };
@@ -3030,7 +3070,7 @@ function hideProcessing() {
     const p = a.payload || {};
     if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${escapeHtml(p.sourceAccountName||p.sourceAccountNumber||'—')} → ${escapeHtml(p.destAccountName||p.destAccountNumber||'—')} • ${p.date}`;
     if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
-    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
+    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')} • ${escapeHtml(p.paymentMode || 'cash')}${p.collectorName ? ` • Received from ${escapeHtml(p.collectorName)}` : ''} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${escapeHtml(p.staffName || 'staff')} for ${p.date}`;
     if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${escapeHtml(p.accountNumber || '')} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
     if (a.type === 'account_opening') return `${escapeHtml(p.name || '')} • Phone ${escapeHtml(p.phone || '—')} • NIN ${escapeHtml(p.nin || '—')} • BVN ${escapeHtml(p.bvn || '—')}`;
@@ -3822,9 +3862,13 @@ function staffLedgerEvents(staffId) {
       const amount = Number(entry.amount || 0);
       const date = entry.formDate || entry.floatDate || String(entry.date || '').slice(0,10) || businessDate();
       if (['approved_form','approved_float'].includes(type)) addEvent({ key: entry.id || `form-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: entry.note || `Approved FORM for ${date}`, runningType: 'form' });
-      else if (['customer_credit'].includes(type)) addEvent({ key: entry.id || `credit-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: -amount, details: entry.note || 'Customer credit', runningType: 'credit' });
+      // SURGICAL FIX 2026-09-04 (client-confirmed bug): a customer_credit
+      // (deposit — cash coming IN) was given the same negative delta as a
+      // customer_debit (withdrawal — cash going OUT), so deposits silently
+      // reduced this running balance instead of increasing it.
+      else if (['customer_credit'].includes(type)) addEvent({ key: entry.id || `credit-${date}-${amount}`, date, type: 'Credit Impact', amount, delta: amount, details: entry.note || 'Customer credit', runningType: 'credit' });
       else if (['customer_debit'].includes(type)) addEvent({ key: entry.id || `debit-${date}-${amount}`, date, type: 'Debit Impact', amount, delta: -amount, details: entry.note || 'Customer debit', runningType: 'debit' });
-      else if (['customer_credit_journal'].includes(type)) addEvent({ key: entry.id || `credit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Credit journal form', runningType: 'credit' });
+      else if (['customer_credit_journal'].includes(type)) addEvent({ key: entry.id || `credit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: amount, details: entry.note || 'Credit journal form', runningType: 'credit' });
       else if (['customer_debit_journal'].includes(type)) addEvent({ key: entry.id || `debit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Debit journal form', runningType: 'debit' });
       else if (['debt_repayment','wallet_fund','wallet_funding'].includes(type)) addEvent({ key: entry.id || `${type}-${date}-${amount}`, date, type: type === 'debt_repayment' ? 'Debt Repayment' : 'Wallet', amount, delta: 0, details: entry.note || type.replace(/_/g,' '), runningType: 'other' });
     });
@@ -3848,9 +3892,12 @@ function staffLedgerEvents(staffId) {
         const amount = Number(payload.amount || payload.floatAmount || 0);
         addEvent({ key: req.id || `form-approval-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: `Approved FORM for ${date}`, runningType: 'form' });
       }
+      // SURGICAL FIX 2026-09-04 (client-confirmed bug): see the matching
+      // comment above — customer_credit / customer_credit_journal now
+      // correctly add to the running balance instead of subtracting.
       if (req.type === 'customer_credit' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
+        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit', amount, delta: amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
       }
       if (req.type === 'customer_debit' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
@@ -3858,7 +3905,7 @@ function staffLedgerEvents(staffId) {
       }
       if (req.type === 'customer_credit_journal' && payload.staffId === staffId) {
         const formAmount = Number(payload.formAmount || 0);
-        addEvent({ key: req.id || `credit-journal-${date}`, date, type: 'Credit Journal', amount: formAmount, delta: -formAmount, details: `Credit journal (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'credit' });
+        addEvent({ key: req.id || `credit-journal-${date}`, date, type: 'Credit Journal', amount: formAmount, delta: formAmount, details: `Credit journal (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'credit' });
       }
       if (req.type === 'customer_debit_journal' && payload.staffId === staffId) {
         const formAmount = Number(payload.formAmount || 0);
@@ -3874,6 +3921,50 @@ function staffLedgerEvents(staffId) {
       if (['form','credit','debit'].includes(event.runningType)) running += Number(event.delta || 0);
       return { ...event, runningBalance: running, staffName: staff.name || staffId };
     }).sort((a,b)=> new Date(`${b.date}T12:00:00Z`) - new Date(`${a.date}T12:00:00Z`));
+  }
+
+  // SURGICAL ADDITION 2026-09-04 (client request): "every staff will have
+  // account statement listing their transactions and balances with
+  // appropriate filters" — a self-service version of the Staff Ledger
+  // modal above, reusing the exact same staffLedgerEvents() data, but as
+  // a proper filterable screen every role can reach for their OWN account
+  // (see hasPermission's free-tool list and the customer_service module).
+  function renderMyStatement() {
+    const st = currentStaff();
+    if (!st) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
+    const acc = ensureStaffAccount(st.id);
+    const filter = state.ui.myStatementFilter || { preset: 'daily', from: '', to: '' };
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
+    const events = filterByDate(staffLedgerEvents(st.id), filter);
+    const rows = events.map((row, i) => {
+      const displayDate = String(row.businessDate || row.date || businessDate()).slice(0,10);
+      return `<tr><td>${i+1}</td><td>${fmtDate(`${displayDate}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type || '')}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(row.details || '—')}</td></tr>`;
+    }).join('');
+    return `
+      <div class="stack">
+        <div class="form-card">
+          <h3>My Statement</h3>
+          <div class="kpi-row wrap">
+            <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(st.name || '')}</div></div>
+            <div class="kpi"><div class="label">Office</div><div class="number">${ROLE_LABELS[st.role] || st.role}</div></div>
+            <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(acc.accountNumber || '—')}</div></div>
+            <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(getStaffOperationalBalance(st.id))}</div></div>
+          </div>
+          <div class="action-inline balance-filters-row" style="margin-top:10px">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-my-statement-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="myStatementFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="myStatementTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="myStatementCustomApply">Apply Custom</button></div>
+          <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No entries in range</td></tr>'}</tbody></table></div>
+        </div>
+      </div>`;
+  }
+
+  function bindMyStatement() {
+    qq('[data-my-statement-preset]').forEach(btn => btn.onclick = () => {
+      state.ui.myStatementFilter = { preset: btn.dataset.myStatementPreset, from: '', to: '' };
+      save(); renderWorkspace();
+    });
+    if (byId('myStatementCustomApply')) byId('myStatementCustomApply').onclick = () => {
+      state.ui.myStatementFilter = { preset: 'custom', from: byId('myStatementFrom')?.value || '', to: byId('myStatementTo')?.value || '' };
+      save(); renderWorkspace();
+    };
   }
 
   async function openStaffLedgerModal(staffId) {
@@ -3987,7 +4078,10 @@ function normalizeStaffLedgerEntryType(row) {
       const delta = Number(row.delta || 0);
       if (Number.isFinite(delta) && delta !== 0) balance += delta;
       else if (['approved_form','approved_float','approved_float_topup','wallet_fund','wallet_funding'].includes(type)) balance += amount;
-      else if (['customer_credit','customer_credit_journal','credit'].includes(type)) balance -= amount;
+      // SURGICAL FIX 2026-09-04 (client-confirmed bug): fallback path (used
+      // only when a row has no delta) treated credit and debit identically
+      // as reductions. Credit (deposit) now correctly adds.
+      else if (['customer_credit','customer_credit_journal','credit'].includes(type)) balance += amount;
       else if (['customer_debit','customer_debit_journal','debit'].includes(type)) balance -= amount;
       if (['customer_credit','customer_credit_journal','credit'].includes(type)) totalCreditReceived += amount;
       if (['customer_debit','customer_debit_journal','debit'].includes(type)) totalDebitsPaid += amount;
@@ -4056,9 +4150,15 @@ function normalizeStaffLedgerEntryType(row) {
       const totalCreditReceived = Number(summary.totalCreditReceived || 0);
       const totalDebitsPaid = Number(summary.totalDebitsPaid || 0);
       const balance = Number(summary.balance ?? acc.balance ?? 0);
-      return `<tr><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${escapeHtml(acc.accountNumber || '')}</td><td>${money(balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
+      // SURGICAL ADDITION 2026-09-04 (client request): show Collector totals
+      // alongside every other staff total on this screen. All-time, no date
+      // filter (this report has none) — 0 for every non-Collector, since
+      // getCollectorTotal only ever matches inter_staff_credit rows tagged
+      // with this staffId as collectorId.
+      const totalCollected = getCollectorTotal(s.id);
+      return `<tr><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${escapeHtml(acc.accountNumber || '')}</td><td>${money(balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td>${money(totalCollected)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
     }).join('');
-    return `<div class="table-card"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Teller and Posting Accounts</h3><div class="note" style="margin:0">Business Date: <strong>${businessDate()}</strong></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Account Number</th><th>Balance</th><th>Debt Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Ledger</th></tr></thead><tbody>${rows}</tbody></table></div><div class="action-row">${state.staff.length > (state.ui.tellerEntriesLimit || 20) ? `<button id="tellerMore" class="secondary">Show More</button>` : ''}${(state.ui.tellerEntriesLimit || 20) > 20 ? `<button id="tellerLess" class="secondary">Show Less</button>` : ''}</div></div>`;
+    return `<div class="table-card"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Teller and Posting Accounts</h3><div class="note" style="margin:0">Business Date: <strong>${businessDate()}</strong></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Account Number</th><th>Balance</th><th>Debt Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Total Collected</th><th>Ledger</th></tr></thead><tbody>${rows}</tbody></table></div><div class="action-row">${state.staff.length > (state.ui.tellerEntriesLimit || 20) ? `<button id="tellerMore" class="secondary">Show More</button>` : ''}${(state.ui.tellerEntriesLimit || 20) > 20 ? `<button id="tellerLess" class="secondary">Show Less</button>` : ''}</div></div>`;
   }
 
   function allApprovedCustomerTx(kind) {
@@ -4142,6 +4242,7 @@ function normalizeStaffLedgerEntryType(row) {
   function bindToolHandlers() {
     switch (state.ui.tool) {
       case 'check_balance': bindCheckBalance(); break;
+      case 'my_statement': bindMyStatement(); break;
       case 'account_opening': bindAccountOpening(); break;
       case 'account_maintenance': bindMaintenance('maintenance'); break;
       case 'account_reactivation': bindMaintenance('reactivation'); break;
@@ -4168,6 +4269,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'business_balance': bindBalanceFilters('business'); break;
       case 'operational_balance': bindBalanceFilters('operational'); break;
       case 'teller_balances': bindTellerBalances(); break;
+      case 'collector_balance': bindCollectorBalance(); break;
     }
     overlayDateInputsWithDDMMYYYY(byId('workspace') || document);
   }
@@ -4184,6 +4286,43 @@ function normalizeStaffLedgerEntryType(row) {
     qq('[data-assign-topup]').forEach(btn => btn.onclick = () => openFloatTopUpModal(btn.dataset.assignTopup));
     qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
     refreshTellerBalanceLedgerSummaries();
+  }
+
+  // SURGICAL ADDITION 2026-09-04 (client request): dedicated "Collector
+  // Totals" report — how much each Collector has brought to Treasury.
+  // Entirely read-only: it only aggregates already-approved
+  // inter_staff_credit rows via getCollectorTotal() above and posts
+  // nothing of its own, so it has zero effect on Business Balance,
+  // Overall Balance, or any other rollup.
+  function renderCollectorBalance() {
+    const filter = state.ui.collectorFilter || { preset: 'daily', from: '', to: '' };
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
+    const collectors = (state.staff || []).filter(s => s.role === 'collector');
+    const rows = collectors.map((s, i) => {
+      const periodTotal = getCollectorTotal(s.id, filter);
+      const allTimeTotal = getCollectorTotal(s.id, { preset: 'all' });
+      const staffCode = s.staffCode || s.staff_code || s.id || '—';
+      return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${money(periodTotal)}</td><td>${money(allTimeTotal)}</td></tr>`;
+    }).join('');
+    const grandPeriod = collectors.reduce((sum, s) => sum + getCollectorTotal(s.id, filter), 0);
+    return `
+      <div class="table-card">
+        <div class="action-inline"><h3 style="margin:0">Collector Totals</h3></div>
+        <div class="note" style="margin:6px 0">How much each Collector has brought in and handed to Treasury — a read-only summary of already-approved Credit Staff Account entries tagged "Received From" a Collector. Posts nothing of its own and does not affect Business Balance.</div>
+        <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-collector-filter-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="collectorFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="collectorTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="collectorCustomApply">Apply Custom</button></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Collector</th><th>Staff ID</th><th>Total Collected (Period)</th><th>Total Collected (All-Time)</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No Collectors found</td></tr>'}${collectors.length ? `<tr class="total-row"><td colspan="3"><strong>Total (Period)</strong></td><td><strong>${money(grandPeriod)}</strong></td><td></td></tr>` : ''}</tbody></table></div>
+      </div>`;
+  }
+
+  function bindCollectorBalance() {
+    qq('[data-collector-filter-preset]').forEach(btn => btn.onclick = () => {
+      state.ui.collectorFilter = { preset: btn.dataset.collectorFilterPreset, from: '', to: '' };
+      save(); renderWorkspace();
+    });
+    if (byId('collectorCustomApply')) byId('collectorCustomApply').onclick = () => {
+      state.ui.collectorFilter = { preset: 'custom', from: byId('collectorFrom')?.value || '', to: byId('collectorTo')?.value || '' };
+      save(); renderWorkspace();
+    };
   }
 
   function openFloatTopUpModal(staffId=null) {
@@ -4471,6 +4610,11 @@ function normalizeStaffLedgerEntryType(row) {
     if (amtInput) amtInput.oninput = () => { draft.amount = amtInput.value; };
     if (noteInput) noteInput.oninput = () => { draft.note = noteInput.value; };
     qq('input[name="staffCreditMode"]').forEach(r => r.onchange = () => { if (r.checked) draft.mode = r.value; });
+    const collectorSelect = byId('staffCreditCollector');
+    if (collectorSelect) {
+      collectorSelect.value = draft.collectorId || '';
+      collectorSelect.onchange = () => { draft.collectorId = collectorSelect.value || ''; };
+    }
     // SURGICAL ADDITION 2026-09-04 (client request): funding source toggle —
     // Treasury (existing cash injection) vs Debit an Account (real transfer,
     // debits the source account for real on approval — see the
@@ -4531,9 +4675,15 @@ function normalizeStaffLedgerEntryType(row) {
         if (amount > Number(sourceAccount.balance || 0) + 0.01) return showToast(`Amount exceeds the source account's balance (${money(sourceAccount.balance || 0)})`);
       }
       const paymentMode = fundingSource === 'account' ? 'transfer' : (q('input[name="staffCreditMode"]:checked')?.value || 'cash');
+      // SURGICAL ADDITION 2026-09-04: Received From is pure attribution —
+      // it never changes whose account is credited or by how much, it just
+      // records which Collector physically handed over this cash.
+      const collector = fundingSource === 'treasury' && draft.collectorId
+        ? (state.staff || []).find(s => s.id === draft.collectorId && s.role === 'collector')
+        : null;
       const confirmMessage = fundingSource === 'account'
         ? `Debit ${sourceAccount.name} ${money(amount)} to fund ${targetAccount?.name || 'staff account'}?`
-        : `Credit ${targetAccount?.name || 'staff account'} ${money(amount)}?`;
+        : `Credit ${targetAccount?.name || 'staff account'} ${money(amount)}${collector ? ` (received from ${collector.name})` : ''}?`;
       confirmAction(confirmMessage, async () => {
         showProcessing('Sending for approval...'); await nextPaint();
         try {
@@ -4546,7 +4696,9 @@ function normalizeStaffLedgerEntryType(row) {
             fundingSource,
             sourceAccountId: sourceAccount?.id || '',
             sourceAccountNumber: sourceAccount?.accountNumber || '',
-            sourceAccountName: sourceAccount?.name || ''
+            sourceAccountName: sourceAccount?.name || '',
+            collectorId: collector?.id || '',
+            collectorName: collector?.name || ''
           });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit');
           state.ui.staffCreditDraft = {};
@@ -5003,15 +5155,33 @@ function normalizeStaffLedgerEntryType(row) {
     };
   }
 
-  function getStaffOperationalBalance(staffId) {
-    return getStaffOperationalBreakdown(staffId).variance;
+  function getStaffOperationalBalance(staffId, excludeDateStr) {
+    return getStaffOperationalBreakdown(staffId, excludeDateStr).variance;
   }
 
-  function getStaffOperationalBreakdown(staffId) {
+  function getStaffOperationalBreakdown(staffId, excludeDateStr) {
     // Cash = total funded to this teller's operational account by Treasury (approved credits).
-    // Posting Cash = total drawn from it via customer postings so far (approved debits).
-    // Variance = Cash - Posting Cash = what's actually left to work with (can go negative —
-    // a teller may credit a customer before Treasury has funded/reconciled them).
+    // Always all-time, regardless of excludeDateStr — Treasury can fund a teller multiple
+    // times, on any date, and it always becomes part of opening balance (client-confirmed).
+    //
+    // Posting Cash = net effect of customer postings so far.
+    // SURGICAL FIX 2026-09-04 (client-confirmed bug): customer_credit (a
+    // deposit — cash/value coming IN) used to be added into this the same
+    // way as customer_debit (a withdrawal — cash/value going OUT), so a
+    // deposit silently REDUCED the teller's available balance instead of
+    // increasing it — and, via the Till formula in renderJournalTool (which
+    // adds today's cash credits back on top of this figure), deposits
+    // netted to zero effect on Till while withdrawals got subtracted twice.
+    // Credits now correctly add, debits subtract. This one place feeds
+    // every consumer (Till, Journal Form Amount, COD, the debit-exceeds-
+    // balance check, Teller Balances), so fixing it here fixes all of them.
+    //
+    // excludeDateStr (optional): when given, customer postings dated
+    // exactly that business date are left out of this sum. Used by the
+    // Till breakdown to get the balance as of the START of today, since
+    // today's own cash-mode postings are already added back separately as
+    // Cash Received / Cash Withdrawal — without this exclusion, today's
+    // activity would be counted twice.
     const opAccount = (state.customers || []).find(c =>
       c.accountType === 'staff_operational' && c.linkedStaffId === staffId
     );
@@ -5023,13 +5193,32 @@ function normalizeStaffLedgerEntryType(row) {
       .reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
     const postingCash = (state.approvals || [])
       .filter(r => r.status === 'approved' && r.payload?.staffId === staffId &&
-        ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type))
-      .reduce((s, r) => s + (r.type.endsWith('_journal') ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
+        ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type) &&
+        (!excludeDateStr || r.payload?.date !== excludeDateStr))
+      .reduce((s, r) => {
+        const amt = r.type.endsWith('_journal') ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0);
+        const isCredit = r.type === 'customer_credit' || r.type === 'customer_credit_journal';
+        return s + (isCredit ? -amt : amt);
+      }, 0);
     return { cash, postingCash, variance: cash - postingCash };
   }
 
   function hasApprovedFloat(staffId, dateStr) {
     return openingBalanceOnlyForDate(staffId, dateStr) > 0 || hasBaseOpeningBalanceForDate(staffId, dateStr);
+  }
+
+  // SURGICAL ADDITION 2026-09-04 (client request): read-only rollup of what
+  // a Collector has brought to Treasury — sums approved inter_staff_credit
+  // requests tagged with this staffId as collectorId (see the "Received
+  // From" field on Credit Staff Account). Pure aggregation over already-
+  // approved data, same pattern as getStaffOperationalBreakdown above —
+  // posts nothing, so it cannot affect Business Balance/Overall Balance.
+  function getCollectorTotal(staffId, filter) {
+    const approved = (state.approvals || []).filter(r =>
+      r.status === 'approved' && r.type === 'inter_staff_credit' && r.payload?.collectorId === staffId
+    );
+    const rows = filter ? filterByDate(approved.map(r => ({ ...r, date: r.payload?.date })), filter) : approved;
+    return rows.reduce((sum, r) => sum + Number(r.payload?.amount || 0), 0);
   }
 
 
@@ -6105,6 +6294,14 @@ function normalizeStaffLedgerEntryType(row) {
     const accountOptions = staffOpAccounts.map(a =>
       `<option value="${a.id}">${escapeHtml(a.name || a.displayName || a.display_name || '')} (${escapeHtml(a.accountNumber || a.account_number || '')})</option>`
     ).join('');
+    // SURGICAL ADDITION 2026-09-04 (client request): Collectors never touch
+    // money in the system themselves — they hand cash to whichever Treasury
+    // officer they find, and that officer records it here. This is purely
+    // an attribution field for the audit trail (who the cash came from);
+    // it does not change whose account gets credited or how much.
+    const collectorOptions = (state.staff || []).filter(s => s.role === 'collector').map(s =>
+      `<option value="${s.id}">${escapeHtml(s.name || '')}</option>`
+    ).join('');
     const draft = state.ui.staffCreditDraft ||= {};
     const fundingSource = draft.source === 'account' ? 'account' : 'treasury';
     return `
@@ -6134,6 +6331,17 @@ function normalizeStaffLedgerEntryType(row) {
             <button id="staffCreditSourceSearch" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="staffCreditSourceInfo" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<strong>${escapeHtml(draft.sourceName || '')}</strong> <span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
+          ` : ''}
+          ${fundingSource === 'treasury' && collectorOptions ? `
+          <div class="cs2-row">
+            <div class="cs2-label">Received From</div>
+            <div class="cs2-input-wrap cs2-wide">
+              <select id="staffCreditCollector" class="entry-input cs2-input">
+                <option value="">— Direct (not from a Collector) —</option>
+                ${collectorOptions}
+              </select>
+            </div>
+          </div>
           ` : ''}
           <div class="cs2-row">
             <div class="cs2-label">Amount</div>
