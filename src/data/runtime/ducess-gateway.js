@@ -2370,18 +2370,27 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // deterministic and system-generated; there is nothing here for an
       // approving officer to review, so routing it through the approval queue
       // would just add a hop with no actual decision in it.
+      // SURGICAL ADDITION 2026-09-05 (client request): Treasury (cash_officer)
+      // gets the same auto-provisioned operational account as a Teller —
+      // it's what they debit from to fund tellers via Non Cash/"Debit an
+      // Account", and what Cash Receipt credits. Same account-number
+      // sequence/table, only the display name differs: client asked
+      // specifically for "TREASURY <first name>" (not full name, unlike the
+      // Teller convention below, which stays as-is).
       let operationalAccount = null;
       let operationalAccountError = null;
-      if (roleCode === 'teller') {
+      if (roleCode === 'teller' || roleCode === 'cash_officer') {
         try {
           const { data: seqData, error: seqError } = await client.rpc('generate_staff_operational_account_number');
           if (seqError || !seqData) {
-            operationalAccountError = seqError?.message || 'Failed to generate teller account number.';
+            operationalAccountError = seqError?.message || 'Failed to generate operational account number.';
           } else {
+            const firstName = String(fullName || '').trim().split(/\s+/)[0] || fullName;
+            const displayName = roleCode === 'cash_officer' ? `TREASURY ${firstName}` : `TELLER ${fullName}`;
             const acctInsert = await client.from(customersTable).insert({
               account_number: seqData,
               full_name: fullName,
-              display_name: `TELLER ${fullName}`,
+              display_name: displayName,
               phone: '',
               status: 'active',
               account_type: 'staff_operational',
@@ -2394,7 +2403,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
             else operationalAccount = acctInsert.data;
           }
         } catch (err) {
-          operationalAccountError = err?.message || 'Unexpected error provisioning teller operational account.';
+          operationalAccountError = err?.message || 'Unexpected error provisioning staff operational account.';
         }
       }
 
@@ -2413,6 +2422,72 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (operationalAccount) staffSummary.operationalAccount = operationalAccount;
       if (operationalAccountError) staffSummary.operationalAccountError = operationalAccountError;
       return defaultResult.ok(staffSummary);
+    }
+
+    // SURGICAL ADDITION 2026-09-05 (client request): one-time backfill so
+    // every Treasury (cash_officer) staff member already in the system gets
+    // the same auto-provisioned operational account new ones now get (see
+    // createStaff above) — "TREASURY <first name>", same T#### sequence.
+    // Skips anyone who already has one; safe to run more than once.
+    async function backfillTreasuryOperationalAccounts() {
+      if (!canUseSupabase()) {
+        return defaultResult.err('LOCAL_MODE_UNSUPPORTED', 'Treasury account backfill requires Supabase — local/offline mode does not track linked staff accounts.');
+      }
+      try {
+        const { data: treasuryStaff, error: staffError } = await client
+          .from(staffTable)
+          .select('id, staff_code, full_name, role_code, is_active')
+          .eq('role_code', 'cash_officer')
+          .eq('is_active', true);
+        if (staffError) return defaultResult.err('STAFF_QUERY_FAILED', staffError.message, staffError);
+
+        const { data: existingAccounts, error: acctError } = await client
+          .from(customersTable)
+          .select('linked_staff_id')
+          .eq('account_type', 'staff_operational');
+        if (acctError) return defaultResult.err('ACCOUNT_QUERY_FAILED', acctError.message, acctError);
+        const alreadyProvisioned = new Set((existingAccounts || []).map(r => r.linked_staff_id).filter(Boolean));
+
+        const created = [];
+        const skipped = [];
+        const errors = [];
+        for (const s of (treasuryStaff || [])) {
+          if (alreadyProvisioned.has(s.id)) { skipped.push(s.full_name); continue; }
+          try {
+            const { data: seqData, error: seqError } = await client.rpc('generate_staff_operational_account_number');
+            if (seqError || !seqData) { errors.push(`${s.full_name}: ${seqError?.message || 'failed to generate account number'}`); continue; }
+            const firstName = String(s.full_name || '').trim().split(/\s+/)[0] || s.full_name;
+            const acctInsert = await client.from(customersTable).insert({
+              account_number: seqData,
+              full_name: s.full_name,
+              display_name: `TREASURY ${firstName}`,
+              phone: '',
+              status: 'active',
+              account_type: 'staff_operational',
+              linked_staff_id: s.id,
+              system_assigned: true,
+              created_at: new Date().toISOString(),
+              is_active: true,
+            }).select(customersSelect).maybeSingle();
+            if (acctInsert.error) { errors.push(`${s.full_name}: ${acctInsert.error.message}`); continue; }
+            created.push({ name: s.full_name, accountNumber: acctInsert.data?.account_number });
+          } catch (err) {
+            errors.push(`${s.full_name}: ${err?.message || 'unexpected error'}`);
+          }
+        }
+
+        try {
+          await client.from(config?.supabase?.auditLogTable || 'audit_log').insert({
+            action_type: 'treasury_accounts_backfilled',
+            entity_type: 'staff',
+            metadata: { created: created.length, skipped: skipped.length, errors: errors.length },
+          });
+        } catch (_e) {}
+
+        return defaultResult.ok({ created, skipped, errors });
+      } catch (err) {
+        return defaultResult.err('BACKFILL_FAILED', err?.message || 'Unexpected error during backfill', err);
+      }
     }
 
     async function updateStaffStatus(payload = {}) {
@@ -3049,6 +3124,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         updateStaffStatus,
         updateStaffCode,
         listStaffLedger,
+        backfillTreasuryOperationalAccounts,
       },
       permissions: {
         getEffectivePermissions,
