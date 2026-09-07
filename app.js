@@ -7789,17 +7789,29 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       backfillBtn.textContent = 'Working…';
       try {
         const result = await gateway.staff.backfillTreasuryOperationalAccounts();
-        if (!result?.ok) return showToast(result?.error?.message || 'Backfill failed');
+        // SURGICAL FIX 2026-09-08: a toast is too easy to miss and too short
+        // to hold a real diagnostic — show a persistent modal with exactly
+        // what happened (found/created/skipped/errors) so a run that
+        // doesn't do what's expected can actually be diagnosed instead of
+        // just "it still doesn't work".
+        if (!result?.ok) {
+          openModal('Backfill Failed', `<div class="note">${escapeHtml(result?.error?.message || 'Unknown error')}</div>`, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+          return;
+        }
         const { created = [], skipped = [], errors = [] } = result.data || {};
         if (created.length) await syncCustomersListFromGateway();
-        const parts = [];
-        if (created.length) parts.push(`${created.length} account${created.length === 1 ? '' : 's'} opened (${created.map(c => `${c.name}: ${c.accountNumber}`).join(', ')})`);
-        if (skipped.length) parts.push(`${skipped.length} already had one`);
-        if (errors.length) parts.push(`${errors.length} failed (${errors.join('; ')})`);
-        showToast(parts.join(' • ') || 'No Treasury staff found');
+        const totalFound = created.length + skipped.length + errors.length;
+        const body = `
+          <div class="stack">
+            <div class="note">${totalFound === 0 ? 'No active Treasury or Admin Officer staff found at all — check that their role is set correctly in Staff Directory.' : `Found ${totalFound} Treasury/Admin staff member${totalFound === 1 ? '' : 's'} total.`}</div>
+            ${created.length ? `<div><strong>Opened (${created.length}):</strong><ul>${created.map(c => `<li>${escapeHtml(c.name)} — ${escapeHtml(c.accountNumber || '(no number returned)')}</li>`).join('')}</ul></div>` : ''}
+            ${skipped.length ? `<div><strong>Already had one (${skipped.length}):</strong><ul>${skipped.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul></div>` : ''}
+            ${errors.length ? `<div><strong style="color:var(--accent-red)">Failed (${errors.length}):</strong><ul>${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul></div>` : ''}
+          </div>`;
+        openModal('Backfill Result', body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
         render();
       } catch (err) {
-        showToast('Unexpected error running backfill');
+        openModal('Backfill Failed', `<div class="note">Unexpected error: ${escapeHtml(err?.message || String(err))}</div>`, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
       } finally {
         backfillBtn.disabled = false;
         backfillBtn.textContent = 'Backfill Operational Accounts';
