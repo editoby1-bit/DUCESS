@@ -2377,16 +2377,19 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // sequence/table, only the display name differs: client asked
       // specifically for "TREASURY <first name>" (not full name, unlike the
       // Teller convention below, which stays as-is).
+      // SURGICAL ADDITION 2026-09-07 (client request): Admin Officer also
+      // gets one now, following the same "ADMIN <first name>" convention as
+      // Treasury's first-name naming.
       let operationalAccount = null;
       let operationalAccountError = null;
-      if (roleCode === 'teller' || roleCode === 'cash_officer') {
+      if (roleCode === 'teller' || roleCode === 'cash_officer' || roleCode === 'admin_officer') {
         try {
           const { data: seqData, error: seqError } = await client.rpc('generate_staff_operational_account_number');
           if (seqError || !seqData) {
             operationalAccountError = seqError?.message || 'Failed to generate operational account number.';
           } else {
             const firstName = String(fullName || '').trim().split(/\s+/)[0] || fullName;
-            const displayName = roleCode === 'cash_officer' ? `TREASURY ${firstName}` : `TELLER ${fullName}`;
+            const displayName = roleCode === 'cash_officer' ? `TREASURY ${firstName}` : roleCode === 'admin_officer' ? `ADMIN ${firstName}` : `TELLER ${fullName}`;
             const acctInsert = await client.from(customersTable).insert({
               account_number: seqData,
               full_name: fullName,
@@ -2424,20 +2427,21 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(staffSummary);
     }
 
-    // SURGICAL ADDITION 2026-09-05 (client request): one-time backfill so
-    // every Treasury (cash_officer) staff member already in the system gets
-    // the same auto-provisioned operational account new ones now get (see
-    // createStaff above) — "TREASURY <first name>", same T#### sequence.
+    // SURGICAL ADDITION 2026-09-05 (client request), GENERALIZED 2026-09-07:
+    // one-time backfill so every Treasury (cash_officer) AND Admin Officer
+    // staff member already in the system gets the same auto-provisioned
+    // operational account new ones now get (see createStaff above) —
+    // "TREASURY <first name>" / "ADMIN <first name>", same T#### sequence.
     // Skips anyone who already has one; safe to run more than once.
     async function backfillTreasuryOperationalAccounts() {
       if (!canUseSupabase()) {
-        return defaultResult.err('LOCAL_MODE_UNSUPPORTED', 'Treasury account backfill requires Supabase — local/offline mode does not track linked staff accounts.');
+        return defaultResult.err('LOCAL_MODE_UNSUPPORTED', 'Operational account backfill requires Supabase — local/offline mode does not track linked staff accounts.');
       }
       try {
-        const { data: treasuryStaff, error: staffError } = await client
+        const { data: eligibleStaff, error: staffError } = await client
           .from(staffTable)
           .select('id, staff_code, full_name, role_code, is_active')
-          .eq('role_code', 'cash_officer')
+          .in('role_code', ['cash_officer', 'admin_officer'])
           .eq('is_active', true);
         if (staffError) return defaultResult.err('STAFF_QUERY_FAILED', staffError.message, staffError);
 
@@ -2451,16 +2455,17 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         const created = [];
         const skipped = [];
         const errors = [];
-        for (const s of (treasuryStaff || [])) {
+        for (const s of (eligibleStaff || [])) {
           if (alreadyProvisioned.has(s.id)) { skipped.push(s.full_name); continue; }
           try {
             const { data: seqData, error: seqError } = await client.rpc('generate_staff_operational_account_number');
             if (seqError || !seqData) { errors.push(`${s.full_name}: ${seqError?.message || 'failed to generate account number'}`); continue; }
             const firstName = String(s.full_name || '').trim().split(/\s+/)[0] || s.full_name;
+            const displayName = s.role_code === 'admin_officer' ? `ADMIN ${firstName}` : `TREASURY ${firstName}`;
             const acctInsert = await client.from(customersTable).insert({
               account_number: seqData,
               full_name: s.full_name,
-              display_name: `TREASURY ${firstName}`,
+              display_name: displayName,
               phone: '',
               status: 'active',
               account_type: 'staff_operational',
