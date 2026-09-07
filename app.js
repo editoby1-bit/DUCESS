@@ -179,20 +179,25 @@
       // SURGICAL ADDITION 2026-09-06 (client-confirmed design): Treasury is
       // now the one who funds Tellers and receives cash (from Collectors or
       // anyone else) — not Admin — so cash_receipt and staff_credit need to
-      // be reachable from here, not just Administration.
-      tools: ['intra_transfer','cash_receipt','staff_credit']
+      // be reachable from here, not just Administration. my_statement added
+      // 2026-09-07 so Treasury can see their own totals here too.
+      tools: ['intra_transfer','cash_receipt','staff_credit','my_statement']
     },
     tellering: {
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','credit','debit','journal','intra_transfer']
+      tools: ['check_balance','credit','debit','journal','intra_transfer','my_statement']
     },
     approvals: {
       title: 'Approval',
       desc: 'Approve or reject submitted requests and review approval history.',
       icon: '✅',
-      tools: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history']
+      // SURGICAL ADDITION 2026-09-07 (client request): "My Approvals" —
+      // Approving Officer's own unique totals view (how much they've
+      // approved, by date), separate from the cash statement everyone else
+      // gets since they never hold a cash account themselves.
+      tools: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals']
     },
     administration: {
       title: 'Administration',
@@ -205,7 +210,9 @@
       // anywhere. Wiring them in here (Administration uses the generic
       // tool-tab loop, not a hardcoded button row) is what actually makes
       // "Credit Staff Account" reachable for the first time.
-      tools: ['central_close_day','cash_receipt','staff_credit','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','teller_balances','transaction_summary','overall_balance','permissions']
+      // SURGICAL ADDITION 2026-09-07: my_statement added so Admin can see
+      // their own totals now that Admin has an operational account too.
+      tools: ['central_close_day','cash_receipt','staff_credit','my_statement','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','teller_balances','transaction_summary','overall_balance','permissions']
     },
     balances: {
       title: 'Balances',
@@ -222,6 +229,7 @@
   const TOOL_LABELS = {
     check_balance: 'Check Balance',
     my_statement: 'My Statement',
+    my_approvals: 'My Approvals',
     account_opening: 'Account Opening',
     account_maintenance: 'Account Maintenance',
     account_reactivation: 'Account Reactivation',
@@ -256,15 +264,21 @@
 
   const DEFAULT_PERMS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
-    cash_officer: ['intra_transfer','cash_receipt','staff_credit'],
-    teller: ['check_balance','credit','debit','journal','intra_transfer'],
-    approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary'],
+    cash_officer: ['intra_transfer','cash_receipt','staff_credit','my_statement'],
+    teller: ['check_balance','credit','debit','journal','intra_transfer','my_statement'],
+    // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
+    // own totals view ("my_approvals" — how much they've approved, by date)
+    // rather than the cash statement everyone else gets, since they never
+    // hold a cash account themselves.
+    approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary','my_statement'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory'],
     // Collector's job ends at handing cash to Treasury — they never disburse,
-    // credit, or debit anything themselves, so no tools beyond the universal
-    // check_balance (already free to every role via hasPermission() above).
-    collector: []
+    // credit, or debit anything themselves. my_statement is the one thing
+    // they need: it's their own totals record (client-confirmed 2026-09-07 —
+    // "My Statement" is for whoever handles cash: Teller, Treasury,
+    // Collector, Admin; Customer Service needs it least and doesn't get it).
+    collector: ['my_statement']
   };
 
   let realtimeBound = false;
@@ -751,7 +765,12 @@
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
-    if (['check_balance','account_statement','operational_accounts','my_close_day','my_statement'].includes(tool)) return true;
+    // SURGICAL FIX 2026-09-07 (client request): my_statement used to be
+    // universal — now it's only for roles who actually handle cash
+    // (Teller, Treasury, Collector, Admin — see DEFAULT_PERMS below).
+    // Customer Service and Report Officer don't get it; Approving Officer
+    // gets its own separate "My Approvals" totals view instead.
+    if (['check_balance','account_statement','operational_accounts','my_close_day'].includes(tool)) return true;
     const base = DEFAULT_PERMS[staff.role] || [];
     const grantOn = state.tempGrants.some(g => g.staffId === staff.id && g.tool === tool && g.enabled);
     return base.includes(tool) || grantOn;
@@ -2268,6 +2287,7 @@ function hideProcessing() {
           ${toolBtn('debit')}
           ${toolBtn('journal')}
           ${toolBtn('intra_transfer')}
+          ${toolBtn('my_statement')}
         </div>`;
       }
       if (state.ui.module === 'cash_officer') {
@@ -2277,6 +2297,7 @@ function hideProcessing() {
           ${toolBtn('cash_receipt')}
           ${toolBtn('staff_credit')}
           ${toolBtn('intra_transfer')}
+          ${toolBtn('my_statement')}
         </div>`;
       }
       return module.tools.map(t => `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>`).join('');
@@ -2335,6 +2356,7 @@ function hideProcessing() {
     switch(tool) {
       case 'check_balance': return renderCheckBalance();
       case 'my_statement': return renderMyStatement();
+      case 'my_approvals': return renderMyApprovals();
       case 'account_opening': return renderAccountOpening();
       case 'account_maintenance': return renderAccountMaintenance();
       case 'account_reactivation': return renderAccountReactivation();
@@ -2420,16 +2442,16 @@ function hideProcessing() {
     const isSystemAssigned = acctType !== 'customer';
     const staffOptions = (state.staff || [])
       .filter(s => s.is_active !== false)
-      // SURGICAL FIX 2026-09-05 (client request): Treasury now also gets an
-      // operational account (auto-provisioned on creation — see
-      // gateway.staff.createStaff), so this manual screen is now mainly a
-      // repair path for either role, not just a Teller-only flow.
-      .filter(s => !isStaffOp || s.role === 'teller' || s.role === 'cash_officer')
+      // SURGICAL FIX 2026-09-07 (client request): Admin Officer now also
+      // gets an operational account (auto-provisioned on creation — see
+      // gateway.staff.createStaff), so this manual screen is a repair path
+      // for all three roles now, not just Teller/Treasury.
+      .filter(s => !isStaffOp || s.role === 'teller' || s.role === 'cash_officer' || s.role === 'admin_officer')
       .map(s =>
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Tellers and Treasury only — the account name is auto-set to TELLER <FULL NAME> or TREASURY <FIRST NAME>.',
+      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Tellers, Treasury and Admin only — the account name is auto-set to TELLER <FULL NAME>, TREASURY <FIRST NAME>, or ADMIN <FIRST NAME>.',
       staff_salary:      '"S" + number (S1, S2, S3, ...) — assigned automatically when you submit.',
       expense:           '"E" + number (E1, E2, ...) — assigned automatically when you submit',
       income:            '"I" + number (I1, I2, ...) — assigned automatically when you submit'
@@ -3483,7 +3505,7 @@ function nextPaint() {
     }).join('');
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button>${isSupabaseApprovalMode() ? `<button id="backfillTreasuryAccountsBtn" class="secondary tiny-btn" title="One-time: opens a TREASURY operational account for any Treasury staff who doesn't have one yet">Backfill Treasury Accounts</button>` : ''}<button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button>${isSupabaseApprovalMode() ? `<button id="backfillTreasuryAccountsBtn" class="secondary tiny-btn" title="One-time: opens a TREASURY/ADMIN operational account for any Treasury or Admin staff who doesn't have one yet">Backfill Operational Accounts</button>` : ''}<button id="addStaffBtn">ADD STAFF</button></div>
         ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
@@ -3977,6 +3999,68 @@ function staffLedgerEvents(staffId) {
     };
   }
 
+  // SURGICAL ADDITION 2026-09-07 (client request): "My Approvals" — an
+  // Approving Officer's own unique totals view. They never hold a cash
+  // account, so a cash statement doesn't apply to them; this shows how
+  // much THEY have approved instead, same date-filter pattern as everywhere
+  // else. Attribution is by name (state.approvals only tracks approvedBy as
+  // a name string, not a staff id — matches how Approval History already
+  // displays "approved by" everywhere else in the app). Rejections aren't
+  // broken out per-officer here since who rejected a request isn't tracked
+  // locally at all yet (only sent to the gateway, never stored back).
+  const APPROVAL_TYPE_LABELS = {
+    customer_credit: 'Customer Credit', customer_debit: 'Customer Debit',
+    customer_credit_journal: 'Credit Journal', customer_debit_journal: 'Debit Journal',
+    intra_bank_transfer: 'Non Cash', account_opening: 'Account Opening',
+    account_maintenance: 'Account Maintenance', cash_receipt: 'Cash Receipt',
+    inter_staff_credit: 'Fund Account', operational_entry: 'Income/Expense Posting',
+    float_declaration: 'Float Declaration'
+  };
+
+  function renderMyApprovals() {
+    const st = currentStaff();
+    if (!st) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
+    const filter = state.ui.myApprovalsFilter || { preset: 'daily', from: '', to: '' };
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
+    const mine = (state.approvals || []).filter(r => r.status === 'approved' && r.approvedBy === st.name);
+    const filtered = filterByDate(mine, filter);
+    const totalValue = filtered.reduce((s, r) => s + Number(r.payload?.amount || r.payload?.formAmount || 0), 0);
+    const byType = {};
+    filtered.forEach(r => {
+      const label = APPROVAL_TYPE_LABELS[r.type] || r.type;
+      byType[label] ||= { count: 0, value: 0 };
+      byType[label].count += 1;
+      byType[label].value += Number(r.payload?.amount || r.payload?.formAmount || 0);
+    });
+    const rows = Object.entries(byType).map(([label, v], i) =>
+      `<tr><td>${i+1}</td><td>${escapeHtml(label)}</td><td>${v.count}</td><td>${money(v.value)}</td></tr>`
+    ).join('');
+    return `
+      <div class="stack">
+        <div class="form-card">
+          <h3>My Approvals</h3>
+          <div class="kpi-row wrap">
+            <div class="kpi"><div class="label">Officer</div><div class="number">${escapeHtml(st.name || '')}</div></div>
+            <div class="kpi"><div class="label">Total Approved</div><div class="number">${filtered.length}</div></div>
+            <div class="kpi"><div class="label">Total Value</div><div class="number">${money(totalValue)}</div></div>
+          </div>
+          <div class="action-inline balance-filters-row" style="margin-top:10px">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-my-approvals-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="myApprovalsFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="myApprovalsTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="myApprovalsCustomApply">Apply Custom</button></div>
+          <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Request Type</th><th>Count</th><th>Total Value</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="muted">No approvals in range</td></tr>'}</tbody></table></div>
+        </div>
+      </div>`;
+  }
+
+  function bindMyApprovals() {
+    qq('[data-my-approvals-preset]').forEach(btn => btn.onclick = () => {
+      state.ui.myApprovalsFilter = { preset: btn.dataset.myApprovalsPreset, from: '', to: '' };
+      save(); renderWorkspace();
+    });
+    if (byId('myApprovalsCustomApply')) byId('myApprovalsCustomApply').onclick = () => {
+      state.ui.myApprovalsFilter = { preset: 'custom', from: byId('myApprovalsFrom')?.value || '', to: byId('myApprovalsTo')?.value || '' };
+      save(); renderWorkspace();
+    };
+  }
+
   async function openStaffLedgerModal(staffId) {
     const staff = staffById(staffId);
     if (!staff) return showToast('Staff not found');
@@ -4294,6 +4378,7 @@ function normalizeStaffLedgerEntryType(row) {
     switch (state.ui.tool) {
       case 'check_balance': bindCheckBalance(); break;
       case 'my_statement': bindMyStatement(); break;
+      case 'my_approvals': bindMyApprovals(); break;
       case 'account_opening': bindAccountOpening(); break;
       case 'account_maintenance': bindMaintenance('maintenance'); break;
       case 'account_reactivation': bindMaintenance('reactivation'); break;
@@ -4523,13 +4608,15 @@ function normalizeStaffLedgerEntryType(row) {
       openingDraft.linkedStaffId = linkedStaffSelect.value;
       if ((openingDraft.accountType || 'customer') === 'staff_operational') {
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffSelect.value);
-        // SURGICAL FIX 2026-09-05 (client request): Treasury (cash_officer)
-        // gets "TREASURY <FIRST NAME>" instead of the Teller convention
+        // SURGICAL FIX 2026-09-05/07 (client request): Treasury and Admin
+        // get "<ROLE> <FIRST NAME>" instead of the Teller convention
         // "TELLER <FULL NAME>" — client asked specifically for first name
-        // only on the Treasury account.
+        // only on those two.
+        const firstName = () => String(linkedStaff?.name || '').trim().split(/\s+/)[0] || linkedStaff?.name || '';
         if (linkedStaff?.role === 'cash_officer') {
-          const firstName = String(linkedStaff.name || '').trim().split(/\s+/)[0] || linkedStaff.name || '';
-          openingDraft.name = `TREASURY ${firstName.toUpperCase()}`;
+          openingDraft.name = `TREASURY ${firstName().toUpperCase()}`;
+        } else if (linkedStaff?.role === 'admin_officer') {
+          openingDraft.name = `ADMIN ${firstName().toUpperCase()}`;
         } else {
           openingDraft.name = linkedStaff ? `TELLER ${String(linkedStaff.name || '').toUpperCase()}` : '';
         }
@@ -7715,7 +7802,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         showToast('Unexpected error running backfill');
       } finally {
         backfillBtn.disabled = false;
-        backfillBtn.textContent = 'Backfill Treasury Accounts';
+        backfillBtn.textContent = 'Backfill Operational Accounts';
       }
     };
     if (addBtn) addBtn.onclick = () => {
