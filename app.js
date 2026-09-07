@@ -174,9 +174,13 @@
     },
     cash_officer: {
       title: 'Treasury',
-      desc: 'Non-cash transfers between accounts.',
+      desc: 'Fund tellers, receive cash, and move money between accounts.',
       icon: '💰',
-      tools: ['intra_transfer']
+      // SURGICAL ADDITION 2026-09-06 (client-confirmed design): Treasury is
+      // now the one who funds Tellers and receives cash (from Collectors or
+      // anyone else) — not Admin — so cash_receipt and staff_credit need to
+      // be reachable from here, not just Administration.
+      tools: ['intra_transfer','cash_receipt','staff_credit']
     },
     tellering: {
       title: 'Tellering',
@@ -252,7 +256,7 @@
 
   const DEFAULT_PERMS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
-    cash_officer: ['intra_transfer'],
+    cash_officer: ['intra_transfer','cash_receipt','staff_credit'],
     teller: ['check_balance','credit','debit','journal','intra_transfer'],
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history'],
     admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary'],
@@ -2270,6 +2274,8 @@ function hideProcessing() {
         const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
+          ${toolBtn('cash_receipt')}
+          ${toolBtn('staff_credit')}
           ${toolBtn('intra_transfer')}
         </div>`;
       }
@@ -2414,12 +2420,16 @@ function hideProcessing() {
     const isSystemAssigned = acctType !== 'customer';
     const staffOptions = (state.staff || [])
       .filter(s => s.is_active !== false)
-      .filter(s => !isStaffOp || s.role === 'teller')
+      // SURGICAL FIX 2026-09-05 (client request): Treasury now also gets an
+      // operational account (auto-provisioned on creation — see
+      // gateway.staff.createStaff), so this manual screen is now mainly a
+      // repair path for either role, not just a Teller-only flow.
+      .filter(s => !isStaffOp || s.role === 'teller' || s.role === 'cash_officer')
       .map(s =>
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${ROLE_LABELS[s.role] || s.role})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Tellers only — the account name is auto-set to TELLER <FULL NAME>.',
+      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Tellers and Treasury only — the account name is auto-set to TELLER <FULL NAME> or TREASURY <FIRST NAME>.',
       staff_salary:      '"S" + number (S1, S2, S3, ...) — assigned automatically when you submit.',
       expense:           '"E" + number (E1, E2, ...) — assigned automatically when you submit',
       income:            '"I" + number (I1, I2, ...) — assigned automatically when you submit'
@@ -3473,7 +3483,7 @@ function nextPaint() {
     }).join('');
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button><button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button>${isSupabaseApprovalMode() ? `<button id="backfillTreasuryAccountsBtn" class="secondary tiny-btn" title="One-time: opens a TREASURY operational account for any Treasury staff who doesn't have one yet">Backfill Treasury Accounts</button>` : ''}<button id="addStaffBtn">ADD STAFF</button></div>
         ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
@@ -3973,6 +3983,14 @@ function staffLedgerEvents(staffId) {
     const acc = ensureStaffAccount(staffId);
     const staffName = staff.name || staff.full_name || staffId;
     const staffRole = ROLE_LABELS[staff.role] || staff.role || '';
+    // SURGICAL ADDITION 2026-09-04 (client request): admins asked to be
+    // able to see/filter every staff's statement from here. One shared
+    // filter (Daily/Weekly/Monthly/All/Custom, same pattern as My
+    // Statement/Collector Totals) — persisted per staffId so switching
+    // staff doesn't carry over someone else's date range.
+    state.ui.staffLedgerFilters ||= {};
+    const filter = state.ui.staffLedgerFilters[staffId] ||= { preset: 'all', from: '', to: '' };
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
 
     // Show modal immediately with local data, then upgrade with Supabase data
     function cleanStaffLedgerDetails(value) {
@@ -4008,13 +4026,37 @@ function staffLedgerEvents(staffId) {
         </div>
         ${cod ? `<div class="note">Latest COD: <strong>${fmtDate(`${cod.date || cod.submittedAt}T12:00:00.000Z`)}</strong> • ${escapeHtml(cod.status || 'submitted')} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0)}</div>` : '<div class="note">No COD record yet for this staff.</div>'}
         ${loading ? '<div class="note" style="color:var(--text-muted)">Loading ledger from server…</div>' : ''}
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No ledger entries yet</td></tr>'}</tbody></table></div>
+        <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-staff-ledger-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="staffLedgerFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="staffLedgerTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="staffLedgerCustomApply">Apply Custom</button><button class="secondary" id="staffLedgerPrintBtn">Print</button></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No ledger entries in range</td></tr>'}</tbody></table></div>
       </div>`;
+    }
+
+    function bindModalControls(allEvents) {
+      qq('[data-staff-ledger-preset]').forEach(btn => btn.onclick = () => {
+        state.ui.staffLedgerFilters[staffId] = { preset: btn.dataset.staffLedgerPreset, from: '', to: '' };
+        save();
+        const modalBody = document.querySelector('.modal-body');
+        if (modalBody) modalBody.innerHTML = buildModal(buildRows(filterByDate(allEvents, state.ui.staffLedgerFilters[staffId])), false);
+        bindModalControls(allEvents);
+      });
+      if (byId('staffLedgerCustomApply')) byId('staffLedgerCustomApply').onclick = () => {
+        state.ui.staffLedgerFilters[staffId] = { preset: 'custom', from: byId('staffLedgerFrom')?.value || '', to: byId('staffLedgerTo')?.value || '' };
+        save();
+        const modalBody = document.querySelector('.modal-body');
+        if (modalBody) modalBody.innerHTML = buildModal(buildRows(filterByDate(allEvents, state.ui.staffLedgerFilters[staffId])), false);
+        bindModalControls(allEvents);
+      };
+      if (byId('staffLedgerPrintBtn')) byId('staffLedgerPrintBtn').onclick = () => {
+        const filtered = filterByDate(allEvents, state.ui.staffLedgerFilters[staffId]);
+        const printRows = filtered.map((row, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${staffLedgerDisplayDate(row)}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td>${money(row.runningBalance)}</td><td>${escapeHtml(cleanStaffLedgerDetails(row.details || row.note || '—'))}</td></tr>`).join('');
+        printHtml(`<div class="record-card"><h3>Statement — ${escapeHtml(staffName)} (${escapeHtml(acc.accountNumber || '—')})</h3><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${printRows || '<tr><td colspan="6">No entries in range</td></tr>'}</tbody></table></div>`, true);
+      };
     }
 
     // Show immediately with local data
     const localEvents = staffLedgerEvents(staffId);
-    openModal(`Staff Ledger — ${escapeHtml(staffName)}`, buildModal(buildRows(localEvents), isSupabaseApprovalMode()), [{ label:'Close', className:'secondary', onClick: closeModal }]);
+    openModal(`Staff Ledger — ${escapeHtml(staffName)}`, buildModal(buildRows(filterByDate(localEvents, filter)), isSupabaseApprovalMode()), [{ label:'Close', className:'secondary', onClick: closeModal }]);
+    bindModalControls(localEvents);
 
     // Fetch from Supabase and upgrade
     if (isSupabaseApprovalMode() && gateway.staff?.listStaffLedger) {
@@ -4035,8 +4077,15 @@ function staffLedgerEvents(staffId) {
             else if (['customer_debit','debit'].includes(entryType)) { type = 'Debit Impact'; runningType = 'debit'; }
             else if (entryType === 'debt_repayment') { type = 'Debt Repayment'; }
             else if (['wallet_fund','wallet_funding'].includes(entryType)) { type = 'Wallet'; }
-            else { type = entryType.replace(/_/g,' ').replace(/\w/g,c=>c.toUpperCase()); }
-            if (['form','credit','debit'].includes(runningType)) running += delta || (runningType === 'form' ? amount : -amount);
+            else { type = entryType.replace(/_/g,' ').replace(/\w/g,c=>c.toUpperCase()); }
+            // SURGICAL FIX 2026-09-04 (client-confirmed bug, same as the
+            // gateway delta fix): this fallback — only used when a row's
+            // stored delta is 0/missing — treated credit the same as debit
+            // (both -amount). Credit now correctly falls back to +amount.
+            // Note: historical rows that already have a nonzero (wrong-
+            // signed) delta from before the gateway fix still display with
+            // their old stored value — this only affects rows without one.
+            if (['form','credit','debit'].includes(runningType)) running += delta || (runningType === 'debit' ? -amount : amount);
             return {
               date: String(row.business_date || row.float_date || '').slice(0,10),
               businessDate: row.business_date || row.float_date || null,
@@ -4051,11 +4100,13 @@ function staffLedgerEvents(staffId) {
 
           // Update modal content
           const modalBody = document.querySelector('.modal-body, .modal .stack')?.closest('.modal-body') || document.querySelector('.modal-body');
-          if (modalBody) modalBody.innerHTML = buildModal(buildRows(sbEvents), false);
+          if (modalBody) modalBody.innerHTML = buildModal(buildRows(filterByDate(sbEvents, state.ui.staffLedgerFilters[staffId] || filter)), false);
+          bindModalControls(sbEvents);
         } else {
           // No Supabase data — remove loading indicator
           const modalBody = document.querySelector('.modal-body');
-          if (modalBody) modalBody.innerHTML = buildModal(buildRows(localEvents), false);
+          if (modalBody) modalBody.innerHTML = buildModal(buildRows(filterByDate(localEvents, state.ui.staffLedgerFilters[staffId] || filter)), false);
+          bindModalControls(localEvents);
         }
       } catch (err) {
         console.warn('[DUCESS] Staff ledger Supabase fetch failed:', err);
@@ -4472,7 +4523,16 @@ function normalizeStaffLedgerEntryType(row) {
       openingDraft.linkedStaffId = linkedStaffSelect.value;
       if ((openingDraft.accountType || 'customer') === 'staff_operational') {
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffSelect.value);
-        openingDraft.name = linkedStaff ? `TELLER ${String(linkedStaff.name || '').toUpperCase()}` : '';
+        // SURGICAL FIX 2026-09-05 (client request): Treasury (cash_officer)
+        // gets "TREASURY <FIRST NAME>" instead of the Teller convention
+        // "TELLER <FULL NAME>" — client asked specifically for first name
+        // only on the Treasury account.
+        if (linkedStaff?.role === 'cash_officer') {
+          const firstName = String(linkedStaff.name || '').trim().split(/\s+/)[0] || linkedStaff.name || '';
+          openingDraft.name = `TREASURY ${firstName.toUpperCase()}`;
+        } else {
+          openingDraft.name = linkedStaff ? `TELLER ${String(linkedStaff.name || '').toUpperCase()}` : '';
+        }
         save();
         renderWorkspace();
       }
@@ -4615,11 +4675,19 @@ function normalizeStaffLedgerEntryType(row) {
       collectorSelect.value = draft.collectorId || '';
       collectorSelect.onchange = () => { draft.collectorId = collectorSelect.value || ''; };
     }
-    // SURGICAL ADDITION 2026-09-04 (client request): funding source toggle —
-    // Treasury (existing cash injection) vs Debit an Account (real transfer,
-    // debits the source account for real on approval — see the
-    // inter_staff_credit approval case). Switching source re-renders since
-    // it shows/hides a whole field group (Source Account vs Payment Mode).
+    // SURGICAL REWRITE 2026-09-06: the target account now decides the whole
+    // shape of the form (see renderStaffCredit) — picking it re-renders so
+    // the right fields (My Treasury Balance vs Admin/Debit-an-Account) show.
+    const accountSelect = byId('staffCreditAccount');
+    if (accountSelect) {
+      accountSelect.value = draft.accountId || '';
+      accountSelect.onchange = () => {
+        draft.accountId = accountSelect.value || '';
+        draft.source = ''; draft.sourceAcct = ''; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0; draft.collectorId = '';
+        save();
+        renderWorkspace();
+      };
+    }
     qq('input[name="staffCreditSource"]').forEach(r => r.onchange = () => {
       if (!r.checked) return;
       draft.source = r.value;
@@ -4664,24 +4732,46 @@ function normalizeStaffLedgerEntryType(row) {
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
       const note = (byId('staffCreditNote')?.value || '').trim();
       const targetAccount = (state.customers || []).find(c => c.id === accountId);
+      const targetStaff = (state.staff || []).find(s => s.id === targetAccount?.linkedStaffId);
       const st = currentStaff();
-      const fundingSource = draft.source === 'account' ? 'account' : 'treasury';
       let sourceAccount = null;
-      if (fundingSource === 'account') {
-        if (!draft.sourceId) return showToast('Look up the source account first');
-        sourceAccount = (state.customers || []).find(c => c.id === draft.sourceId);
-        if (!sourceAccount) return showToast('Source account not found — look it up again');
-        if (sourceAccount.id === targetAccount?.id) return showToast('Source and destination cannot be the same account');
-        if (amount > Number(sourceAccount.balance || 0) + 0.01) return showToast(`Amount exceeds the source account's balance (${money(sourceAccount.balance || 0)})`);
+      let fundingSource;
+      // SURGICAL REWRITE 2026-09-06 (client-confirmed design): funding a
+      // Teller is now ALWAYS a real debit against the acting officer's own
+      // Treasury balance — no injection option, no arbitrary source account,
+      // enforced here, not left to whatever radio the person left checked.
+      if (targetStaff?.role === 'teller') {
+        sourceAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st.id);
+        if (!sourceAccount) return showToast('You have no Treasury account — ask Admin to open one before funding a Teller');
+        if (sourceAccount.id === targetAccount.id) return showToast('Source and destination cannot be the same account');
+        const myBalance = getStaffOperationalBalance(st.id);
+        if (amount > myBalance + 0.01) return showToast(`Amount exceeds your Treasury balance (${money(myBalance)})`);
+        fundingSource = 'treasury_balance';
+      } else {
+        // Funding Treasury's own account: Admin injection (unlimited) or a
+        // real debit from any other account.
+        fundingSource = draft.source === 'account' ? 'account' : 'admin_injection';
+        if (fundingSource === 'admin_injection' && st.role !== 'admin_officer') {
+          return showToast('Only Admin can inject cash — otherwise use Debit an Account');
+        }
+        if (fundingSource === 'account') {
+          if (!draft.sourceId) return showToast('Look up the source account first');
+          sourceAccount = (state.customers || []).find(c => c.id === draft.sourceId);
+          if (!sourceAccount) return showToast('Source account not found — look it up again');
+          if (sourceAccount.id === targetAccount?.id) return showToast('Source and destination cannot be the same account');
+          if (amount > Number(sourceAccount.balance || 0) + 0.01) return showToast(`Amount exceeds the source account's balance (${money(sourceAccount.balance || 0)})`);
+        }
       }
-      const paymentMode = fundingSource === 'account' ? 'transfer' : (q('input[name="staffCreditMode"]:checked')?.value || 'cash');
-      // SURGICAL ADDITION 2026-09-04: Received From is pure attribution —
-      // it never changes whose account is credited or by how much, it just
-      // records which Collector physically handed over this cash.
-      const collector = fundingSource === 'treasury' && draft.collectorId
+      const paymentMode = fundingSource === 'admin_injection' ? (q('input[name="staffCreditMode"]:checked')?.value || 'cash') : 'transfer';
+      // Received From is pure attribution — it never changes whose account
+      // is credited or by how much, it just records which Collector
+      // physically handed over this cash.
+      const collector = draft.collectorId
         ? (state.staff || []).find(s => s.id === draft.collectorId && s.role === 'collector')
         : null;
-      const confirmMessage = fundingSource === 'account'
+      const confirmMessage = fundingSource === 'treasury_balance'
+        ? `Debit your Treasury balance ${money(amount)} to fund ${targetAccount?.name || 'this Teller'}?`
+        : fundingSource === 'account'
         ? `Debit ${sourceAccount.name} ${money(amount)} to fund ${targetAccount?.name || 'staff account'}?`
         : `Credit ${targetAccount?.name || 'staff account'} ${money(amount)}${collector ? ` (received from ${collector.name})` : ''}?`;
       confirmAction(confirmMessage, async () => {
@@ -4703,7 +4793,7 @@ function normalizeStaffLedgerEntryType(row) {
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit');
           state.ui.staffCreditDraft = {};
           render();
-          showToast('Staff credit sent for approval');
+          showToast('Sent for approval');
         } finally { hideProcessing(); }
       });
     };
@@ -4993,6 +5083,19 @@ function normalizeStaffLedgerEntryType(row) {
             }
           </div>
         </div>` : `<div class="note">Select a category above to see its transactions for this date.</div>`}
+        <!-- SURGICAL ADDITION 2026-09-04 (client request): "get statements for
+             every staff, maybe from their transaction summary" — a direct
+             jump from here into the same filterable Staff Ledger modal used
+             from Staff Directory / Teller Balances, so an admin doesn't have
+             to leave this screen to pull a specific staff member's statement. -->
+        <div class="cs2-row" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line);align-items:center;gap:10px">
+          <div class="cs2-label" style="margin:0">Staff Statements</div>
+          <select id="txSummaryStaffPicker" class="entry-input" style="max-width:260px">
+            <option value="">— Select a staff member —</option>
+            ${(state.staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.name || '')} (${ROLE_LABELS[s.role] || s.role})</option>`).join('')}
+          </select>
+          <button id="txSummaryViewStatement" class="secondary">View Statement</button>
+        </div>
       </div>`;
   }
 
@@ -5007,6 +5110,11 @@ function normalizeStaffLedgerEntryType(row) {
         save(); renderWorkspace();
       };
     });
+    if (byId('txSummaryViewStatement')) byId('txSummaryViewStatement').onclick = () => {
+      const staffId = byId('txSummaryStaffPicker')?.value;
+      if (!staffId) return showToast('Select a staff member first');
+      openStaffLedgerModal(staffId);
+    };
   }
 
   function bindMaintenance(prefix) {
@@ -6289,24 +6397,36 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function renderStaffCredit() {
-    // Cash Officer credits a Teller's staff operational account
+    // SURGICAL REWRITE 2026-09-06 (client-confirmed design):
+    // - Funding a TELLER must ALWAYS be a real debit against the acting
+    //   Treasury officer's own operational balance — no more picking an
+    //   arbitrary account or an unlimited "Treasury" injection here. If the
+    //   money originally came from somewhere else, Treasury pulls it into
+    //   their own account first (the second case below), then disburses
+    //   from their own real balance — that's two separate, real postings,
+    //   each fully attributed to whoever actually did it.
+    // - Funding TREASURY's OWN account can come from Admin (unlimited
+    //   injection — real cash entering the business) or from debiting any
+    //   other account (customers, other staff, or Collector hand-offs).
     const staffOpAccounts = (state.customers || []).filter(c => c.accountType === 'staff_operational');
     const accountOptions = staffOpAccounts.map(a =>
       `<option value="${a.id}">${escapeHtml(a.name || a.displayName || a.display_name || '')} (${escapeHtml(a.accountNumber || a.account_number || '')})</option>`
     ).join('');
-    // SURGICAL ADDITION 2026-09-04 (client request): Collectors never touch
-    // money in the system themselves — they hand cash to whichever Treasury
-    // officer they find, and that officer records it here. This is purely
-    // an attribution field for the audit trail (who the cash came from);
-    // it does not change whose account gets credited or how much.
     const collectorOptions = (state.staff || []).filter(s => s.role === 'collector').map(s =>
       `<option value="${s.id}">${escapeHtml(s.name || '')}</option>`
     ).join('');
     const draft = state.ui.staffCreditDraft ||= {};
-    const fundingSource = draft.source === 'account' ? 'account' : 'treasury';
+    const targetAccount = staffOpAccounts.find(a => a.id === draft.accountId);
+    const targetStaff = targetAccount ? (state.staff || []).find(s => s.id === targetAccount.linkedStaffId) : null;
+    const targetIsTeller = targetStaff?.role === 'teller';
+    const targetIsTreasury = targetStaff?.role === 'cash_officer';
+    const actingStaff = currentStaff();
+    const myOpAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === actingStaff?.id);
+    const myBalance = myOpAccount ? getStaffOperationalBalance(actingStaff.id) : 0;
+    const fundingSource = draft.source === 'account' ? 'account' : 'admin_injection';
     return `
       <div class="form-card cs2-card opening-card">
-        <div class="cs2-title">Credit Teller Account</div>
+        <div class="cs2-title">Fund Account</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Staff Account</div>
@@ -6317,10 +6437,19 @@ function normalizeStaffLedgerEntryType(row) {
               </select>
             </div>
           </div>
+          ${!targetAccount ? `<div class="note">Select a Teller or Treasury account to see how it can be funded.</div>` : ''}
+          ${targetIsTeller ? `
+          <div class="note">Funding a Teller always comes from <strong>your own</strong> Treasury balance — a real debit against your account, credited to theirs.</div>
+          <div class="cs2-row">
+            <div class="cs2-label">My Treasury Balance</div>
+            <div class="cs2-input-wrap"><div class="display-field">${myOpAccount ? balanceHtml(myBalance) : '<span style="color:var(--accent-red)">You have no Treasury account — ask Admin to open one</span>'}</div></div>
+          </div>
+          ` : ''}
+          ${targetIsTreasury ? `
           <div class="cs2-row">
             <div class="cs2-label">Funding Source</div>
             <div class="tx-mode-toggle">
-              <label class="tx-toggle-pill"><input type="radio" name="staffCreditSource" value="treasury" ${fundingSource === 'treasury' ? 'checked' : ''}> <span>Treasury</span></label>
+              <label class="tx-toggle-pill"><input type="radio" name="staffCreditSource" value="admin_injection" ${fundingSource === 'admin_injection' ? 'checked' : ''}> <span>Admin Injection</span></label>
               <label class="tx-toggle-pill"><input type="radio" name="staffCreditSource" value="account" ${fundingSource === 'account' ? 'checked' : ''}> <span>Debit an Account</span></label>
             </div>
           </div>
@@ -6332,7 +6461,7 @@ function normalizeStaffLedgerEntryType(row) {
           </div>
           <div id="staffCreditSourceInfo" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<strong>${escapeHtml(draft.sourceName || '')}</strong> <span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
           ` : ''}
-          ${fundingSource === 'treasury' && collectorOptions ? `
+          ${collectorOptions ? `
           <div class="cs2-row">
             <div class="cs2-label">Received From</div>
             <div class="cs2-input-wrap cs2-wide">
@@ -6343,11 +6472,12 @@ function normalizeStaffLedgerEntryType(row) {
             </div>
           </div>
           ` : ''}
+          ` : ''}
           <div class="cs2-row">
             <div class="cs2-label">Amount</div>
             <div class="cs2-input-wrap cs2-medium"><input id="staffCreditAmount" class="entry-input cs2-input" type="number" value="${escapeHtml(String(draft.amount || ''))}"></div>
           </div>
-          ${fundingSource === 'treasury' ? `
+          ${targetIsTreasury && fundingSource === 'admin_injection' ? `
           <div class="cs2-row">
             <div class="cs2-label">Payment Mode</div>
             <div class="tx-mode-toggle">
@@ -6361,7 +6491,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="cs2-input-wrap cs2-wide"><input id="staffCreditNote" class="entry-input cs2-input" value="${escapeHtml(String(draft.note || ''))}"></div>
           </div>
           <div class="cs2-button-row">
-            <button id="submitStaffCredit" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
+            <button id="submitStaffCredit" class="sheet-btn cs2-btn cs2-btn-solid" ${!targetAccount ? 'disabled' : ''}>Submit for Approval</button>
           </div>
         </div>
       </div>`;
@@ -7565,6 +7695,29 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       return;
     }
     const addBtn = byId('addStaffBtn');
+    const backfillBtn = byId('backfillTreasuryAccountsBtn');
+    if (backfillBtn) backfillBtn.onclick = async () => {
+      if (!gateway.staff?.backfillTreasuryOperationalAccounts) return showToast('Not available');
+      backfillBtn.disabled = true;
+      backfillBtn.textContent = 'Working…';
+      try {
+        const result = await gateway.staff.backfillTreasuryOperationalAccounts();
+        if (!result?.ok) return showToast(result?.error?.message || 'Backfill failed');
+        const { created = [], skipped = [], errors = [] } = result.data || {};
+        if (created.length) await syncCustomersListFromGateway();
+        const parts = [];
+        if (created.length) parts.push(`${created.length} account${created.length === 1 ? '' : 's'} opened (${created.map(c => `${c.name}: ${c.accountNumber}`).join(', ')})`);
+        if (skipped.length) parts.push(`${skipped.length} already had one`);
+        if (errors.length) parts.push(`${errors.length} failed (${errors.join('; ')})`);
+        showToast(parts.join(' • ') || 'No Treasury staff found');
+        render();
+      } catch (err) {
+        showToast('Unexpected error running backfill');
+      } finally {
+        backfillBtn.disabled = false;
+        backfillBtn.textContent = 'Backfill Treasury Accounts';
+      }
+    };
     if (addBtn) addBtn.onclick = () => {
       openModal('Onboard New Staff', `
       <div class="form-grid two" style="gap:12px">
@@ -7634,18 +7787,20 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           // SURGICAL PATCH 2026-08-14: tellers now get their operational
           // account auto-provisioned by the gateway at creation time (no more
           // separate Account Opening + approval step — see gateway.staff.createStaff).
-          // Pull the fresh customer list so the new T#### account shows up
+          // SURGICAL ADDITION 2026-09-05: Treasury (cash_officer) gets the same
+          // auto-provisioning now, so this is no longer teller-only.
+          // Pull the fresh customer list so the new account shows up
           // immediately, and log it as its own audit entry (distinct from
           // "staff_created") since it's a separate record being opened.
           if (newStaffRecord.operationalAccount?.account_number) {
             await syncCustomersListFromGateway();
-            pushAudit('teller_account_opened', `Operational account ${newStaffRecord.operationalAccount.account_number} auto-opened for ${name}`);
-          } else if (role === 'teller' && newStaffRecord.operationalAccountError) {
+            pushAudit('operational_account_opened', `Operational account ${newStaffRecord.operationalAccount.account_number} auto-opened for ${name}`);
+          } else if ((role === 'teller' || role === 'cash_officer') && newStaffRecord.operationalAccountError) {
             showToast(`Staff created, but operational account setup failed: ${newStaffRecord.operationalAccountError}. Open it manually.`);
           }
           closeModal();
           render();
-          showToast(`✓ Staff "${name}" (${staffCode}) created successfully${newStaffRecord.operationalAccount?.account_number ? ` — teller account ${newStaffRecord.operationalAccount.account_number} opened` : ''}`);
+          showToast(`✓ Staff "${name}" (${staffCode}) created successfully${newStaffRecord.operationalAccount?.account_number ? ` — operational account ${newStaffRecord.operationalAccount.account_number} opened` : ''}`);
         } catch (err) {
           showToast('Unexpected error creating staff');
           if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Staff Account'; }
