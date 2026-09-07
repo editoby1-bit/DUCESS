@@ -3501,7 +3501,14 @@ function nextPaint() {
       const staffRole = s.role || s.role_code || '';
       const isActive = s.active !== false && s.is_active !== false;
       const acc = ensureStaffAccount(s.id);
-      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code> <button class="secondary tiny-btn" data-staff-edit-code="${s.id}" title="Staff ID is manager-assigned — must stay unique">Edit ID</button></td><td><code style="font-size:0.85em">${escapeHtml(String(acc.accountNumber || '—'))}</code></td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
+      // SURGICAL ADDITION 2026-09-08 (client-facing diagnostic gap): this
+      // "Account Number" column has always been the legacy wallet number
+      // (ensureStaffAccount), NOT the real T#### operational account used
+      // by Cash Receipt/Fund Account/Till — there was previously no way to
+      // see whether that real account actually exists for a given staff
+      // member without checking Supabase directly. Shown here now.
+      const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === s.id);
+      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code> <button class="secondary tiny-btn" data-staff-edit-code="${s.id}" title="Staff ID is manager-assigned — must stay unique">Edit ID</button></td><td><code style="font-size:0.85em">${escapeHtml(String(acc.accountNumber || '—'))}</code></td><td>${opAccount ? `<code style="font-size:0.85em">${escapeHtml(String(opAccount.accountNumber || opAccount.account_number || ''))}</code>` : `<span style="color:var(--text-muted)">— none —</span>`}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
     }).join('');
     return `
       <div class="table-card">
@@ -3510,7 +3517,7 @@ function nextPaint() {
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
         </div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Full Name</th><th>Staff ID</th><th>Account Number</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="7">No staff found</td></tr>'}</tbody></table></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Full Name</th><th>Staff ID</th><th>Account Number</th><th>Op. Account (Cash Receipt/Fund Account)</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="8">No staff found</td></tr>'}</tbody></table></div>
       </div>`;
   }
 
