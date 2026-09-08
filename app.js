@@ -1319,7 +1319,20 @@
       active: typeof customer.active === 'boolean' ? customer.active : String(customer.status || 'active').toLowerCase() === 'active',
       createdAt: customer.createdAt || customer.created_at || new Date().toISOString(),
       transactions: Array.isArray(customer.transactions) ? customer.transactions : [],
+      // SURGICAL FIX 2026-09-08 (root cause found via client screenshot):
+      // the gateway sends both .linkedStaffId and .staffId on each customer
+      // (same value, see normalizeCustomerSummary in the gateway), but this
+      // function only ever kept it under .staffId when building the
+      // frontend's state.customers record. Every consumer written for the
+      // Treasury/Admin operational-account features — getStaffOperational-
+      // Breakdown, Cash Receipt, Fund Account's target-role detection, the
+      // Staff Directory Op. Account column, all of it — checks
+      // `c.linkedStaffId`, which was always undefined as a result. This is
+      // why Cash Receipt has never worked for anyone and Fund Account never
+      // correctly told Teller and Treasury targets apart. Kept .staffId too
+      // in case anything else already depends on that name.
       staffId: customer.linkedStaffId || customer.staffId || null,
+      linkedStaffId: customer.linkedStaffId || customer.staffId || null,
       accountType: customer.accountType || 'customer'
     };
   }
