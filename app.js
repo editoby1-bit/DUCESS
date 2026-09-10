@@ -178,10 +178,19 @@
       icon: '💰',
       // SURGICAL ADDITION 2026-09-06 (client-confirmed design): Treasury is
       // now the one who funds Tellers and receives cash (from Collectors or
-      // anyone else) — not Admin — so cash_receipt and staff_credit need to
-      // be reachable from here, not just Administration. my_statement added
-      // 2026-09-07 so Treasury can see their own totals here too.
-      tools: ['intra_transfer','cash_receipt','staff_credit','my_statement']
+      // anyone else) — not Admin — so cash_receipt needs to be reachable
+      // from here, not just Administration. my_statement added 2026-09-07
+      // so Treasury can see their own totals here too.
+      // SURGICAL REMOVAL 2026-09-09 (client-confirmed design): "Credit Staff
+      // Account" (staff_credit) is dissolved out of Treasury entirely.
+      // Funding a Teller now happens through Non Cash (intra_transfer),
+      // which force-locks the Debit side to the acting Treasury officer's
+      // own account whenever the Credit side is a staff operational
+      // account — see renderIntraTransfer/bindIntraTransfer. Treasury
+      // funds itself via Cash Receipt (unchanged). Admin still has
+      // staff_credit via the 'administration' module below — this removal
+      // is Treasury-only, per client instruction.
+      tools: ['intra_transfer','cash_receipt','my_statement']
     },
     tellering: {
       title: 'Tellering',
@@ -264,7 +273,10 @@
 
   const DEFAULT_PERMS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
-    cash_officer: ['intra_transfer','cash_receipt','staff_credit','my_statement'],
+    // SURGICAL REMOVAL 2026-09-09: 'staff_credit' dropped from Treasury's
+    // permission set — see the matching comment on the cash_officer module
+    // above. Admin (admin_officer, below) keeps it untouched.
+    cash_officer: ['intra_transfer','cash_receipt','my_statement'],
     teller: ['check_balance','credit','debit','journal','intra_transfer','my_statement'],
     // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
     // own totals view ("my_approvals" — how much they've approved, by date)
@@ -2308,7 +2320,6 @@ function hideProcessing() {
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
           ${toolBtn('cash_receipt')}
-          ${toolBtn('staff_credit')}
           ${toolBtn('intra_transfer')}
           ${toolBtn('my_statement')}
         </div>`;
@@ -3939,6 +3950,28 @@ function staffLedgerEvents(staffId) {
           const amount = Number(payload.amount || 0);
           addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Treasury'} • ${payload.paymentMode || 'cash'}`, runningType: 'form' });
         }
+        // SURGICAL ADDITION 2026-09-09: the ACTING staff who issued this
+        // funding (via Non Cash, locked to their own account — see
+        // applyStaffAccountLock) needs it on their own statement too — a
+        // non-balance-affecting audit line ("I funded this account"), not
+        // just visible on the receiving side above. This is what makes the
+        // acting staff's own My Statement actually diverge from anyone
+        // else's based on what THEY did, instead of staying silent on
+        // every Non Cash action they perform.
+        if (payload.staffId === staffId) {
+          const amount = Number(payload.amount || 0);
+          addEvent({ key: `${req.id || 'inter-credit'}-issued`, date, type: 'Non Cash (Issued)', amount, delta: 0, details: `Funded ${payload.targetAccountName || 'staff account'} from ${payload.sourceAccountName || 'your account'}`, runningType: 'other' });
+        }
+      }
+      // SURGICAL ADDITION 2026-09-09: ordinary Non Cash (account-to-account,
+      // neither side a staff operational account) — the staff member who
+      // performed it gets a non-balance-affecting audit line on their own
+      // statement. Accountability for "who did this", same principle as
+      // the "Issued" line above, just for the non-staff-funding case.
+      if (req.type === 'intra_bank_transfer' && payload.staffId === staffId) {
+        const amount = Number(payload.amount || 0);
+        const route = `${payload.sourceAccountName || payload.sourceAccountNumber || ''} → ${payload.destAccountName || payload.destAccountNumber || ''}`.trim();
+        addEvent({ key: req.id || `nc-${date}-${amount}`, date, type: 'Non Cash', amount, delta: 0, details: `${route}${payload.details ? ' • ' + payload.details : ''}`, runningType: 'other' });
       }
       if (req.type === 'float_declaration' && (payload.staffId === staffId || payload.staff_id === staffId)) {
         const amount = Number(payload.amount || payload.floatAmount || 0);
@@ -4453,20 +4486,39 @@ function normalizeStaffLedgerEntryType(row) {
   function renderCollectorBalance() {
     const filter = state.ui.collectorFilter || { preset: 'daily', from: '', to: '' };
     const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
-    const collectors = (state.staff || []).filter(s => s.role === 'collector');
-    const rows = collectors.map((s, i) => {
+    // SURGICAL UPDATE 2026-09-09 (client-confirmed design): this rollup now
+    // covers all four "Received From" source types from Cash Receipt —
+    // Collector, Teller, Admin (fixed staff rosters, listed even at zero so
+    // the roster stays visible) and Customer (not a fixed roster — pulled
+    // from whichever customers have actually been tagged on an approved
+    // cash receipt, since listing every customer in the system would be
+    // pointless noise).
+    const staffSources = (state.staff || [])
+      .filter(s => s.role === 'collector' || s.role === 'teller' || s.role === 'admin_officer')
+      .map(s => ({ id: s.id, name: s.name || '', role: ROLE_LABELS[s.role] || s.role, ref: s.staffCode || s.staff_code || s.id || '—' }));
+    const customerSourceIds = new Set();
+    (state.approvals || []).forEach(r => {
+      if (r.status === 'approved' && r.type === 'cash_receipt' && r.payload?.receivedFromType === 'customer' && r.payload?.receivedFromId) {
+        customerSourceIds.add(r.payload.receivedFromId);
+      }
+    });
+    const customerSources = Array.from(customerSourceIds)
+      .map(id => (state.customers || []).find(c => c.id === id))
+      .filter(Boolean)
+      .map(c => ({ id: c.id, name: c.name || '', role: 'Customer', ref: c.accountNumber || c.account_number || '—' }));
+    const allSources = [...staffSources, ...customerSources];
+    const rows = allSources.map((s, i) => {
       const periodTotal = getCollectorTotal(s.id, filter);
       const allTimeTotal = getCollectorTotal(s.id, { preset: 'all' });
-      const staffCode = s.staffCode || s.staff_code || s.id || '—';
-      return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code></td><td>${money(periodTotal)}</td><td>${money(allTimeTotal)}</td></tr>`;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.role)}</td><td><code style="font-size:0.85em">${escapeHtml(String(s.ref))}</code></td><td>${money(periodTotal)}</td><td>${money(allTimeTotal)}</td></tr>`;
     }).join('');
-    const grandPeriod = collectors.reduce((sum, s) => sum + getCollectorTotal(s.id, filter), 0);
+    const grandPeriod = allSources.reduce((sum, s) => sum + getCollectorTotal(s.id, filter), 0);
     return `
       <div class="table-card">
         <div class="action-inline"><h3 style="margin:0">Collector Totals</h3></div>
-        <div class="note" style="margin:6px 0">How much each Collector has brought in and handed to Treasury — a read-only summary of already-approved Credit Staff Account entries tagged "Received From" a Collector. Posts nothing of its own and does not affect Business Balance.</div>
+        <div class="note" style="margin:6px 0">How much each Collector, Teller, Admin, or Customer has brought in and handed to Treasury — a read-only summary of already-approved Cash Receipt entries tagged "Received From" them. Posts nothing of its own and does not affect Business Balance.</div>
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-collector-filter-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="collectorFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="collectorTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="collectorCustomApply">Apply Custom</button></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Collector</th><th>Staff ID</th><th>Total Collected (Period)</th><th>Total Collected (All-Time)</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No Collectors found</td></tr>'}${collectors.length ? `<tr class="total-row"><td colspan="3"><strong>Total (Period)</strong></td><td><strong>${money(grandPeriod)}</strong></td><td></td></tr>` : ''}</tbody></table></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Name</th><th>Role</th><th>Reference</th><th>Total Collected (Period)</th><th>Total Collected (All-Time)</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No sources found</td></tr>'}${allSources.length ? `<tr class="total-row"><td colspan="4"><strong>Total (Period)</strong></td><td><strong>${money(grandPeriod)}</strong></td><td></td></tr>` : ''}</tbody></table></div>
       </div>`;
   }
 
@@ -4906,17 +4958,55 @@ function normalizeStaffLedgerEntryType(row) {
     };
   }
 
+  // SURGICAL ADDITION 2026-09-09 (client-confirmed design): "Credit Staff
+  // Account" (Fund Account) is dissolved into Non Cash. Whenever the Credit
+  // (destination) side resolves to a staff operational account (Teller or
+  // Treasury), the Debit (source) side is force-locked to the ACTING
+  // staff's own operational account — nobody can fund a staff account from
+  // an arbitrary source anymore. To fund a Teller with a customer's money,
+  // the acting officer now has to do it in two real, separately-attributed
+  // steps: pull it into their own account first (an ordinary Non Cash
+  // entry), then disburse from their own real balance (this locked case).
+  // That two-step is what keeps the acting staff as the accountable
+  // issuer instead of letting money jump straight from an arbitrary
+  // account into a staff account with nobody's name on it.
+  // Returns the staff's own operational account record, or null (and
+  // shows a toast + clears the destination) if they don't have one.
+  function applyStaffAccountLock(draft) {
+    const dest = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
+    if (!dest || dest.accountType !== 'staff_operational') return null;
+    const st = currentStaff();
+    const mine = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id);
+    if (!mine) {
+      showToast('You have no operational account — ask Admin to open one before funding a staff account');
+      draft.destId = ''; draft.destAcct = ''; draft.destName = ''; draft.destBalance = 0;
+      return null;
+    }
+    draft.sourceId = mine.id;
+    draft.sourceAcct = mine.accountNumber || mine.account_number || '';
+    draft.sourceName = mine.name || mine.displayName || mine.display_name || '';
+    // A staff operational account's real spendable balance is NOT its
+    // customer.balance field (that only tracks real debits ever posted to
+    // it) — it's the live aggregate from getStaffOperationalBalance (same
+    // figure shown everywhere else as Till/Treasury/Teller balance).
+    draft.sourceBalance = getStaffOperationalBalance(st.id);
+    return mine;
+  }
+
   function renderIntraTransfer() {
     const draft = state.ui.intraTransferDraft ||= {};
+    const destAccount = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
+    const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational');
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Non Cash Transaction</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Debit Account</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off"></div>
-            <button id="itrLookupSource" class="sheet-btn secondary tiny-btn">Search</button>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
+            <button id="itrLookupSource" class="sheet-btn secondary tiny-btn" ${sourceLocked ? 'disabled' : ''}>Search</button>
           </div>
+          <div id="itrSourceLockNote" class="note" style="${sourceLocked ? '' : 'display:none'}">Crediting a staff account always debits <strong>your own</strong> operational account — locked so you stay the accountable issuer. To fund it with someone else's money, first move that money into your own account with a separate Non Cash entry, then fund the staff account from there.</div>
           <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
           <div id="itrSourceBalance" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
           <div class="cs2-row">
@@ -4947,12 +5037,22 @@ function normalizeStaffLedgerEntryType(row) {
     const destInput = byId('itrDestAcct');
     const amtInput = byId('itrAmount');
     const detailsInput = byId('itrDetails');
-    const lookupAcct = async (acctNum, nameElId, idKey, nameKey, balanceElId, balanceKey) => {
+    const lookupAcct = async (acctNum, nameElId, idKey, nameKey, balanceElId, balanceKey, isDest) => {
       const match = (state.customers || []).find(c => c.accountNumber === acctNum || c.account_number === acctNum);
       if (match) {
         draft[idKey] = match.id;
         draft[nameKey] = match.name || match.full_name || match.display_name || acctNum;
         draft[balanceKey] = Number(match.balance || 0);
+        // A destination that turns out to be a staff operational account
+        // force-locks the Debit side to the acting staff's own account —
+        // that changes the shape of the form (disabled field + note), so
+        // it needs a full re-render, not just the two DOM boxes below.
+        if (isDest && match.accountType === 'staff_operational') {
+          applyStaffAccountLock(draft);
+          save();
+          renderWorkspace();
+          return;
+        }
         if (byId(nameElId)) byId(nameElId).innerHTML = `<strong>${escapeHtml(draft[nameKey])}</strong>`;
         if (byId(balanceElId)) byId(balanceElId).innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft[balanceKey])}`;
       } else {
@@ -4976,16 +5076,23 @@ function normalizeStaffLedgerEntryType(row) {
       draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; draft.destBalance = 0;
       if (byId('itrDestName')) byId('itrDestName').innerHTML = '';
       if (byId('itrDestBalance')) byId('itrDestBalance').innerHTML = '';
+      // The destination just changed, so any staff-account lock from a
+      // PREVIOUS destination is stale until the next lookup re-evaluates
+      // it — release it now rather than leave a disabled Debit field
+      // pointing at the wrong context.
+      if (byId('itrSourceAcct')) byId('itrSourceAcct').disabled = false;
+      if (byId('itrLookupSource')) byId('itrLookupSource').disabled = false;
+      if (byId('itrSourceLockNote')) byId('itrSourceLockNote').style.display = 'none';
     };
     if (sourceInput) sourceInput.onkeyup = (e) => {
       if (e.key !== 'Enter') return;
       const v = sourceInput.value.trim();
-      if (v) lookupAcct(v, 'itrSourceName', 'sourceId', 'sourceName', 'itrSourceBalance', 'sourceBalance');
+      if (v) lookupAcct(v, 'itrSourceName', 'sourceId', 'sourceName', 'itrSourceBalance', 'sourceBalance', false);
     };
     if (destInput) destInput.onkeyup = (e) => {
       if (e.key !== 'Enter') return;
       const v = destInput.value.trim();
-      if (v) lookupAcct(v, 'itrDestName', 'destId', 'destName', 'itrDestBalance', 'destBalance');
+      if (v) lookupAcct(v, 'itrDestName', 'destId', 'destName', 'itrDestBalance', 'destBalance', true);
     };
     if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
     if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
@@ -5002,21 +5109,47 @@ function normalizeStaffLedgerEntryType(row) {
 
     if (byId('submitIntraTransfer')) byId('submitIntraTransfer').onclick = async () => {
       const amount = parseAmountInput('itrAmount');
-      if (!draft.sourceId) return showToast('Look up the source account first');
       if (!draft.destId) return showToast('Look up the destination account first');
+      const destAccount = (state.customers || []).find(c => c.id === draft.destId);
+      const isStaffFunding = destAccount?.accountType === 'staff_operational';
+      // Re-apply the lock right before submit (not just on lookup) so a
+      // stale draft — e.g. reloaded from a saved session — can never
+      // slip an arbitrary source past this check.
+      if (isStaffFunding && !applyStaffAccountLock(draft)) return;
+      if (!draft.sourceId) return showToast('Look up the source account first');
       if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
+      if (isStaffFunding && amount > Number(draft.sourceBalance || 0) + 0.01) {
+        return showToast(`Amount exceeds your operational balance (${money(draft.sourceBalance || 0)})`);
+      }
       const st = currentStaff();
+      const details = (byId('itrDetails')?.value || '').trim();
       confirmAction(`Non cash transaction: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
         showProcessing('Submitting non cash transaction...'); await nextPaint();
         try {
-          const result = await submitApprovalThroughGateway('intra_bank_transfer', {
-            staffId: st.id, staffName: st.name, date: businessDate(),
-            sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
-            destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
-            amount, details: (byId('itrDetails')?.value||'').trim()
-          });
+          // Staff-account funding submits as 'inter_staff_credit' (not
+          // 'intra_bank_transfer') so it stays wired into every existing
+          // consumer of that type built for the old "Fund Account" screen:
+          // getStaffOperationalBreakdown (Till, Journal Amount, COD, Teller
+          // Balances), the Treasury Transactions category in Transaction
+          // Summary, and the receiving staff's own "Operational Credit"
+          // line in My Statement.
+          const result = isStaffFunding
+            ? await submitApprovalThroughGateway('inter_staff_credit', {
+                staffId: st.id, staffName: st.name,
+                targetAccountId: draft.destId, targetAccountNumber: draft.destAcct, targetAccountName: draft.destName,
+                amount, paymentMode: 'transfer', date: businessDate(), note: details,
+                fundingSource: 'treasury_balance',
+                sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
+                collectorId: '', collectorName: ''
+              })
+            : await submitApprovalThroughGateway('intra_bank_transfer', {
+                staffId: st.id, staffName: st.name, date: businessDate(),
+                sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
+                destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
+                amount, details
+              });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
           state.ui.intraTransferDraft = {};
           render();
@@ -5423,14 +5556,22 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   // SURGICAL ADDITION 2026-09-04 (client request): read-only rollup of what
-  // a Collector has brought to Treasury — sums approved inter_staff_credit
-  // requests tagged with this staffId as collectorId (see the "Received
-  // From" field on Credit Staff Account). Pure aggregation over already-
-  // approved data, same pattern as getStaffOperationalBreakdown above —
-  // posts nothing, so it cannot affect Business Balance/Overall Balance.
+  // a Collector (or, since 2026-09-09, a Teller) has brought to Treasury.
+  // SURGICAL UPDATE 2026-09-09 (client-confirmed design): "Received From"
+  // moved from the now-dissolved "Credit Staff Account" screen onto Cash
+  // Receipt itself (receivedFromId/receivedFromName on cash_receipt
+  // records) — that's where all NEW attribution lives. The old
+  // inter_staff_credit + collectorId form is kept here too, read-only, so
+  // historical records tagged before this change still count. Pure
+  // aggregation over already-approved data, same pattern as
+  // getStaffOperationalBreakdown above — posts nothing, so it cannot
+  // affect Business Balance/Overall Balance.
   function getCollectorTotal(staffId, filter) {
     const approved = (state.approvals || []).filter(r =>
-      r.status === 'approved' && r.type === 'inter_staff_credit' && r.payload?.collectorId === staffId
+      r.status === 'approved' && (
+        (r.type === 'cash_receipt' && r.payload?.receivedFromId === staffId) ||
+        (r.type === 'inter_staff_credit' && r.payload?.collectorId === staffId)
+      )
     );
     const rows = filter ? filterByDate(approved.map(r => ({ ...r, date: r.payload?.date })), filter) : approved;
     return rows.reduce((sum, r) => sum + Number(r.payload?.amount || 0), 0);
@@ -6457,6 +6598,17 @@ function normalizeStaffLedgerEntryType(row) {
     const myOpAccount = (state.customers || []).find(c =>
       c.accountType === 'staff_operational' && c.linkedStaffId === st.id
     );
+    // SURGICAL UPDATE 2026-09-09 (client-confirmed design): "Received From"
+    // is now REQUIRED, not optional — "if you receive cash you have to
+    // know the source." Four source types cover every case: Collector,
+    // Teller, Admin (all pick a specific staff member from that role), or
+    // Customer (looked up by account number, since that's not a staff
+    // list). No "Direct/none" escape hatch anymore.
+    const collectorStaff = (state.staff || []).filter(s => s.role === 'collector');
+    const tellerStaff = (state.staff || []).filter(s => s.role === 'teller');
+    const adminStaff = (state.staff || []).filter(s => s.role === 'admin_officer');
+    let selectedStaffId = '';
+    let selectedCustomer = null; // {id, name, accountNumber}
     openModal('Cash Receipt', `
       <div class="form-grid two compact-modal-grid">
         <div class="field"><label>Treasury</label><div class="display-field">${escapeHtml(st.name || '')}</div></div>
@@ -6468,6 +6620,26 @@ function normalizeStaffLedgerEntryType(row) {
         </div>
         <div class="field"><label>Note (optional)</label><input id="cashReceiptNote" class="entry-input" type="text"></div>
       </div>
+      <div class="form-grid one compact-modal-grid" style="margin-top:8px">
+        <div class="field"><label>Received From (required)</label>
+          <select id="cashReceiptSourceType" class="entry-input">
+            <option value="">— Select source —</option>
+            <option value="collector">Collector</option>
+            <option value="teller">Teller</option>
+            <option value="admin">Admin</option>
+            <option value="customer">Customer</option>
+          </select>
+        </div>
+      </div>
+      <div id="cashReceiptStaffWrap" class="form-grid one compact-modal-grid" style="margin-top:8px; display:none">
+        <div class="field"><label id="cashReceiptStaffLabel">Select</label>
+          <select id="cashReceiptStaffPicker" class="entry-input"><option value="">— Select —</option></select>
+        </div>
+      </div>
+      <div id="cashReceiptCustomerWrap" class="form-grid two compact-modal-grid" style="margin-top:8px; display:none">
+        <div class="field"><label>Customer Account Number</label><input id="cashReceiptCustomerAcct" class="entry-input" placeholder="Enter account number, press Enter"></div>
+        <div class="field"><label>&nbsp;</label><div id="cashReceiptCustomerInfo" class="cs2-note-box" style="min-height:24px"></div></div>
+      </div>
       ${myOpAccount ? `<div class="note">This will credit your operational account: <strong>${escapeHtml(myOpAccount.name || myOpAccount.account_number || 'your account')}</strong></div>` : '<div class="note warning-note">No operational account linked to your staff profile. Ask admin to open one.</div>'}
     `, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
@@ -6478,6 +6650,22 @@ function normalizeStaffLedgerEntryType(row) {
           if (!(amount > 0)) return showToast('Enter a valid amount');
           if (!myOpAccount) return showToast('No operational account found — contact admin');
           if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
+          const sourceType = byId('cashReceiptSourceType')?.value || '';
+          if (!sourceType) return showToast('Select where this cash was received from');
+          let receivedFromId = '', receivedFromName = '', receivedFromRole = '';
+          if (sourceType === 'customer') {
+            if (!selectedCustomer) return showToast('Look up the customer account first');
+            receivedFromId = selectedCustomer.id;
+            receivedFromName = selectedCustomer.name || '';
+            receivedFromRole = 'customer';
+          } else {
+            if (!selectedStaffId) return showToast(`Select which ${sourceType} handed over this cash`);
+            const staffMember = (state.staff || []).find(s => s.id === selectedStaffId);
+            if (!staffMember) return showToast('Selected staff not found');
+            receivedFromId = staffMember.id;
+            receivedFromName = staffMember.name || '';
+            receivedFromRole = staffMember.role;
+          }
           const paymentMode = q('input[name="cashReceiptMode"]:checked')?.value || 'cash';
           const note = byId('cashReceiptNote')?.value?.trim() || '';
           closeModal();
@@ -6492,7 +6680,11 @@ function normalizeStaffLedgerEntryType(row) {
               amount,
               paymentMode,
               date: businessDate(),
-              note
+              note,
+              receivedFromType: sourceType,
+              receivedFromId,
+              receivedFromName,
+              receivedFromRole
             });
             if (result?.ok === false) return showToast(result?.error?.message || 'Unable to submit cash receipt');
             render();
@@ -6501,7 +6693,50 @@ function normalizeStaffLedgerEntryType(row) {
         }
       }
     ]);
+    const sourceTypeSelect = byId('cashReceiptSourceType');
+    const staffWrap = byId('cashReceiptStaffWrap');
+    const staffLabel = byId('cashReceiptStaffLabel');
+    const staffPicker = byId('cashReceiptStaffPicker');
+    const customerWrap = byId('cashReceiptCustomerWrap');
+    const customerAcctInput = byId('cashReceiptCustomerAcct');
+    const customerInfo = byId('cashReceiptCustomerInfo');
+    const populateStaffPicker = (list, label) => {
+      if (staffLabel) staffLabel.textContent = label;
+      if (staffPicker) staffPicker.innerHTML = `<option value="">— Select ${label} —</option>` + list.map(s => `<option value="${s.id}">${escapeHtml(s.name || '')}</option>`).join('');
+      selectedStaffId = '';
+    };
+    if (sourceTypeSelect) sourceTypeSelect.onchange = () => {
+      const v = sourceTypeSelect.value;
+      selectedStaffId = ''; selectedCustomer = null;
+      if (staffWrap) staffWrap.style.display = 'none';
+      if (customerWrap) customerWrap.style.display = 'none';
+      if (v === 'collector') { populateStaffPicker(collectorStaff, 'Collector'); if (staffWrap) staffWrap.style.display = ''; }
+      else if (v === 'teller') { populateStaffPicker(tellerStaff, 'Teller'); if (staffWrap) staffWrap.style.display = ''; }
+      else if (v === 'admin') { populateStaffPicker(adminStaff, 'Admin'); if (staffWrap) staffWrap.style.display = ''; }
+      else if (v === 'customer') {
+        if (customerWrap) customerWrap.style.display = '';
+        if (customerAcctInput) customerAcctInput.value = '';
+        if (customerInfo) customerInfo.innerHTML = '';
+      }
+    };
+    if (staffPicker) staffPicker.onchange = () => { selectedStaffId = staffPicker.value || ''; };
+    if (customerAcctInput) {
+      const lookupCustomer = () => {
+        const v = customerAcctInput.value.trim();
+        const match = (state.customers || []).find(c => c.accountNumber === v || c.account_number === v);
+        if (match) {
+          selectedCustomer = match;
+          if (customerInfo) customerInfo.innerHTML = `<strong>${escapeHtml(match.name || '')}</strong>`;
+        } else {
+          selectedCustomer = null;
+          if (customerInfo) customerInfo.innerHTML = v ? `<span style="color:var(--accent-red)">Account not found</span>` : '';
+        }
+      };
+      customerAcctInput.oninput = () => { selectedCustomer = null; if (customerInfo) customerInfo.innerHTML = ''; };
+      customerAcctInput.onkeyup = (e) => { if (e.key === 'Enter') lookupCustomer(); };
+    }
   }
+
 
   function renderStaffCredit() {
     // SURGICAL REWRITE 2026-09-06 (client-confirmed design):
@@ -7457,6 +7692,15 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         draft.destName = c.name || '';
         draft.destId = c.id;
         draft.destBalance = Number(c.balance || 0);
+        // Picking a staff operational account via Search locks the Debit
+        // side the same way typing+Enter does (see applyStaffAccountLock)
+        // — this needs a full re-render since it changes the form shape.
+        if (c.accountType === 'staff_operational') {
+          applyStaffAccountLock(draft);
+          save();
+          renderWorkspace();
+          return;
+        }
         if (byId('itrDestAcct')) byId('itrDestAcct').value = c.accountNumber || '';
         if (byId('itrDestName')) byId('itrDestName').innerHTML = `<strong>${escapeHtml(c.name || '')}</strong>`;
         if (byId('itrDestBalance')) byId('itrDestBalance').innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.destBalance)}`;
