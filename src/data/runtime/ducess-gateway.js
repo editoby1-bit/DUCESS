@@ -1336,12 +1336,49 @@ if (inserted.error) {
 
       // Inter-staff credit: Cash Officer credits a Teller's operational account
       if (type === 'inter_staff_credit') {
+        const amount = normalizeNumber(payload.amount);
+        // SURGICAL FIX 2026-09-16 (client-observed bug): this ledger write
+        // previously ALWAYS credited payload.staffId — the ACTING/GIVING
+        // staff who performed the transfer — with a POSITIVE delta and
+        // entryType 'inter_staff_credit'. That's backwards: the giver
+        // should be debited, and the credit belongs to the actual
+        // RECIPIENT (whoever's operational account payload.targetAccountId
+        // points at), not whoever initiated it. This is what was making
+        // Non Cash / Teller-to-Teller funding show up as a "Received"
+        // figure on the wrong staff member's Teller Balances row.
+        if (payload.sourceAccountId) {
+          const debitLedgerResult = await insertStaffCashLedgerEntry({
+            approvalRequestId: requestRow.id,
+            staffId: payload.staffId || null,
+            entryType: 'inter_staff_debit',
+            amount,
+            delta: -amount,
+            note: payload.note || `Funded ${payload.targetAccountName || payload.targetAccountNumber || 'staff account'} from own balance`,
+            floatDate: payload.date || null,
+            createdByStaffId: requestRow.requested_by_staff_id || null,
+            approvedByStaffId: approver?.staffId || null,
+          });
+          if (!debitLedgerResult.ok) return debitLedgerResult;
+        }
+        // Resolve the actual recipient's staff id from the target account
+        // (falls back to payload.staffId only if that lookup fails, so a
+        // legitimate credit is never silently dropped).
+        let recipientStaffId = payload.staffId || null;
+        try {
+          const targetSummary = await getAccountSummary(payload.targetAccountId || payload.targetAccountNumber);
+          if (targetSummary.ok && targetSummary.data?.customerId) {
+            const targetCustomerResult = await getCustomerById(targetSummary.data.customerId);
+            if (targetCustomerResult.ok && targetCustomerResult.data?.linkedStaffId) {
+              recipientStaffId = targetCustomerResult.data.linkedStaffId;
+            }
+          }
+        } catch (_) { /* fall back to payload.staffId */ }
         const ledgerResult = await insertStaffCashLedgerEntry({
           approvalRequestId: requestRow.id,
-          staffId: payload.staffId || null,
+          staffId: recipientStaffId,
           entryType: 'inter_staff_credit',
-          amount: normalizeNumber(payload.amount),
-          delta: normalizeNumber(payload.amount),
+          amount,
+          delta: amount,
           note: payload.note || `Operational credit from ${payload.staffName || 'Cash Officer'} to ${payload.targetAccountName || payload.targetAccountNumber || 'teller account'} (${payload.paymentMode || 'cash'})`,
           floatDate: payload.date || null,
           createdByStaffId: requestRow.requested_by_staff_id || null,
