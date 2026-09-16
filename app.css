@@ -108,6 +108,16 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .tool-tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom: 10px; }
 .tool-tab { background:#eef2f6; color: var(--text); }
 .tool-tab.active { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: white; }
+/* SURGICAL ADDITION 2026-09-16 (client-confirmed design): the three posting
+   categories (Direct Posting / Non Cash Posting / Journal Posting) are
+   collapsible groups in the Tellering/Treasury sidebar — click the group
+   name to reveal its entry types, matching the client's reference sheet
+   layout (categories containing entry types, not a flat list). */
+.tool-group-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;background:transparent;border:none;border-bottom:1px solid var(--line);padding:8px 4px;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted,#667);cursor:pointer;min-height:auto;text-align:left;}
+.tool-group-toggle.open{color:var(--text);}
+.tool-group-toggle .tool-group-caret{font-size:11px;opacity:.7;}
+.tool-group-body{display:flex;flex-direction:column;gap:4px;padding-left:8px;margin:2px 0 4px;}
+.tool-group-body.hidden{display:none;}
 .layout-grid.two { display:grid; grid-template-columns: 1.2fr .8fr; gap:18px; }
 .layout-grid.three { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:18px; }
 .form-card, .table-card, .record-card { padding: 18px; }

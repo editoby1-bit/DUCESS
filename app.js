@@ -2312,29 +2312,43 @@ function hideProcessing() {
     const renderToolButtons = () => {
       if (state.ui.module === 'tellering') {
         const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
+        state.ui.tellerGroupOpen ||= {};
+        // A group auto-opens if the currently active tool lives inside it,
+        // so navigating straight to a tool (or re-rendering) never hides
+        // the very button that's active.
+        const groupDefs = [
+          ['direct', 'Direct Posting', ['credit', 'debit']],
+          ['non_cash', 'Non Cash Posting', ['intra_transfer']],
+          ['journal', 'Journal Posting', ['journal', 'journal_register']]
+        ];
+        const groupHtml = groupDefs.map(([key, label, tools]) => {
+          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
+          return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
+          <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
+        }).join('');
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Tellering Tools</div>
           ${toolBtn('check_balance')}
-          <div class="tool-column-title" style="margin-top:8px">Direct Posting</div>
-          ${toolBtn('credit')}
-          ${toolBtn('debit')}
-          <div class="tool-column-title" style="margin-top:8px">Non Cash Posting</div>
-          ${toolBtn('intra_transfer')}
-          <div class="tool-column-title" style="margin-top:8px">Journal Posting</div>
-          ${toolBtn('journal')}
-          ${toolBtn('journal_register')}
+          ${groupHtml}
           ${toolBtn('my_statement')}
         </div>`;
       }
       if (state.ui.module === 'cash_officer') {
         const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
+        state.ui.tellerGroupOpen ||= {};
+        const groupDefs = [
+          ['non_cash', 'Non Cash Posting', ['intra_transfer']],
+          ['journal', 'Journal Posting', ['journal_register']]
+        ];
+        const groupHtml = groupDefs.map(([key, label, tools]) => {
+          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
+          return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
+          <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
+        }).join('');
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
           ${toolBtn('cash_receipt')}
-          <div class="tool-column-title" style="margin-top:8px">Non Cash Posting</div>
-          ${toolBtn('intra_transfer')}
-          <div class="tool-column-title" style="margin-top:8px">Journal Posting</div>
-          ${toolBtn('journal_register')}
+          ${groupHtml}
           ${toolBtn('my_statement')}
         </div>`;
       }
@@ -2342,6 +2356,13 @@ function hideProcessing() {
     };
     const tabs = `<div class="workspace-switcher"><div class="tool-tabs vertical-tool-tabs ${(state.ui.module==='tellering'||state.ui.module==='cash_officer')?'tellering-tool-tabs':''}">${renderToolButtons()}</div><div class="workspace-tool-body">${state.ui.tool ? renderTool(state.ui.tool) : `<div class="tool-empty-state"><div class="tool-empty-title">${module.title}</div><div class="tool-empty-note">Select a heading to open that work area.</div></div>`}</div></div>`;
     byId('workspace').innerHTML = tabs;
+    qq('[data-posting-group]').forEach(btn => btn.onclick = () => {
+      const key = btn.dataset.postingGroup;
+      state.ui.tellerGroupOpen ||= {};
+      state.ui.tellerGroupOpen[key] = !state.ui.tellerGroupOpen[key];
+      save();
+      renderWorkspace();
+    });
     qq('.tool-tab').forEach(btn => btn.onclick = () => {
       const nextTool = btn.dataset.tool;
       if (state.ui.tool === nextTool) {
