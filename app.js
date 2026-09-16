@@ -157,8 +157,7 @@
     cash_officer: 'Treasury',
     approving_officer: 'Approving Officer',
     admin_officer: 'Administrative Officer',
-    report_officer: 'Report Officer',
-    collector: 'Field Collector'
+    report_officer: 'Report Officer'
   };
 
   const MODULES = {
@@ -167,9 +166,9 @@
       desc: 'Check balance, open, maintain, reactivate accounts and print statements.',
       icon: '👤',
       // SURGICAL ADDITION 2026-09-04 (client request): "my_statement" is
-      // universal (see hasPermission's free-tool list) — every staff role,
-      // including Collector, needs somewhere to reach it, and this module
-      // is already the one every role can open (via check_balance).
+      // universal (see hasPermission's free-tool list) — every staff role
+      // needs somewhere to reach it, and this module is already the one
+      // every role can open (via check_balance).
       tools: ['check_balance','account_opening','account_maintenance','account_reactivation','my_statement']
     },
     cash_officer: {
@@ -196,7 +195,7 @@
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','credit','debit','journal','intra_transfer','my_statement']
+      tools: ['check_balance','credit','debit','journal','journal_register','intra_transfer','my_statement']
     },
     approvals: {
       title: 'Approval',
@@ -227,10 +226,12 @@
       title: 'Balances',
       desc: 'Review business balance and operational balance with filters and teller summaries.',
       icon: '📊',
-      // SURGICAL ADDITION 2026-09-04 (client request): read-only Collector
-      // Totals report — sits alongside teller_balances, does NOT feed
-      // business_balance/renderOverallBalance in any way (see
-      // renderCollectorBalance's own comment).
+      // SURGICAL ADDITION 2026-09-04 (client request): read-only
+      // Received-From Totals report — sits alongside teller_balances, does
+      // NOT feed business_balance/renderOverallBalance in any way (see
+      // renderCollectorBalance's own comment). SURGICAL REMOVAL 2026-09-14
+      // (client-confirmed design): the "Collector" role is retired
+      // entirely — this report now only covers Teller/Admin/Customer.
       tools: ['business_balance','operational_balance','teller_balances','collector_balance']
     }
   };
@@ -248,6 +249,7 @@
     credit: 'Credit',
     debit: 'Debit',
     journal: 'Generate Journal',
+    journal_register: 'Journal Register',
     intra_transfer: 'Non Cash',
     my_close_day: 'My Close of Day',
     central_close_day: 'Central Close of Day',
@@ -267,7 +269,7 @@
     operational_balance: 'Operational Balance',
     overall_balance: 'Overall Balance',
     teller_balances: 'Teller Balances',
-    collector_balance: 'Collector Totals',
+    collector_balance: 'Received-From Totals',
     transaction_summary: 'Transaction Summary'
   };
 
@@ -276,21 +278,19 @@
     // SURGICAL REMOVAL 2026-09-09: 'staff_credit' dropped from Treasury's
     // permission set — see the matching comment on the cash_officer module
     // above. Admin (admin_officer, below) keeps it untouched.
-    cash_officer: ['intra_transfer','cash_receipt','my_statement'],
-    teller: ['check_balance','credit','debit','journal','intra_transfer','my_statement'],
+    // SURGICAL ADDITION 2026-09-14 (client-confirmed design): Treasury also
+    // has an operational account, so Journal/Journal Register (needed for
+    // Teller-to-Teller-style journal transfers) belong here too — same
+    // reasoning as Non Cash already being role-agnostic.
+    cash_officer: ['intra_transfer','cash_receipt','journal_register','my_statement'],
+    teller: ['check_balance','credit','debit','journal','journal_register','intra_transfer','my_statement'],
     // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
     // own totals view ("my_approvals" — how much they've approved, by date)
     // rather than the cash statement everyone else gets, since they never
     // hold a cash account themselves.
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary','my_statement'],
-    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory'],
-    // Collector's job ends at handing cash to Treasury — they never disburse,
-    // credit, or debit anything themselves. my_statement is the one thing
-    // they need: it's their own totals record (client-confirmed 2026-09-07 —
-    // "My Statement" is for whoever handles cash: Teller, Treasury,
-    // Collector, Admin; Customer Service needs it least and doesn't get it).
-    collector: ['my_statement']
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','journal_register','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary','my_statement'],
+    report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory']
   };
 
   let realtimeBound = false;
@@ -389,6 +389,13 @@
     state.staffAccounts ||= {};
     state.businessExtras ||= [];
     state.dayClosures ||= [];
+    // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal
+    // now gets a permanent, referenceable Journal Number (JN1, JN2, ...) and
+    // can be saved as a draft — built up, stored, and sent for approval
+    // later — instead of only existing in the moment it's typed and
+    // submitted. See nextJournalNumber(), saveJournalDraft(),
+    // sendJournalForApproval(), renderJournalRegister().
+    state.journals ||= [];
     if (!state.businessDate) {
       const latest = latestClosedBusinessDay();
       state.businessDate = latest?.date ? (latest.nextBusinessDate || nextDate(latest.date)) : today();
@@ -2311,6 +2318,7 @@ function hideProcessing() {
           ${toolBtn('credit')}
           ${toolBtn('debit')}
           ${toolBtn('journal')}
+          ${toolBtn('journal_register')}
           ${toolBtn('intra_transfer')}
           ${toolBtn('my_statement')}
         </div>`;
@@ -2321,6 +2329,7 @@ function hideProcessing() {
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
           ${toolBtn('cash_receipt')}
           ${toolBtn('intra_transfer')}
+          ${toolBtn('journal_register')}
           ${toolBtn('my_statement')}
         </div>`;
       }
@@ -2390,6 +2399,7 @@ function hideProcessing() {
       case 'credit': return renderJournalTool('credit');
       case 'debit': return renderJournalTool('debit');
       case 'journal': return renderJournalStandalone();
+      case 'journal_register': return renderJournalRegister();
       case 'intra_transfer': return renderIntraTransfer();
       case 'transaction_summary': return renderTransactionSummary();
       case 'my_close_day': return `<div class="tool-empty-state"><div class="tool-empty-title">My Close of Day</div><div class="tool-empty-note">Close-of-day details open in a modal when this heading is selected.</div></div>`;
@@ -2447,7 +2457,6 @@ function hideProcessing() {
           <div class="cs2-button-row">
             <button id="searchPhotoBtn" class="sheet-btn cs2-btn cs2-btn-ghost">Photo</button>
             <button id="openStatementBtn" class="sheet-btn cs2-btn cs2-btn-ghost">Statement</button>
-            <button id="openFieldNoteBtn" class="sheet-btn cs2-btn cs2-btn-ghost">Field Note (Form)</button>
           </div>
           <div class="sheet-photo-row hidden" id="checkBalancePhotoRow">
             <div class="photo-box inline-photo" data-fill="photo"><span>No Photo</span></div>
@@ -2686,6 +2695,159 @@ function hideProcessing() {
       </div>`;
   }
 
+  // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal now
+  // gets a permanent, referenceable Journal Number. One global sequence
+  // (JN1, JN2, JN3...), never reused, regardless of who created it or
+  // whether it's a Credit or Debit journal.
+  function nextJournalNumber() {
+    let max = 0;
+    (state.journals || []).forEach(j => {
+      const m = /^JN(\d+)$/.exec(String(j.journalNumber || ''));
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return `JN${max + 1}`;
+  }
+
+  // Shared by the live "Submit Journal" button and the Journal Register's
+  // "Send for Approval" action, so a saved draft is sent through the exact
+  // same approval path as one typed and submitted in one sitting — no
+  // parallel/duplicate logic to keep in sync.
+  async function submitJournalRows(kind, staffId, staffName, formAmount, formPaymentMode, rows, fieldNote, journalNumber) {
+    const type = kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal';
+    return await submitApprovalThroughGateway(type, {
+      staffId, staffName, date: businessDate(), formAmount, formPaymentMode, journalNumber,
+      rows: (rows || []).map(row => ({
+        customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber,
+        accountType: row.accountType || 'customer', staffAccountId: row.staffAccountId || '', staffAccountUuid: row.staffAccountUuid || '',
+        amount: row.amount, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown,
+        totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount,
+        chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId,
+        details: row.details, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode
+      })),
+      fieldNote: fieldNote || null
+    });
+  }
+
+  // A saved draft's effective status is computed live from state.approvals
+  // rather than stored — sidesteps ever needing to know exactly which id
+  // shape a given gateway mode hands back, and self-heals if an approval's
+  // status changes after the fact.
+  function journalEffectiveStatus(record) {
+    if (record.status === 'draft') return 'draft';
+    const linked = (state.approvals || []).find(r => r.payload?.journalNumber === record.journalNumber);
+    return linked?.status || record.status || 'sent';
+  }
+
+  // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal is
+  // now listed here — draft, sent, approved, or rejected — filterable by
+  // date and searchable by Journal Number. Replaces the journal-sourced
+  // rows that used to blend into Statement of Account (moved because it's
+  // the STAFF's own record of what they posted, not the customer's).
+  function renderJournalRegister() {
+    const filter = state.ui.journalRegisterFilter || { preset: 'all', from: '', to: '' };
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
+    const searchNumber = (state.ui.journalRegisterSearch || '').trim().toUpperCase();
+    let list = (state.journals || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    if (searchNumber) {
+      list = list.filter(j => String(j.journalNumber || '').toUpperCase().includes(searchNumber));
+    } else {
+      list = filterByDate(list, filter);
+    }
+    const rows = list.map((j, i) => {
+      const status = journalEffectiveStatus(j);
+      const statusLabel = { draft: 'Draft', pending: 'Pending Approval', approved: 'Approved', rejected: 'Rejected', sent: 'Pending Approval' }[status] || status;
+      const canAct = status === 'draft';
+      return `<tr>
+        <td>${i+1}</td>
+        <td><strong>${escapeHtml(j.journalNumber)}</strong></td>
+        <td>${fmtDate(j.date)}</td>
+        <td>${j.kind === 'credit' ? 'Credit' : 'Debit'}</td>
+        <td>${escapeHtml(j.staffName || '')}</td>
+        <td>${money(j.formAmount || 0)}</td>
+        <td><span class="status-pill status-${status}">${statusLabel}</span></td>
+        <td>${canAct ? `<button class="secondary tiny-btn" data-journal-resume="${j.id}">Resume</button> <button class="tiny-btn" data-journal-send="${j.id}">Send for Approval</button>` : `<button class="secondary tiny-btn" data-journal-view="${j.id}">View</button>`}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <div class="table-card">
+        <div class="action-inline"><h3 style="margin:0">Journal Register</h3></div>
+        <div class="note" style="margin:6px 0">Every Journal ever saved or sent, by Journal Number — draft journals here haven't been sent for approval yet.</div>
+        <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-journal-register-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="journalRegisterFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="journalRegisterTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="journalRegisterCustomApply">Apply Custom</button></div>
+        <div class="action-inline" style="margin-top:8px"><input id="journalRegisterSearch" class="entry-input" placeholder="Jump to Journal Number (e.g. JN7)" value="${escapeHtml(searchNumber)}" style="max-width:260px"></div>
+        <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Journal No.</th><th>Date</th><th>Kind</th><th>Staff</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No journals found</td></tr>'}</tbody></table></div>
+      </div>`;
+  }
+
+  function bindJournalRegister() {
+    qq('[data-journal-register-preset]').forEach(btn => btn.onclick = () => {
+      state.ui.journalRegisterFilter = { preset: btn.dataset.journalRegisterPreset, from: '', to: '' };
+      state.ui.journalRegisterSearch = '';
+      save(); renderWorkspace();
+    });
+    if (byId('journalRegisterCustomApply')) byId('journalRegisterCustomApply').onclick = () => {
+      state.ui.journalRegisterFilter = { preset: 'custom', from: byId('journalRegisterFrom')?.value || '', to: byId('journalRegisterTo')?.value || '' };
+      save(); renderWorkspace();
+    };
+    const searchInput = byId('journalRegisterSearch');
+    if (searchInput) searchInput.onkeyup = (e) => {
+      if (e.key !== 'Enter') return;
+      state.ui.journalRegisterSearch = searchInput.value;
+      save(); renderWorkspace();
+    };
+    qq('[data-journal-resume]').forEach(btn => btn.onclick = () => {
+      const record = (state.journals || []).find(j => j.id === btn.dataset.journalResume);
+      if (!record) return showToast('Journal not found');
+      const staff = currentStaff();
+      // Resuming loads the draft's rows into TODAY's working journal slot
+      // for this staff/kind, and remembers the draft's id so Save/Submit
+      // update THIS record instead of minting a new Journal Number.
+      state.ui.journalStandaloneKind = record.kind;
+      state.ui.tool = 'journal';
+      const visibilityKey = `${staff.id}:${businessDate()}:${record.kind}`;
+      state.ui.staffJournals ||= {};
+      state.ui.staffJournalAttachments ||= {};
+      state.ui.generatedJournals ||= {};
+      state.ui.staffJournals[visibilityKey] = record.rows.map(r => ({ ...r }));
+      state.ui.staffJournalAttachments[visibilityKey] = { fieldNote: record.fieldNote || null, loading: false };
+      state.ui.generatedJournals[visibilityKey] = record.rows.length > 0;
+      state.ui.resumingJournalId = record.id;
+      save();
+      renderWorkspace();
+    });
+    qq('[data-journal-send]').forEach(btn => btn.onclick = () => {
+      const record = (state.journals || []).find(j => j.id === btn.dataset.journalSend);
+      if (!record) return showToast('Journal not found');
+      if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
+      confirmAction(`Send ${record.journalNumber} for approval?`, async () => {
+        showProcessing('Sending journal...'); await nextPaint();
+        try {
+          // Frozen at Save time: the rows were balanced against
+          // formAmount as it stood then — re-checking against whatever
+          // the balance is NOW would risk rejecting a journal that was
+          // already valid when saved, so we send exactly what was saved.
+          const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
+          if (!result?.ok) return showToast(result?.error?.message || 'Unable to send journal');
+          record.status = 'sent';
+          save();
+          showToast(`${record.journalNumber} sent for approval`);
+          renderWorkspace();
+        } finally { hideProcessing(); }
+      });
+    });
+    qq('[data-journal-view]').forEach(btn => btn.onclick = () => {
+      const record = (state.journals || []).find(j => j.id === btn.dataset.journalView);
+      if (!record) return showToast('Journal not found');
+      const rowsHtml = (record.rows || []).map((r, i) => `<tr><td>${i+1}</td><td>${escapeHtml(r.accountNumber||'')}</td><td>${escapeHtml(r.customerName||'')}</td><td>${money(r.amount||0)}</td></tr>`).join('');
+      const body = `<div class="stack">
+        <div class="note">${record.kind === 'credit' ? 'Credit' : 'Debit'} Journal • ${fmtDate(record.date)} • by ${escapeHtml(record.staffName || '')} • Form Amount ${money(record.formAmount || 0)}</div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account No.</th><th>Name</th><th>Amount</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="4">No rows</td></tr>'}</tbody></table></div>
+        ${record.fieldNote ? (String(record.fieldNote.type||'').startsWith('image/') ? `<img src="${record.fieldNote.dataUrl}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">` : `<a href="${record.fieldNote.dataUrl}" target="_blank" rel="noopener">📄 ${escapeHtml(record.fieldNote.name||'Field note')}</a>`) : ''}
+      </div>`;
+      openModal(`${record.journalNumber}`, body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+    });
+  }
+
+
   function renderJournalTool(kind) {
     const title = kind === 'credit' ? 'Credit' : 'Debit';
     const st = currentStaff();
@@ -2725,16 +2887,25 @@ function hideProcessing() {
           <div class="posting-modal-rows polished-posting-modal">
             <div class="posting-row posting-row-acc-kpi" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <div class="posting-acc-search-inline">
-                <label class="sheet-label posting-label-account" for="txAcc">Acct No.</label>
+                <label class="sheet-label posting-label-account" for="txAcc">Account Number</label>
                 <input id="txAcc" class="entry-input sheet-input short-code" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                 <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
+                <span class="sheet-label" style="margin-left:10px">Teller ID</span>
+                <div class="display-field" id="txTellerId">${escapeHtml(String((state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id)?.accountNumber || '—'))}</div>
               </div>
               <div class="posting-business-date-corner"><span class="sheet-label">Business Date</span> <strong>${fmtDate(businessDate())}</strong></div>
             </div>
 
             <div class="posting-row posting-row-name">
-              <label class="sheet-label posting-label-name" for="txName">Acct Name</label>
+              <label class="sheet-label posting-label-name" for="txName">Account Name</label>
               <div class="display-field value-wide" id="txName">—</div>
+            </div>
+
+            <div class="posting-row posting-row-status">
+              <label class="sheet-label posting-label-name">Account Status</label>
+              <div class="display-field" id="txAccountStatus">—</div>
+              <label class="sheet-label posting-label-name" style="margin-left:14px">Account Type</label>
+              <div class="display-field" id="txAccountType">—</div>
             </div>
 
             <div class="posting-row posting-row-amount">
@@ -2744,7 +2915,7 @@ function hideProcessing() {
             </div>
 
             <div class="posting-row posting-row-details">
-              <label class="sheet-label posting-label-name" for="txDetails">Details</label>
+              <label class="sheet-label posting-label-name" for="txDetails">Description</label>
               <input id="txDetails" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}" placeholder="What is this transaction for?">
             </div>
 
@@ -2754,12 +2925,12 @@ function hideProcessing() {
             </div>
 
             <div class="posting-row posting-row-balance">
-              <label class="sheet-label posting-label-name" for="txBalance">Available Balance</label>
+              <label class="sheet-label posting-label-name" for="txBalance">Account Balance</label>
               <div class="display-field" id="txBalance">—</div>
             </div>
 
             <div class="posting-row posting-row-mode">
-              <label class="sheet-label posting-label-name">${kind === 'credit' ? 'Mode' : 'Payout Source'}</label>
+              <label class="sheet-label posting-label-name">Payment Method</label>
               <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
             </div>
             ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
@@ -2808,8 +2979,15 @@ function hideProcessing() {
             <div class="journal-pane-actions ${journalCollapsed ? "" : "journal-pane-actions-hidden"}"><button id="journalCollapseTopBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
           </div>
           <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
+            <div class="journal-entry-top row-journal-number" style="display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+              <div><span class="sheet-label">Journal Number</span> <strong id="journalNumberPreview">${(() => {
+                const resuming = state.ui.resumingJournalId ? (state.journals || []).find(j => j.id === state.ui.resumingJournalId) : null;
+                return resuming ? resuming.journalNumber : `${nextJournalNumber()} (will be assigned on Save/Submit)`;
+              })()}</strong></div>
+              <div><span class="sheet-label">Journal Date</span> <strong>${fmtDate(businessDate())}</strong></div>
+            </div>
             <div class="journal-entry-top row-zero journal-form-row" style="display:grid;grid-template-columns:max-content 160px max-content max-content;column-gap:10px;align-items:end;margin-bottom:10px;">
-              <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Form Amount</label>
+              <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Value</label>
               <div id="journalFormAmount" class="display-field" data-op-balance="${getStaffOperationalBalance(st?.id)}" style="margin:0;">${money(getStaffOperationalBalance(st?.id))}</div>
               <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${(telleringDraft.journalFormMode || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${(telleringDraft.journalFormMode || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
               <div class="posting-kpis-inline">
@@ -2822,9 +3000,9 @@ function hideProcessing() {
                  journal, not one row — moved above the table so it's set once per
                  journal instead of re-typed for every entry added. -->
             <div class="journal-entry-top row-counterparty-top" style="display:grid;grid-template-columns:max-content 240px;column-gap:10px;align-items:end;margin-bottom:10px;">
-              <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.journalCounterpartyDraft || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid To'}</div></div>
+              <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.journalCounterpartyDraft || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid By'}</div></div>
             </div>
-            <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>Details</th><th>Amount</th><th>Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
+            <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>Details</th><th>Amount Paid</th><th>Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 190px;column-gap:6px;align-items:end;justify-content:start;">
                 <label class="sheet-label posting-label-account" for="journalAcc" style="margin:0;white-space:nowrap;align-self:center;">Account Number</label>
@@ -2840,7 +3018,7 @@ function hideProcessing() {
               </div>
               ${kind === 'credit' ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
             </div>
-            <div class="action-row journal-submit-row"><button id="journalSubmit">Submit Journal</button><button class="secondary" id="journalClear">Clear Journal</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note</label><input id="journalFieldNoteInput" type="file" accept="image/*,.pdf,application/pdf" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
+            <div class="action-row journal-submit-row"><button id="journalSubmit">Submit Journal</button><button class="secondary" id="journalSaveDraft">Save Journal</button><button class="secondary" id="journalClear">Clear Journal</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note</label><input id="journalFieldNoteInput" type="file" accept="image/*,.pdf,application/pdf" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
             <div id="journalFieldNotePreview" class="field-note-preview hidden"></div>
           </div>
         </div>
@@ -3251,7 +3429,7 @@ function hideProcessing() {
         ${field('Journal Form Amount', `${money(p.formAmount || 0)} (${p.formPaymentMode === 'transfer' ? 'Transfer' : 'Cash'})`, 'field-account')}
         ${req.type === 'customer_credit_journal' ? field('Total Charges', money(totalCharges), 'field-account') : ''}
       </div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>${req.type === 'customer_credit_journal' ? 'Received By' : 'Paid To'}</th><th>Mode</th><th>Details</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="7" class="muted">No journal entries</td></tr>'}</tbody></table></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>${req.type === 'customer_credit_journal' ? 'Received By' : 'Paid By'}</th><th>Mode</th><th>Details</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="7" class="muted">No journal entries</td></tr>'}</tbody></table></div>
       ${noteBlock}
     </div>`;
   } else if (req.type === 'account_reactivation') {
@@ -4035,7 +4213,16 @@ function staffLedgerEvents(staffId) {
             <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(acc.accountNumber || '—')}</div></div>
             <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(getStaffOperationalBalance(st.id))}</div></div>
           </div>
-          <div class="action-inline balance-filters-row" style="margin-top:10px">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-my-statement-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="myStatementFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="myStatementTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="myStatementCustomApply">Apply Custom</button></div>
+          <div class="action-inline balance-filters-row" style="margin-top:10px">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-my-statement-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="myStatementFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="myStatementTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="myStatementCustomApply">Apply Custom</button>
+          <!-- SURGICAL MOVE 2026-09-14 (client-confirmed design): "Field Note
+               (Form)" used to sit on Check Balance, next to a CUSTOMER
+               lookup — but the field note is something the STAFF member
+               uploaded (the one who carried out the transaction), so it
+               belongs on their own statement, not a customer's context.
+               Individual journals also keep their own attached note in the
+               Journal Register — this is just a "what did I upload most
+               recently" shortcut. -->
+          <button id="openFieldNoteBtn" class="secondary">Field Note (Form)</button></div>
           <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No entries in range</td></tr>'}</tbody></table></div>
         </div>
       </div>`;
@@ -4049,6 +4236,19 @@ function staffLedgerEvents(staffId) {
     if (byId('myStatementCustomApply')) byId('myStatementCustomApply').onclick = () => {
       state.ui.myStatementFilter = { preset: 'custom', from: byId('myStatementFrom')?.value || '', to: byId('myStatementTo')?.value || '' };
       save(); renderWorkspace();
+    };
+    const fieldNoteBtn = byId('openFieldNoteBtn'); if (fieldNoteBtn) fieldNoteBtn.onclick = () => {
+      const staff = currentStaff();
+      const note = staff ? getLatestFieldNoteForStaff(staff.id) : null;
+      if (!note) return showToast('No field note uploaded yet — upload one from Generate Journal');
+      const isImage = String(note.type || '').startsWith('image/');
+      const body = `<div class="stack">
+        <div class="note">${String(note.uploadedAt || '').slice(0,10) === businessDate() ? "Today's field note" : `Last uploaded field note (${fmtDate(note.uploadedAt)})`}</div>
+        ${isImage
+          ? `<img src="${note.dataUrl}" alt="Field note" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">`
+          : `<a href="${note.dataUrl}" target="_blank" rel="noopener" class="field-note-pdf-link">📄 ${escapeHtml(note.name || 'Field note.pdf')}</a>`}
+      </div>`;
+      openModal('Field Note (Form)', body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
     };
   }
 
@@ -4442,6 +4642,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'credit': bindJournal('credit'); break;
       case 'debit': bindJournal('debit'); break;
       case 'journal': bindJournalStandalone(); break;
+      case 'journal_register': bindJournalRegister(); break;
       case 'central_close_day':
       case 'approval_queue':
       case 'approval_customer_service':
@@ -4487,14 +4688,15 @@ function normalizeStaffLedgerEntryType(row) {
     const filter = state.ui.collectorFilter || { preset: 'daily', from: '', to: '' };
     const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
     // SURGICAL UPDATE 2026-09-09 (client-confirmed design): this rollup now
-    // covers all four "Received From" source types from Cash Receipt —
-    // Collector, Teller, Admin (fixed staff rosters, listed even at zero so
-    // the roster stays visible) and Customer (not a fixed roster — pulled
-    // from whichever customers have actually been tagged on an approved
-    // cash receipt, since listing every customer in the system would be
-    // pointless noise).
+    // covers all "Received From" source types from Cash Receipt — Teller,
+    // Admin (fixed staff rosters, listed even at zero so the roster stays
+    // visible) and Customer (not a fixed roster — pulled from whichever
+    // customers have actually been tagged on an approved cash receipt,
+    // since listing every customer in the system would be pointless
+    // noise). SURGICAL REMOVAL 2026-09-14 (client-confirmed design): the
+    // "Collector" role is retired entirely — dropped from this roster.
     const staffSources = (state.staff || [])
-      .filter(s => s.role === 'collector' || s.role === 'teller' || s.role === 'admin_officer')
+      .filter(s => s.role === 'teller' || s.role === 'admin_officer')
       .map(s => ({ id: s.id, name: s.name || '', role: ROLE_LABELS[s.role] || s.role, ref: s.staffCode || s.staff_code || s.id || '—' }));
     const customerSourceIds = new Set();
     (state.approvals || []).forEach(r => {
@@ -4515,8 +4717,8 @@ function normalizeStaffLedgerEntryType(row) {
     const grandPeriod = allSources.reduce((sum, s) => sum + getCollectorTotal(s.id, filter), 0);
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Collector Totals</h3></div>
-        <div class="note" style="margin:6px 0">How much each Collector, Teller, Admin, or Customer has brought in and handed to Treasury — a read-only summary of already-approved Cash Receipt entries tagged "Received From" them. Posts nothing of its own and does not affect Business Balance.</div>
+        <div class="action-inline"><h3 style="margin:0">Received-From Totals</h3></div>
+        <div class="note" style="margin:6px 0">How much each Teller, Admin, or Customer has brought in and handed to Treasury — a read-only summary of already-approved Cash Receipt entries tagged "Received From" them. Posts nothing of its own and does not affect Business Balance.</div>
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-collector-filter-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="collectorFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="collectorTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="collectorCustomApply">Apply Custom</button></div>
         <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Name</th><th>Role</th><th>Reference</th><th>Total Collected (Period)</th><th>Total Collected (All-Time)</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No sources found</td></tr>'}${allSources.length ? `<tr class="total-row"><td colspan="4"><strong>Total (Period)</strong></td><td><strong>${money(grandPeriod)}</strong></td><td></td></tr>` : ''}</tbody></table></div>
       </div>`;
@@ -4591,19 +4793,6 @@ function normalizeStaffLedgerEntryType(row) {
     };
     byId('lookupAcc').onkeyup = (e) => { if (e.key === "Enter") doLookup(false); };
     byId('openStatementBtn').onclick = () => { state.ui.tool = 'account_statement'; renderWorkspace(); };
-    const fieldNoteBtn = byId('openFieldNoteBtn'); if (fieldNoteBtn) fieldNoteBtn.onclick = () => {
-      const staff = currentStaff();
-      const note = staff ? getLatestFieldNoteForStaff(staff.id) : null;
-      if (!note) return showToast('No field note uploaded yet — upload one from Generate Journal');
-      const isImage = String(note.type || '').startsWith('image/');
-      const body = `<div class="stack">
-        <div class="note">${String(note.uploadedAt || '').slice(0,10) === businessDate() ? "Today's field note" : `Last uploaded field note (${fmtDate(note.uploadedAt)})`}</div>
-        ${isImage
-          ? `<img src="${note.dataUrl}" alt="Field note" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">`
-          : `<a href="${note.dataUrl}" target="_blank" rel="noopener" class="field-note-pdf-link">📄 ${escapeHtml(note.name || 'Field note.pdf')}</a>`}
-      </div>`;
-      openModal('Field Note (Form)', body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
-    };
     const photoBtn = byId('searchPhotoBtn'); if (photoBtn) photoBtn.onclick = ()=> {
       const row = byId('checkBalancePhotoRow');
       const selected = getSelectedCustomer();
@@ -4829,11 +5018,6 @@ function normalizeStaffLedgerEntryType(row) {
     if (amtInput) amtInput.oninput = () => { draft.amount = amtInput.value; };
     if (noteInput) noteInput.oninput = () => { draft.note = noteInput.value; };
     qq('input[name="staffCreditMode"]').forEach(r => r.onchange = () => { if (r.checked) draft.mode = r.value; });
-    const collectorSelect = byId('staffCreditCollector');
-    if (collectorSelect) {
-      collectorSelect.value = draft.collectorId || '';
-      collectorSelect.onchange = () => { draft.collectorId = collectorSelect.value || ''; };
-    }
     // SURGICAL REWRITE 2026-09-06: the target account now decides the whole
     // shape of the form (see renderStaffCredit) — picking it re-renders so
     // the right fields (My Treasury Balance vs Admin/Debit-an-Account) show.
@@ -4842,7 +5026,7 @@ function normalizeStaffLedgerEntryType(row) {
       accountSelect.value = draft.accountId || '';
       accountSelect.onchange = () => {
         draft.accountId = accountSelect.value || '';
-        draft.source = ''; draft.sourceAcct = ''; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0; draft.collectorId = '';
+        draft.source = ''; draft.sourceAcct = ''; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0;
         save();
         renderWorkspace();
       };
@@ -4922,17 +5106,11 @@ function normalizeStaffLedgerEntryType(row) {
         }
       }
       const paymentMode = fundingSource === 'admin_injection' ? (q('input[name="staffCreditMode"]:checked')?.value || 'cash') : 'transfer';
-      // Received From is pure attribution — it never changes whose account
-      // is credited or by how much, it just records which Collector
-      // physically handed over this cash.
-      const collector = draft.collectorId
-        ? (state.staff || []).find(s => s.id === draft.collectorId && s.role === 'collector')
-        : null;
       const confirmMessage = fundingSource === 'treasury_balance'
         ? `Debit your Treasury balance ${money(amount)} to fund ${targetAccount?.name || 'this Teller'}?`
         : fundingSource === 'account'
         ? `Debit ${sourceAccount.name} ${money(amount)} to fund ${targetAccount?.name || 'staff account'}?`
-        : `Credit ${targetAccount?.name || 'staff account'} ${money(amount)}${collector ? ` (received from ${collector.name})` : ''}?`;
+        : `Credit ${targetAccount?.name || 'staff account'} ${money(amount)}?`;
       confirmAction(confirmMessage, async () => {
         showProcessing('Sending for approval...'); await nextPaint();
         try {
@@ -4945,9 +5123,7 @@ function normalizeStaffLedgerEntryType(row) {
             fundingSource,
             sourceAccountId: sourceAccount?.id || '',
             sourceAccountNumber: sourceAccount?.accountNumber || '',
-            sourceAccountName: sourceAccount?.name || '',
-            collectorId: collector?.id || '',
-            collectorName: collector?.name || ''
+            sourceAccountName: sourceAccount?.name || ''
           });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit');
           state.ui.staffCreditDraft = {};
@@ -4995,33 +5171,60 @@ function normalizeStaffLedgerEntryType(row) {
 
   function renderIntraTransfer() {
     const draft = state.ui.intraTransferDraft ||= {};
+    const sourceAccount = draft.sourceId ? (state.customers || []).find(c => c.id === draft.sourceId) : null;
     const destAccount = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
     const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational');
+    const st = currentStaff();
+    const myTellerId = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id)?.accountNumber || '—';
+    const statusOf = (c) => c ? ((isCustomerFrozen(c) || c.active === false) ? 'Frozen' : 'Active') : '—';
+    const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')))) : '—';
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Non Cash Transaction</div>
         <div class="cs2-stack">
           <div class="cs2-row">
-            <div class="cs2-label">Debit Account</div>
+            <div class="cs2-label">Debit — Account Number</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
             <button id="itrLookupSource" class="sheet-btn secondary tiny-btn" ${sourceLocked ? 'disabled' : ''}>Search</button>
+            <span class="sheet-label" style="margin-left:10px">Teller ID</span>
+            <div class="display-field" id="itrTellerId">${escapeHtml(myTellerId)}</div>
           </div>
           <div id="itrSourceLockNote" class="note" style="${sourceLocked ? '' : 'display:none'}">Crediting a staff account always debits <strong>your own</strong> operational account — locked so you stay the accountable issuer. To fund it with someone else's money, first move that money into your own account with a separate Non Cash entry, then fund the staff account from there.</div>
           <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
-          <div id="itrSourceBalance" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
+          <div id="itrSourceBalance" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
           <div class="cs2-row">
-            <div class="cs2-label">Credit Account</div>
+            <div class="cs2-label">Account Status</div>
+            <div class="display-field" id="itrSourceStatus">${statusOf(sourceAccount)}</div>
+            <div class="cs2-label" style="margin-left:14px">Account Type</div>
+            <div class="display-field" id="itrSourceType">${typeOf(sourceAccount)}</div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Paid By</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrPaidBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.paidBy || ''))}" placeholder="Who authorized/paid this out"></div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Credit — Account Number</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrDestAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number to credit" autocomplete="off"></div>
             <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
-          <div id="itrDestBalance" class="cs2-note-box" style="min-height:24px">${draft.destId ? `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.destBalance || 0)}` : ''}</div>
+          <div id="itrDestBalance" class="cs2-note-box" style="min-height:24px">${draft.destId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.destBalance || 0)}` : ''}</div>
+          <div class="cs2-row">
+            <div class="cs2-label">Account Status</div>
+            <div class="display-field" id="itrDestStatus">${statusOf(destAccount)}</div>
+            <div class="cs2-label" style="margin-left:14px">Account Type</div>
+            <div class="display-field" id="itrDestType">${typeOf(destAccount)}</div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Received By</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrReceivedBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.receivedBy || ''))}" placeholder="Who received this"></div>
+          </div>
           <div class="cs2-row">
             <div class="cs2-label">Amount</div>
             <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(draft.amount || ''))}"></div>
           </div>
           <div class="cs2-row">
-            <div class="cs2-label">Details / Narration</div>
+            <div class="cs2-label">Description</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
           </div>
           <div class="cs2-button-row">
@@ -5037,8 +5240,15 @@ function normalizeStaffLedgerEntryType(row) {
     const destInput = byId('itrDestAcct');
     const amtInput = byId('itrAmount');
     const detailsInput = byId('itrDetails');
+    const paidByInput = byId('itrPaidBy');
+    if (paidByInput) paidByInput.oninput = () => { draft.paidBy = paidByInput.value; };
+    const receivedByInput = byId('itrReceivedBy');
+    if (receivedByInput) receivedByInput.oninput = () => { draft.receivedBy = receivedByInput.value; };
     const lookupAcct = async (acctNum, nameElId, idKey, nameKey, balanceElId, balanceKey, isDest) => {
       const match = (state.customers || []).find(c => c.accountNumber === acctNum || c.account_number === acctNum);
+      const statusElId = isDest ? 'itrDestStatus' : 'itrSourceStatus';
+      const typeElId = isDest ? 'itrDestType' : 'itrSourceType';
+      const typeLabel = (c) => c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')));
       if (match) {
         draft[idKey] = match.id;
         draft[nameKey] = match.name || match.full_name || match.display_name || acctNum;
@@ -5054,10 +5264,14 @@ function normalizeStaffLedgerEntryType(row) {
           return;
         }
         if (byId(nameElId)) byId(nameElId).innerHTML = `<strong>${escapeHtml(draft[nameKey])}</strong>`;
-        if (byId(balanceElId)) byId(balanceElId).innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft[balanceKey])}`;
+        if (byId(balanceElId)) byId(balanceElId).innerHTML = `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft[balanceKey])}`;
+        if (byId(statusElId)) byId(statusElId).textContent = (isCustomerFrozen(match) || match.active === false) ? 'Frozen' : 'Active';
+        if (byId(typeElId)) byId(typeElId).textContent = typeLabel(match);
       } else {
         if (byId(nameElId)) byId(nameElId).innerHTML = `<span style="color:var(--accent-red)">Account not found</span>`;
         if (byId(balanceElId)) byId(balanceElId).innerHTML = '';
+        if (byId(statusElId)) byId(statusElId).textContent = '—';
+        if (byId(typeElId)) byId(typeElId).textContent = '—';
       }
     };
 
@@ -5125,6 +5339,8 @@ function normalizeStaffLedgerEntryType(row) {
       }
       const st = currentStaff();
       const details = (byId('itrDetails')?.value || '').trim();
+      const paidBy = (byId('itrPaidBy')?.value || '').trim();
+      const receivedBy = (byId('itrReceivedBy')?.value || '').trim();
       confirmAction(`Non cash transaction: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
         showProcessing('Submitting non cash transaction...'); await nextPaint();
         try {
@@ -5134,7 +5350,13 @@ function normalizeStaffLedgerEntryType(row) {
           // getStaffOperationalBreakdown (Till, Journal Amount, COD, Teller
           // Balances), the Treasury Transactions category in Transaction
           // Summary, and the receiving staff's own "Operational Credit"
-          // line in My Statement.
+          // line in My Statement. SURGICAL ADDITION 2026-09-14
+          // (client-confirmed design): this is also how Teller-to-Teller
+          // funding works (any staff with an operational account can be
+          // the source — this was already role-agnostic, not
+          // Treasury-only) — it now gets a Journal Number too, so it's
+          // listed and searchable in the Journal Register.
+          const journalNumber = isStaffFunding ? nextJournalNumber() : '';
           const result = isStaffFunding
             ? await submitApprovalThroughGateway('inter_staff_credit', {
                 staffId: st.id, staffName: st.name,
@@ -5142,18 +5364,30 @@ function normalizeStaffLedgerEntryType(row) {
                 amount, paymentMode: 'transfer', date: businessDate(), note: details,
                 fundingSource: 'treasury_balance',
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
-                collectorId: '', collectorName: ''
+                collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy
               })
             : await submitApprovalThroughGateway('intra_bank_transfer', {
                 staffId: st.id, staffName: st.name, date: businessDate(),
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
                 destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
-                amount, details
+                amount, details, paidBy, receivedBy
               });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
+          if (isStaffFunding) {
+            state.journals.push({
+              id: uid('jn'), journalNumber, kind: 'transfer', date: businessDate(),
+              staffId: st.id, staffName: st.name, counterparty: draft.destName || '',
+              formAmount: amount, formPaymentMode: 'transfer',
+              rows: [
+                { accountNumber: draft.sourceAcct, customerName: `${draft.sourceName} (Debit)`, amount },
+                { accountNumber: draft.destAcct, customerName: `${draft.destName} (Credit)`, amount }
+              ],
+              fieldNote: null, status: 'sent', createdAt: new Date().toISOString()
+            });
+          }
           state.ui.intraTransferDraft = {};
           render();
-          showToast('Non cash transaction sent for approval');
+          showToast(isStaffFunding ? `Non cash transaction sent for approval — ${journalNumber}` : 'Non cash transaction sent for approval');
         } finally { hideProcessing(); }
       });
     };
@@ -5538,7 +5772,21 @@ function normalizeStaffLedgerEntryType(row) {
       .filter(r => r.status === 'approved' &&
         (r.type === 'cash_receipt' || r.type === 'inter_staff_credit') &&
         (r.payload?.operationalAccountId === opAccount.id || r.payload?.targetAccountId === opAccount.id))
-      .reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
+      .reduce((s, r) => s + Number(r.payload?.amount || 0), 0)
+      // SURGICAL FIX 2026-09-14 (client-confirmed design): "money moves
+      // from a teller as debit and enters the other teller as credit" — the
+      // GIVING staff's own balance must actually go down when their
+      // account is the SOURCE of an approved inter_staff_credit (funding a
+      // fellow Teller or Treasury via Non Cash/Journal). Previously this
+      // only ever added inbound funding and never subtracted what a staff
+      // member gave out of their own account — Treasury/Teller balances
+      // could fund others indefinitely without ever depleting. Only
+      // matches when the SOURCE is itself a staff account (Admin Injection
+      // and Debit-an-Account sources are never a staff_operational
+      // account, so this never double-subtracts a customer-sourced credit).
+      - (state.approvals || [])
+        .filter(r => r.status === 'approved' && r.type === 'inter_staff_credit' && r.payload?.sourceAccountId === opAccount.id)
+        .reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
     const postingCash = (state.approvals || [])
       .filter(r => r.status === 'approved' && r.payload?.staffId === staffId &&
         ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type) &&
@@ -5601,6 +5849,22 @@ function normalizeStaffLedgerEntryType(row) {
     // shared with the credit/debit screens — bindJournal() only touches
     // elements that exist on whichever screen is currently rendered.
     bindJournal(kind);
+  }
+
+  // SURGICAL ADDITION 2026-09-14 (client-confirmed design): Direct Posting
+  // now shows Account Status/Account Type once a customer is found,
+  // conforming to the client's reference screenshots. Read-only, decorative
+  // only — never affects any balance or approval logic.
+  function updateTxAccountMeta(customer) {
+    const statusEl = byId('txAccountStatus');
+    const typeEl = byId('txAccountType');
+    if (!customer) {
+      if (statusEl) statusEl.textContent = '—';
+      if (typeEl) typeEl.textContent = '—';
+      return;
+    }
+    if (statusEl) statusEl.textContent = (isCustomerFrozen(customer) || customer.active === false) ? 'Frozen' : 'Active';
+    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
   }
 
   function bindJournal(kind) {
@@ -5707,6 +5971,7 @@ function normalizeStaffLedgerEntryType(row) {
       });
       if (byId('txName')) byId('txName').textContent='—';
       if (byId('txBalance')) byId('txBalance').innerHTML='—';
+      updateTxAccountMeta(null);
       state.ui.selectedCustomerId=null;
       updateSingleCommissionPreview();
     };
@@ -5827,6 +6092,7 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.collapsedJournals[visibilityKey] = false;
       if (byId('txName')) byId('txName').textContent = c.name;
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
+      updateTxAccountMeta(c);
       // Quiet auto-lookup must not save/repaint while the user is moving from
       // Account Number into Amount. Journal was fixed the same way: keep the
       // in-memory selection and DOM update now; persist later on post/journal actions.
@@ -5846,6 +6112,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (byId('txAcc') && String(byId('txAcc').value || '').trim() !== String(customer.accountNumber || '')) byId('txAcc').value = customer.accountNumber || value;
       if (byId('txName')) byId('txName').textContent = customer.name || '—';
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(customer.balance);
+      updateTxAccountMeta(customer);
     };
 
     const searchJournal = (opts = {}) => {
@@ -5869,6 +6136,7 @@ function normalizeStaffLedgerEntryType(row) {
       const clearSingleCustomer = () => {
         if (byId('txName')) byId('txName').textContent = '—';
         if (byId('txBalance')) byId('txBalance').innerHTML = '—';
+        updateTxAccountMeta(null);
         state.ui.selectedCustomerId = null;
         state.ui.generatedJournals ||= {};
         state.ui.collapsedJournals ||= {};
@@ -6196,6 +6464,7 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.journalAccDraft = '';
       state.ui.journalCounterpartyDraft = '';
       state.ui.selectedJournalCustomerId = null;
+      state.ui.resumingJournalId = '';
       telleringDraft.journalAmount = '';
       telleringDraft.journalFormAmount = '';
       telleringDraft.journalFormMode = 'cash';
@@ -6241,6 +6510,7 @@ function normalizeStaffLedgerEntryType(row) {
         ['txAcc','txAmount','txDetails','txCounterparty'].forEach(id => { const el = byId(id); if (el) el.value = ''; });
         if (byId('txName')) byId('txName').textContent = '—';
         if (byId('txBalance')) byId('txBalance').innerHTML = '—';
+        updateTxAccountMeta(null);
         save();
         showProcessing('Sending request...');
         await nextPaint();
@@ -6278,6 +6548,59 @@ function normalizeStaffLedgerEntryType(row) {
       });
     };
 
+    if (byId('journalSaveDraft')) byId('journalSaveDraft').onclick = () => {
+      if (!journal.length) return showToast('Add at least one row before saving');
+      if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
+      const journalFormAmount = getStaffOperationalBalance(staff.id);
+      const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
+      const fieldNoteSnapshot = attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null;
+      // If this draft was opened from the Journal Register ("Resume"), keep
+      // updating THAT record and its Journal Number rather than minting a
+      // new one every time it's re-saved.
+      const resumingId = state.ui.resumingJournalId;
+      const existing = resumingId ? (state.journals || []).find(j => j.id === resumingId) : null;
+      let journalNumber;
+      if (existing) {
+        journalNumber = existing.journalNumber;
+        existing.date = businessDate();
+        existing.counterparty = byId('journalCounterparty')?.value.trim() || '';
+        existing.formAmount = journalFormAmount;
+        existing.formPaymentMode = journalFormMode;
+        existing.rows = journal.map(row => ({ ...row }));
+        existing.fieldNote = fieldNoteSnapshot;
+      } else {
+        journalNumber = nextJournalNumber();
+        state.journals.push({
+          id: uid('jn'),
+          journalNumber,
+          kind,
+          date: businessDate(),
+          staffId: staff.id,
+          staffName: staff.name,
+          counterparty: byId('journalCounterparty')?.value.trim() || '',
+          formAmount: journalFormAmount,
+          formPaymentMode: journalFormMode,
+          rows: journal.map(row => ({ ...row })),
+          fieldNote: fieldNoteSnapshot,
+          status: 'draft',
+          createdAt: new Date().toISOString()
+        });
+      }
+      state.ui.resumingJournalId = '';
+      journal.splice(0);
+      attachmentState.fieldNote = null;
+      attachmentState.loading = false;
+      state.ui.generatedJournals[visibilityKey] = false;
+      state.ui.journalCounterpartyDraft = '';
+      telleringDraft.journalFormAmount = '';
+      telleringDraft.journalFormMode = 'cash';
+      const input = byId('journalFieldNoteInput');
+      if (input) input.value = '';
+      save();
+      showToast(`Saved as ${journalNumber} — send it from the Journal Register when ready`);
+      renderWorkspace();
+    };
+
     if (byId('journalSubmit')) byId('journalSubmit').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
@@ -6311,33 +6634,35 @@ function normalizeStaffLedgerEntryType(row) {
         showProcessing('Sending journal...');
         await nextPaint();
         try {
-          const result = await submitApprovalThroughGateway(kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal', {
-            staffId: staff.id,
-            date: businessDate(),
-            formAmount: journalFormAmount,
-            formPaymentMode: journalFormMode,
-            rows: journal.map(row => ({
-              customerId: row.customerId,
-              customerName: row.customerName,
-              accountNumber: row.accountNumber,
-              accountType: row.accountType || 'customer',
-              staffAccountId: row.staffAccountId || '',
-              staffAccountUuid: row.staffAccountUuid || '',
-              amount: row.amount,
-              customerCreditAmount: row.customerCreditAmount,
-              chargeBreakdown: row.chargeBreakdown,
-              totalChargeAmount: row.totalChargeAmount,
-              commissionAmount: row.commissionAmount,
-              chargeTraceId: row.chargeTraceId || row.commissionTraceId,
-              commissionTraceId: row.commissionTraceId,
-              details: row.details,
-              receivedOrPaidBy: row.receivedOrPaidBy,
-              payoutSource: row.payoutSource,
-              paymentMode: row.paymentMode
-            })),
-            fieldNote: attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null
-          });
+          const resumingId = state.ui.resumingJournalId;
+          const existing = resumingId ? (state.journals || []).find(j => j.id === resumingId) : null;
+          const journalNumber = existing ? existing.journalNumber : nextJournalNumber();
+          const fieldNoteSnapshot = attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null;
+          const rowsSnapshot = journal.map(row => ({ ...row }));
+          const result = await submitJournalRows(kind, staff.id, staff.name, journalFormAmount, journalFormMode, rowsSnapshot, fieldNoteSnapshot, journalNumber);
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit journal');
+          // Every submitted journal is stored and referenceable — see
+          // renderJournalRegister(). Status is computed live from
+          // state.approvals (journalEffectiveStatus), so this 'sent' value
+          // is just the initial state right after a successful submit.
+          if (existing) {
+            existing.date = businessDate();
+            existing.formAmount = journalFormAmount;
+            existing.formPaymentMode = journalFormMode;
+            existing.rows = rowsSnapshot;
+            existing.fieldNote = fieldNoteSnapshot;
+            existing.status = 'sent';
+          } else {
+            state.journals.push({
+              id: uid('jn'), journalNumber, kind, date: businessDate(),
+              staffId: staff.id, staffName: staff.name,
+              counterparty: byId('journalCounterparty')?.value.trim() || '',
+              formAmount: journalFormAmount, formPaymentMode: journalFormMode,
+              rows: rowsSnapshot, fieldNote: fieldNoteSnapshot,
+              status: 'sent', createdAt: new Date().toISOString()
+            });
+          }
+          state.ui.resumingJournalId = '';
           journal.splice(0);
           attachmentState.fieldNote = null;
           attachmentState.loading = false;
@@ -6348,7 +6673,7 @@ function normalizeStaffLedgerEntryType(row) {
           const input = byId('journalFieldNoteInput');
           if (input) input.value = '';
           save();
-          showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} journal sent for approval`);
+          showToast(`${kind === 'credit' ? 'Credit' : 'Debit'} journal sent for approval — ${journalNumber}`);
           renderWorkspace();
         } finally {
           hideProcessing();
@@ -6599,12 +6924,11 @@ function normalizeStaffLedgerEntryType(row) {
       c.accountType === 'staff_operational' && c.linkedStaffId === st.id
     );
     // SURGICAL UPDATE 2026-09-09 (client-confirmed design): "Received From"
-    // is now REQUIRED, not optional — "if you receive cash you have to
-    // know the source." Four source types cover every case: Collector,
-    // Teller, Admin (all pick a specific staff member from that role), or
-    // Customer (looked up by account number, since that's not a staff
-    // list). No "Direct/none" escape hatch anymore.
-    const collectorStaff = (state.staff || []).filter(s => s.role === 'collector');
+    // is required, not optional — "if you receive cash you have to know
+    // the source." SURGICAL REMOVAL 2026-09-14 (client-confirmed design):
+    // the "Collector" role/source-type is retired entirely — Teller,
+    // Admin (pick a specific staff member from that role), or Customer
+    // (looked up by account number) now cover every case.
     const tellerStaff = (state.staff || []).filter(s => s.role === 'teller');
     const adminStaff = (state.staff || []).filter(s => s.role === 'admin_officer');
     let selectedStaffId = '';
@@ -6624,7 +6948,6 @@ function normalizeStaffLedgerEntryType(row) {
         <div class="field"><label>Received From (required)</label>
           <select id="cashReceiptSourceType" class="entry-input">
             <option value="">— Select source —</option>
-            <option value="collector">Collector</option>
             <option value="teller">Teller</option>
             <option value="admin">Admin</option>
             <option value="customer">Customer</option>
@@ -6710,8 +7033,7 @@ function normalizeStaffLedgerEntryType(row) {
       selectedStaffId = ''; selectedCustomer = null;
       if (staffWrap) staffWrap.style.display = 'none';
       if (customerWrap) customerWrap.style.display = 'none';
-      if (v === 'collector') { populateStaffPicker(collectorStaff, 'Collector'); if (staffWrap) staffWrap.style.display = ''; }
-      else if (v === 'teller') { populateStaffPicker(tellerStaff, 'Teller'); if (staffWrap) staffWrap.style.display = ''; }
+      if (v === 'teller') { populateStaffPicker(tellerStaff, 'Teller'); if (staffWrap) staffWrap.style.display = ''; }
       else if (v === 'admin') { populateStaffPicker(adminStaff, 'Admin'); if (staffWrap) staffWrap.style.display = ''; }
       else if (v === 'customer') {
         if (customerWrap) customerWrap.style.display = '';
@@ -6749,13 +7071,14 @@ function normalizeStaffLedgerEntryType(row) {
     //   each fully attributed to whoever actually did it.
     // - Funding TREASURY's OWN account can come from Admin (unlimited
     //   injection — real cash entering the business) or from debiting any
-    //   other account (customers, other staff, or Collector hand-offs).
+    //   other account (customers or other staff).
+    // SURGICAL REMOVAL 2026-09-14 (client-confirmed design): the
+    // "Received From" (Collector) dropdown that used to live here is gone —
+    // the "Collector" role is retired entirely, and "Received From"
+    // attribution now lives solely on Cash Receipt (Teller/Admin/Customer).
     const staffOpAccounts = (state.customers || []).filter(c => c.accountType === 'staff_operational');
     const accountOptions = staffOpAccounts.map(a =>
       `<option value="${a.id}">${escapeHtml(a.name || a.displayName || a.display_name || '')} (${escapeHtml(a.accountNumber || a.account_number || '')})</option>`
-    ).join('');
-    const collectorOptions = (state.staff || []).filter(s => s.role === 'collector').map(s =>
-      `<option value="${s.id}">${escapeHtml(s.name || '')}</option>`
     ).join('');
     const draft = state.ui.staffCreditDraft ||= {};
     const targetAccount = staffOpAccounts.find(a => a.id === draft.accountId);
@@ -6802,17 +7125,6 @@ function normalizeStaffLedgerEntryType(row) {
             <button id="staffCreditSourceSearch" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="staffCreditSourceInfo" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<strong>${escapeHtml(draft.sourceName || '')}</strong> <span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
-          ` : ''}
-          ${collectorOptions ? `
-          <div class="cs2-row">
-            <div class="cs2-label">Received From</div>
-            <div class="cs2-input-wrap cs2-wide">
-              <select id="staffCreditCollector" class="entry-input cs2-input">
-                <option value="">— Direct (not from a Collector) —</option>
-                ${collectorOptions}
-              </select>
-            </div>
-          </div>
           ` : ''}
           ` : ''}
           <div class="cs2-row">
@@ -7677,6 +7989,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       if (byId('txAcc')) byId('txAcc').value = c.accountNumber || '';
       if (byId('txName')) byId('txName').textContent = c.name || '—';
       if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
+      updateTxAccountMeta(c);
       save();
       return;
     }
