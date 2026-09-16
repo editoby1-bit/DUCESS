@@ -2322,7 +2322,7 @@ function hideProcessing() {
           ['journal', 'Journal Posting', ['journal', 'journal_register']]
         ];
         const groupHtml = groupDefs.map(([key, label, tools]) => {
-          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
+          const isOpen = state.ui.tellerGroupOpen[key] !== false || tools.includes(state.ui.tool);
           return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
           <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
         }).join('');
@@ -2341,7 +2341,7 @@ function hideProcessing() {
           ['journal', 'Journal Posting', ['journal_register']]
         ];
         const groupHtml = groupDefs.map(([key, label, tools]) => {
-          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
+          const isOpen = state.ui.tellerGroupOpen[key] !== false || tools.includes(state.ui.tool);
           return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
           <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
         }).join('');
@@ -2359,7 +2359,11 @@ function hideProcessing() {
     qq('[data-posting-group]').forEach(btn => btn.onclick = () => {
       const key = btn.dataset.postingGroup;
       state.ui.tellerGroupOpen ||= {};
-      state.ui.tellerGroupOpen[key] = !state.ui.tellerGroupOpen[key];
+      // Default state is OPEN (undefined counts as open — see the isOpen
+      // check above), so toggling must flip based on the EFFECTIVE current
+      // state, not the raw stored value: undefined/true (open) -> false,
+      // false (closed) -> true.
+      state.ui.tellerGroupOpen[key] = state.ui.tellerGroupOpen[key] === false ? true : false;
       save();
       renderWorkspace();
     });
@@ -2908,7 +2912,7 @@ function hideProcessing() {
     telleringDraft.journalCharges.checked ||= {};
     telleringDraft.journalCharges.values ||= {};
     return `
-      <div class="tellering-stack">
+      <div class="tellering-stack spec-color-scheme">
         <div class="tellering-sheet journal-sheet standalone-posting-sheet">
           <div class="posting-modal-rows polished-posting-modal">
             <div class="posting-row posting-row-acc-kpi" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -2993,11 +2997,11 @@ function hideProcessing() {
       // than letting them generate a journal they can never balance/submit.
       const opBalanceForStart = getStaffOperationalBalance(st?.id);
       if (!(opBalanceForStart > 0)) {
-        return `<div class="tellering-sheet journal-start-sheet form-card"><div class="note warning-note" style="text-align:center;padding:24px 0">Your operational balance is ${money(opBalanceForStart)}. You need a positive balance before you can post a ${kind === 'credit' ? 'Credit' : 'Debit'} Journal — ask Treasury to fund your operational account.</div></div>`;
+        return `<div class="tellering-sheet journal-start-sheet form-card spec-color-scheme"><div class="note warning-note" style="text-align:center;padding:24px 0">Your operational balance is ${money(opBalanceForStart)}. You need a positive balance before you can post a ${kind === 'credit' ? 'Credit' : 'Debit'} Journal — ask Treasury to fund your operational account.</div></div>`;
       }
-      return `<div class="tellering-sheet journal-start-sheet form-card"><div class="action-row" style="justify-content:center;padding:24px 0"><button id="genJournalStartBtn" class="sheet-btn">Generate ${kind === 'credit' ? 'Credit' : 'Debit'} Journal</button></div></div>`;
+      return `<div class="tellering-sheet journal-start-sheet form-card spec-color-scheme"><div class="action-row" style="justify-content:center;padding:24px 0"><button id="genJournalStartBtn" class="sheet-btn">Generate ${kind === 'credit' ? 'Credit' : 'Debit'} Journal</button></div></div>`;
     }
-    return `<div class="w-full flex justify-center journal-center-wrap" id="journalPaneWrap">
+    return `<div class="w-full flex justify-center journal-center-wrap spec-color-scheme" id="journalPaneWrap">
         <div class="journal-wrapper">
         <div class="journal-pane form-card spacious-journal-pane standalone-journal-pane" id="journalPane">
           <div class="journal-pane-head compact-journal-head">
@@ -5207,7 +5211,7 @@ function normalizeStaffLedgerEntryType(row) {
     const statusOf = (c) => c ? ((isCustomerFrozen(c) || c.active === false) ? 'Frozen' : 'Active') : '—';
     const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')))) : '—';
     return `
-      <div class="form-card cs2-card opening-card">
+      <div class="form-card cs2-card opening-card spec-color-scheme">
         <div class="cs2-title">Debit To Credit Entry</div>
         <div class="cs2-stack">
           <div class="cs2-row">

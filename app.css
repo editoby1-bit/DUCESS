@@ -118,6 +118,47 @@ button:disabled { opacity: .55; cursor:not-allowed; }
 .tool-group-toggle .tool-group-caret{font-size:11px;opacity:.7;}
 .tool-group-body{display:flex;flex-direction:column;gap:4px;padding-left:8px;margin:2px 0 4px;}
 .tool-group-body.hidden{display:none;}
+/* SURGICAL ADDITION 2026-09-16 (client-confirmed design): color-match the
+   three posting screens (Direct Posting, Non Cash Posting, Journal
+   Posting) to the client's reference sheet — teal/cyan field labels,
+   cream/tan input & display cells, red primary action buttons. Scoped
+   entirely under .spec-color-scheme so it never leaks into any other
+   screen's shared classes (.sheet-label, .entry-input, etc. are reused
+   all over the app). */
+.spec-color-scheme .sheet-label,
+.spec-color-scheme .posting-label-name,
+.spec-color-scheme .posting-label-account,
+.spec-color-scheme .cs2-label,
+.spec-color-scheme .journal-cell-label{
+  background:#6FD6D6;color:#0a2b2b;padding:4px 8px;border-radius:3px;font-weight:700;display:inline-block;
+}
+.spec-color-scheme .entry-input,
+.spec-color-scheme .sheet-input,
+.spec-color-scheme .display-field,
+.spec-color-scheme .cs2-note-box{
+  background:#FBEFD0 !important;border:1px solid #d8c896 !important;color:#2b2410;
+}
+.spec-color-scheme .cs2-title,
+.spec-color-scheme .journal-pane-head h3,
+.spec-color-scheme .journal-title{
+  background:#111;color:#fff;padding:8px 14px;border-radius:4px;text-transform:uppercase;letter-spacing:.04em;
+}
+.spec-color-scheme #txPostSingle,
+.spec-color-scheme #submitIntraTransfer,
+.spec-color-scheme #journalSubmit,
+.spec-color-scheme #journalSaveDraft,
+.spec-color-scheme #journalAddRow,
+.spec-color-scheme #genJournalStartBtn{
+  background:#D62E2E !important;color:#fff !important;border:none !important;font-weight:700;
+}
+.spec-color-scheme #txPostSingle:hover,
+.spec-color-scheme #submitIntraTransfer:hover,
+.spec-color-scheme #journalSubmit:hover,
+.spec-color-scheme #journalSaveDraft:hover,
+.spec-color-scheme #journalAddRow:hover,
+.spec-color-scheme #genJournalStartBtn:hover{filter:brightness(1.08);}
+.spec-color-scheme .journal-table thead th{background:#6FD6D6;color:#0a2b2b;}
+.spec-color-scheme .journal-table .total-row td{background:#6FD6D6;color:#0a2b2b;font-weight:700;}
 .layout-grid.two { display:grid; grid-template-columns: 1.2fr .8fr; gap:18px; }
 .layout-grid.three { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:18px; }
 .form-card, .table-card, .record-card { padding: 18px; }
