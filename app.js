@@ -2901,17 +2901,14 @@ function hideProcessing() {
               <div class="display-field value-wide" id="txName">—</div>
             </div>
 
-            <div class="posting-row posting-row-status">
-              <label class="sheet-label posting-label-name">Account Status</label>
-              <div class="display-field" id="txAccountStatus">—</div>
-              <label class="sheet-label posting-label-name" style="margin-left:14px">Account Type</label>
-              <div class="display-field" id="txAccountType">—</div>
+            <div class="posting-row posting-row-balance">
+              <label class="sheet-label posting-label-name" for="txBalance">Account Balance</label>
+              <div class="display-field" id="txBalance">—</div>
             </div>
 
-            <div class="posting-row posting-row-amount">
-              <label class="sheet-label posting-label-name" for="txAmount">Amount ${kind === 'credit' ? 'Received' : 'Paid'}</label>
-              <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}" />
-              <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
+            <div class="posting-row posting-row-mode">
+              <label class="sheet-label posting-label-name">Payment Method</label>
+              <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
             </div>
 
             <div class="posting-row posting-row-details">
@@ -2922,16 +2919,19 @@ function hideProcessing() {
             <div class="posting-row posting-row-counterparty">
               <label class="sheet-label posting-label-name" for="txCounterparty">${kind === 'credit' ? 'Received By' : 'Paid By'}</label>
               <input id="txCounterparty" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}">
+              <label class="sheet-label posting-label-name" style="margin-left:14px">Account Status</label>
+              <div class="display-field" id="txAccountStatus">—</div>
             </div>
 
-            <div class="posting-row posting-row-balance">
-              <label class="sheet-label posting-label-name" for="txBalance">Account Balance</label>
-              <div class="display-field" id="txBalance">—</div>
+            <div class="posting-row posting-row-amount">
+              <label class="sheet-label posting-label-name" for="txAmount">Amount ${kind === 'credit' ? 'Received' : 'Paid'}</label>
+              <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}" />
+              <label class="sheet-label posting-label-name" style="margin-left:14px">Account Type</label>
+              <div class="display-field" id="txAccountType">—</div>
             </div>
 
-            <div class="posting-row posting-row-mode">
-              <label class="sheet-label posting-label-name">Payment Method</label>
-              <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
+            <div class="posting-row posting-row-post-action">
+              <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
             </div>
             ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
             <div class="posting-row posting-row-opbox">
@@ -5195,14 +5195,20 @@ function normalizeStaffLedgerEntryType(row) {
           <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
           <div id="itrSourceBalance" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
           <div class="cs2-row">
-            <div class="cs2-label">Account Status</div>
-            <div class="display-field" id="itrSourceStatus">${statusOf(sourceAccount)}</div>
-            <div class="cs2-label" style="margin-left:14px">Account Type</div>
-            <div class="display-field" id="itrSourceType">${typeOf(sourceAccount)}</div>
+            <div class="cs2-label">Description</div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Paid By</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrPaidBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.paidBy || ''))}" placeholder="Who authorized/paid this out"></div>
+            <div class="cs2-label" style="margin-left:14px">Account Status</div>
+            <div class="display-field" id="itrSourceStatus">${statusOf(sourceAccount)}</div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Amount</div>
+            <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(draft.amount || ''))}"></div>
+            <div class="cs2-label" style="margin-left:14px">Account Type</div>
+            <div class="display-field" id="itrSourceType">${typeOf(sourceAccount)}</div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Credit — Account Number</div>
@@ -5212,22 +5218,14 @@ function normalizeStaffLedgerEntryType(row) {
           <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
           <div id="itrDestBalance" class="cs2-note-box" style="min-height:24px">${draft.destId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.destBalance || 0)}` : ''}</div>
           <div class="cs2-row">
-            <div class="cs2-label">Account Status</div>
-            <div class="display-field" id="itrDestStatus">${statusOf(destAccount)}</div>
-            <div class="cs2-label" style="margin-left:14px">Account Type</div>
-            <div class="display-field" id="itrDestType">${typeOf(destAccount)}</div>
-          </div>
-          <div class="cs2-row">
             <div class="cs2-label">Received By</div>
             <div class="cs2-input-wrap cs2-wide"><input id="itrReceivedBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.receivedBy || ''))}" placeholder="Who received this"></div>
+            <div class="cs2-label" style="margin-left:14px">Account Status</div>
+            <div class="display-field" id="itrDestStatus">${statusOf(destAccount)}</div>
           </div>
           <div class="cs2-row">
-            <div class="cs2-label">Amount</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(draft.amount || ''))}"></div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Description</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
+            <div class="cs2-label">Account Type</div>
+            <div class="display-field" id="itrDestType">${typeOf(destAccount)}</div>
           </div>
           <div class="cs2-button-row">
             <button id="submitIntraTransfer" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
