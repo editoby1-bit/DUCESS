@@ -2315,11 +2315,14 @@ function hideProcessing() {
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Tellering Tools</div>
           ${toolBtn('check_balance')}
+          <div class="tool-column-title" style="margin-top:8px">Direct Posting</div>
           ${toolBtn('credit')}
           ${toolBtn('debit')}
+          <div class="tool-column-title" style="margin-top:8px">Non Cash Posting</div>
+          ${toolBtn('intra_transfer')}
+          <div class="tool-column-title" style="margin-top:8px">Journal Posting</div>
           ${toolBtn('journal')}
           ${toolBtn('journal_register')}
-          ${toolBtn('intra_transfer')}
           ${toolBtn('my_statement')}
         </div>`;
       }
@@ -2328,7 +2331,9 @@ function hideProcessing() {
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
           ${toolBtn('cash_receipt')}
+          <div class="tool-column-title" style="margin-top:8px">Non Cash Posting</div>
           ${toolBtn('intra_transfer')}
+          <div class="tool-column-title" style="margin-top:8px">Journal Posting</div>
           ${toolBtn('journal_register')}
           ${toolBtn('my_statement')}
         </div>`;
