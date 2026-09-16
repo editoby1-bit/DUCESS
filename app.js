@@ -3009,7 +3009,9 @@ function hideProcessing() {
                 <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="12" style="width:100px;min-width:100px;margin:0;" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}">
                 <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
                 <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
-                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount</div></div>
+                <div class="journal-cell" style="width:110px;margin:0;"><div class="display-field" id="journalAccountStatus">—</div><div class="journal-cell-label">Account Status</div></div>
+                <div class="journal-cell" style="width:130px;margin:0;"><div class="display-field" id="journalAccountType">—</div><div class="journal-cell-label">Account Type</div></div>
+                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount Paid</div></div>
               </div>
               <div class="journal-entry-top row-two">
                 <div class="journal-cell grow"><input id="journalDetails" class="entry-input"><div class="journal-cell-label">Details</div></div>
@@ -5867,6 +5869,18 @@ function normalizeStaffLedgerEntryType(row) {
     if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
   }
 
+  function updateJournalAccountMeta(customer) {
+    const statusEl = byId('journalAccountStatus');
+    const typeEl = byId('journalAccountType');
+    if (!customer) {
+      if (statusEl) statusEl.textContent = '—';
+      if (typeEl) typeEl.textContent = '—';
+      return;
+    }
+    if (statusEl) statusEl.textContent = (isCustomerFrozen(customer) || customer.active === false) ? 'Frozen' : 'Active';
+    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
+  }
+
   function bindJournal(kind) {
     const staff = currentStaff();
     const journalBtn = byId('txJournalAdd');
@@ -5993,6 +6007,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (clearAccount) {
         if (byId('journalAcc')) byId('journalAcc').value = '';
         if (byId('journalName')) byId('journalName').textContent = '—';
+        updateJournalAccountMeta(null);
         state.ui.journalAccDraft = '';
         state.ui.selectedJournalCustomerId = null;
       }
@@ -6124,6 +6139,7 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.journalAccDraft = value;
       if (byId('journalAcc') && String(byId('journalAcc').value || '').trim() !== value) byId('journalAcc').value = value;
       if (byId('journalName')) byId('journalName').textContent = c.name || '—';
+      updateJournalAccountMeta(c);
       // Journal lookup is deliberately DOM-only during entry. Saving here can cause
       // the journal entry row to repaint while the user is moving between Account
       // Number and Amount, which steals the first click/focus. The actual journal
