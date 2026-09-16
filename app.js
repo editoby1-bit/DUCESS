@@ -246,11 +246,11 @@
     account_statement: 'Account Statement',
     cash_receipt: 'Cash Receipt',
     staff_credit: 'Credit Staff Account',
-    credit: 'Credit',
-    debit: 'Debit',
+    credit: 'Credit Entry',
+    debit: 'Debit Entry',
     journal: 'Generate Journal',
     journal_register: 'Journal Register',
-    intra_transfer: 'Non Cash',
+    intra_transfer: 'Debit To Credit Entry',
     my_close_day: 'My Close of Day',
     central_close_day: 'Central Close of Day',
     approval_queue: 'Approval Queue',
@@ -5182,11 +5182,11 @@ function normalizeStaffLedgerEntryType(row) {
     const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')))) : '—';
     return `
       <div class="form-card cs2-card opening-card">
-        <div class="cs2-title">Non Cash Transaction</div>
+        <div class="cs2-title">Debit To Credit Entry</div>
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Debit — Account Number</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrSourceAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="itrSourceAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
             <button id="itrLookupSource" class="sheet-btn secondary tiny-btn" ${sourceLocked ? 'disabled' : ''}>Search</button>
             <span class="sheet-label" style="margin-left:10px">Teller ID</span>
             <div class="display-field" id="itrTellerId">${escapeHtml(myTellerId)}</div>
@@ -5212,7 +5212,7 @@ function normalizeStaffLedgerEntryType(row) {
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Credit — Account Number</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrDestAcct" class="entry-input cs2-input" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number to credit" autocomplete="off"></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="itrDestAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number" autocomplete="off"></div>
             <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
@@ -5341,8 +5341,8 @@ function normalizeStaffLedgerEntryType(row) {
       const details = (byId('itrDetails')?.value || '').trim();
       const paidBy = (byId('itrPaidBy')?.value || '').trim();
       const receivedBy = (byId('itrReceivedBy')?.value || '').trim();
-      confirmAction(`Non cash transaction: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
-        showProcessing('Submitting non cash transaction...'); await nextPaint();
+      confirmAction(`Debit To Credit Entry: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
+        showProcessing('Submitting Debit To Credit Entry...'); await nextPaint();
         try {
           // Staff-account funding submits as 'inter_staff_credit' (not
           // 'intra_bank_transfer') so it stays wired into every existing
@@ -5387,7 +5387,7 @@ function normalizeStaffLedgerEntryType(row) {
           }
           state.ui.intraTransferDraft = {};
           render();
-          showToast(isStaffFunding ? `Non cash transaction sent for approval — ${journalNumber}` : 'Non cash transaction sent for approval');
+          showToast(isStaffFunding ? `Debit To Credit Entry sent for approval — ${journalNumber}` : 'Debit To Credit Entry sent for approval');
         } finally { hideProcessing(); }
       });
     };
