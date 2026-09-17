@@ -2322,7 +2322,7 @@ function hideProcessing() {
           ['journal', 'Journal Posting', ['journal', 'journal_register']]
         ];
         const groupHtml = groupDefs.map(([key, label, tools]) => {
-          const isOpen = state.ui.tellerGroupOpen[key] !== false || tools.includes(state.ui.tool);
+          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
           return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
           <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
         }).join('');
@@ -2341,7 +2341,7 @@ function hideProcessing() {
           ['journal', 'Journal Posting', ['journal_register']]
         ];
         const groupHtml = groupDefs.map(([key, label, tools]) => {
-          const isOpen = state.ui.tellerGroupOpen[key] !== false || tools.includes(state.ui.tool);
+          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
           return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
           <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
         }).join('');
@@ -2363,7 +2363,7 @@ function hideProcessing() {
       // check above), so toggling must flip based on the EFFECTIVE current
       // state, not the raw stored value: undefined/true (open) -> false,
       // false (closed) -> true.
-      state.ui.tellerGroupOpen[key] = state.ui.tellerGroupOpen[key] === false ? true : false;
+      state.ui.tellerGroupOpen[key] = !state.ui.tellerGroupOpen[key];
       save();
       renderWorkspace();
     });
