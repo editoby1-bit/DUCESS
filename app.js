@@ -2768,6 +2768,68 @@ function hideProcessing() {
     return linked?.status || record.status || 'sent';
   }
 
+  // SURGICAL ADDITION 2026-09-17 (client-confirmed design): this replicates
+  // the "CREDIT JOURNAL POSTING" / "DEBIT JOURNAL POSTING" screen from the
+  // client's reference sheet — a two-panel preview (the acting staff's own
+  // account on one side, the Journal's own details on the other) shown
+  // right before actually sending a saved journal for approval. Clicking
+  // "Post" here IS what sends it — functionally identical to what
+  // "Send for Approval" already did, just with this specific layout in
+  // front of it first, matching the reference sheet exactly.
+  function openJournalPostModal(record) {
+    const st = (state.staff || []).find(s => s.id === record.staffId);
+    const myAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === record.staffId);
+    const isCredit = record.kind === 'credit';
+    const accountPanelTitle = isCredit ? 'Debit Account' : 'Credit Account';
+    const journalPanelTitle = isCredit ? 'Credit Journal' : 'Debit Journal';
+    const accountStatus = myAccount ? ((isCustomerFrozen(myAccount) || myAccount.active === false) ? 'Frozen' : 'Active') : '—';
+    const balance = record.staffId ? getStaffOperationalBalance(record.staffId) : 0;
+    const row = (label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="display-field">${value}</div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
+    const body = `
+      <div class="spec-color-scheme journal-post-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+        <div class="journal-post-panel">
+          <div class="cs2-title" style="text-align:center;margin-bottom:8px;">${accountPanelTitle}</div>
+          ${row('Account Number', escapeHtml(myAccount?.accountNumber || myAccount?.account_number || '—'), 'Teller ID', escapeHtml(myAccount?.accountNumber || '—'))}
+          ${row('Account Name', escapeHtml(myAccount?.name || st?.name || '—'))}
+          ${row('Account Balance', money(balance))}
+          ${row('Description', escapeHtml(`Bng amount ${isCredit ? 'creditted to' : 'Debited from'} Journal NO ${record.journalNumber}`))}
+          ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', accountStatus)}
+          ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', 'Staff Operational')}
+        </div>
+        <div class="journal-post-panel">
+          <div class="cs2-title" style="text-align:center;margin-bottom:8px;">${journalPanelTitle}</div>
+          ${row('Journal Number', escapeHtml(record.journalNumber))}
+          ${row('Journal Name', escapeHtml(st?.name || record.staffName || '—'))}
+          ${row('Description', escapeHtml(record.counterparty || '—'))}
+          ${row(isCredit ? 'Received By' : 'Paid By', escapeHtml(record.staffName || '—'))}
+          ${row('Journal Value', money(record.formAmount || 0))}
+          ${row('Journal Review', '—')}
+        </div>
+      </div>`;
+    openModal(`${record.journalNumber} — ${journalPanelTitle} Posting`, body, [
+      { label: 'Cancel', className: 'secondary', onClick: closeModal },
+      {
+        label: 'Post',
+        onClick: async () => {
+          closeModal();
+          showProcessing('Sending journal...'); await nextPaint();
+          try {
+            // Frozen at Save time: the rows were balanced against
+            // formAmount as it stood then — re-checking against whatever
+            // the balance is NOW would risk rejecting a journal that was
+            // already valid when saved, so we send exactly what was saved.
+            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
+            if (!result?.ok) return showToast(result?.error?.message || 'Unable to send journal');
+            record.status = 'sent';
+            save();
+            showToast(`${record.journalNumber} sent for approval`);
+            renderWorkspace();
+          } finally { hideProcessing(); }
+        }
+      }
+    ]);
+  }
+
   // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal is
   // now listed here — draft, sent, approved, or rejected — filterable by
   // date and searchable by Journal Number. Replaces the journal-sourced
@@ -2848,21 +2910,7 @@ function hideProcessing() {
       const record = (state.journals || []).find(j => j.id === btn.dataset.journalSend);
       if (!record) return showToast('Journal not found');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      confirmAction(`Send ${record.journalNumber} for approval?`, async () => {
-        showProcessing('Sending journal...'); await nextPaint();
-        try {
-          // Frozen at Save time: the rows were balanced against
-          // formAmount as it stood then — re-checking against whatever
-          // the balance is NOW would risk rejecting a journal that was
-          // already valid when saved, so we send exactly what was saved.
-          const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
-          if (!result?.ok) return showToast(result?.error?.message || 'Unable to send journal');
-          record.status = 'sent';
-          save();
-          showToast(`${record.journalNumber} sent for approval`);
-          renderWorkspace();
-        } finally { hideProcessing(); }
-      });
+      openJournalPostModal(record);
     });
     qq('[data-journal-view]').forEach(btn => btn.onclick = () => {
       const record = (state.journals || []).find(j => j.id === btn.dataset.journalView);
