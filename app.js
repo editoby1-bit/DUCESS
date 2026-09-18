@@ -47,7 +47,7 @@
 
   const escapeHtml = (value) => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const formatFileSize = (bytes) => { const size = Number(bytes || 0); if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`; if (size >= 1024) return `${Math.round(size / 1024)} KB`; return `${size} B`; };
-  const isSupportedFieldNoteFile = (file) => !!file && (String(file.type || '').startsWith('image/') || String(file.type || '').toLowerCase() === 'application/pdf' || /\.(pdf|png|jpe?g|gif|webp|bmp)$/i.test(String(file.name || '')));
+  const isSupportedFieldNoteFile = (file) => !!file && (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(file.name || '')));
   const FIELD_NOTE_MAX_BYTES = 2 * 1024 * 1024;
   const CUSTOMER_PHOTO_MAX_BYTES = 1024 * 1024;
   // SURGICAL PATCH 2026-08-22 (Supabase egress overage — see the polling and
@@ -58,6 +58,15 @@
   // renders it at, while cutting typical file size roughly 60-65%.
   const COMPRESSED_IMAGE_MAX_SIDE = 480;
   const COMPRESSED_IMAGE_QUALITY = 0.45;
+  // SURGICAL FIX 2026-09-17 (client request, Supabase egress): field notes
+  // get pushed even smaller than customer photos, and PDFs are no longer
+  // accepted at all (see isSupportedFieldNoteFile above and the file input's
+  // accept attribute) — a field note only ever needs to be "just barely
+  // enough for viewing" a handwritten note/receipt, not archival quality.
+  // Customer photos keep the less-aggressive 480/0.45 setting above since
+  // those are used for identification.
+  const FIELD_NOTE_IMAGE_MAX_SIDE = 320;
+  const FIELD_NOTE_IMAGE_QUALITY = 0.32;
   const estimateDataUrlBytes = (dataUrl) => {
     const value = String(dataUrl || '');
     const base64 = value.includes(',') ? value.split(',')[1] : value;
@@ -131,22 +140,16 @@
 
   async function readFieldNoteFile(file) {
     if (!file) return null;
-    if (String(file.type || '').startsWith('image/')) {
-      const compressed = await compressImageFile(file);
-      return {
-        name: compressed.name || 'field-note.jpg',
-        type: compressed.type || 'image/jpeg',
-        size: Number(compressed.size || 0),
-        dataUrl: String(compressed.dataUrl || ''),
-        uploadedAt: new Date().toISOString()
-      };
-    }
-    const dataUrl = await fileToDataUrl(file);
+    // SURGICAL FIX 2026-09-17: PDFs are no longer accepted for field notes
+    // at all (see isSupportedFieldNoteFile) — only photos, compressed down
+    // to FIELD_NOTE_IMAGE_MAX_SIDE/QUALITY. The old PDF branch (raw
+    // fileToDataUrl, no compression) is gone since it can never be reached.
+    const compressed = await compressImageFile(file, { maxSide: FIELD_NOTE_IMAGE_MAX_SIDE, quality: FIELD_NOTE_IMAGE_QUALITY });
     return {
-      name: file.name || 'field-note',
-      type: file.type || '',
-      size: Number(file.size || 0),
-      dataUrl,
+      name: compressed.name || 'field-note.jpg',
+      type: compressed.type || 'image/jpeg',
+      size: Number(compressed.size || 0),
+      dataUrl: String(compressed.dataUrl || ''),
       uploadedAt: new Date().toISOString()
     };
   }
@@ -3098,7 +3101,7 @@ function hideProcessing() {
               </div>
               ${kind === 'credit' ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
             </div>
-            <div class="action-row journal-submit-row"><button id="journalSubmit">Submit Journal</button><button class="secondary" id="journalSaveDraft">Save Journal</button><button class="secondary" id="journalClear">Clear Journal</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note</label><input id="journalFieldNoteInput" type="file" accept="image/*,.pdf,application/pdf" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
+            <div class="action-row journal-submit-row"><button id="journalSubmit">Submit Journal</button><button class="secondary" id="journalSaveDraft">Save Journal</button><button class="secondary" id="journalClear">Clear Journal</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note Photo</label><input id="journalFieldNoteInput" type="file" accept="image/*" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
             <div id="journalFieldNotePreview" class="field-note-preview hidden"></div>
           </div>
         </div>
@@ -6527,8 +6530,7 @@ function normalizeStaffLedgerEntryType(row) {
       fieldNoteInput.onchange = async (event) => {
         const file = event?.target?.files?.[0] || null;
         if (!file) { attachmentState.fieldNote = null; attachmentState.loading = false; save(); recalcPreview(); return; }
-        if (!isSupportedFieldNoteFile(file)) { event.target.value = ''; attachmentState.fieldNote = null; attachmentState.loading = false; save(); recalcPreview(); return showToast('Only image and PDF field notes are supported'); }
-        if (!String(file.type || '').startsWith('image/') && Number(file.size || 0) > FIELD_NOTE_MAX_BYTES) { event.target.value = ''; attachmentState.fieldNote = null; attachmentState.loading = false; save(); recalcPreview(); return showToast('Field note must be 2 MB or less'); }
+        if (!isSupportedFieldNoteFile(file)) { event.target.value = ''; attachmentState.fieldNote = null; attachmentState.loading = false; save(); recalcPreview(); return showToast('Only photo field notes are supported (PDFs are no longer accepted)'); }
         attachmentState.loading = true; save(); recalcPreview();
         try {
           attachmentState.fieldNote = await readFieldNoteFile(file);
