@@ -281,11 +281,11 @@
     // SURGICAL REMOVAL 2026-09-09: 'staff_credit' dropped from Treasury's
     // permission set — see the matching comment on the cash_officer module
     // above. Admin (admin_officer, below) keeps it untouched.
-    // SURGICAL ADDITION 2026-09-14 (client-confirmed design): Treasury also
-    // has an operational account, so Journal/Journal Register (needed for
-    // Teller-to-Teller-style journal transfers) belong here too — same
-    // reasoning as Non Cash already being role-agnostic.
-    cash_officer: ['intra_transfer','cash_receipt','journal_register','my_statement'],
+    // SURGICAL REMOVAL 2026-09-17 (client-confirmed design): "Journal
+    // Posting" (journal_register) removed from Treasury entirely — Treasury
+    // funds tellers via Non Cash (still role-agnostic), just without a
+    // Journal Register view of their own.
+    cash_officer: ['intra_transfer','cash_receipt','my_statement'],
     teller: ['check_balance','credit','debit','journal','journal_register','intra_transfer','my_statement'],
     // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
     // own totals view ("my_approvals" — how much they've approved, by date)
@@ -2339,9 +2339,11 @@ function hideProcessing() {
       if (state.ui.module === 'cash_officer') {
         const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
         state.ui.tellerGroupOpen ||= {};
+        // SURGICAL REMOVAL 2026-09-17 (client-confirmed design): "Journal
+        // Posting" (journal_register) removed from Treasury entirely — only
+        // Non Cash Posting remains as a group here.
         const groupDefs = [
-          ['non_cash', 'Non Cash Posting', ['intra_transfer']],
-          ['journal', 'Journal Posting', ['journal_register']]
+          ['non_cash', 'Non Cash Posting', ['intra_transfer']]
         ];
         const groupHtml = groupDefs.map(([key, label, tools]) => {
           const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
