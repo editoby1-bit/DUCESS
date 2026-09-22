@@ -2790,6 +2790,14 @@ function hideProcessing() {
     const accountStatus = myAccount ? ((isCustomerFrozen(myAccount) || myAccount.active === false) ? 'Frozen' : 'Active') : '—';
     const balance = record.staffId ? getStaffOperationalBalance(record.staffId) : 0;
     const row = (label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="display-field">${value}</div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
+    // SURGICAL ADDITION 2026-09-22 (client-confirmed design): this is the
+    // moment the teller's own operational account is actually called up
+    // against ONE specific journal — the amount posted against it is typed
+    // in here by the staff, not silently pulled from the saved draft, so
+    // amountRow renders an editable input (matching the reference sheet,
+    // which shows these as hand-filled values), pre-filled from the saved
+    // Journal Value only as a starting point.
+    const amountRow = (id, label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="cs2-input-wrap"><input id="${id}" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(value))}"></div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
     const body = `
       <div class="spec-color-scheme journal-post-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
         <div class="journal-post-panel">
@@ -2799,7 +2807,7 @@ function hideProcessing() {
           ${row('Account Balance', money(balance))}
           ${row('Description', escapeHtml(`Bng amount ${isCredit ? 'creditted to' : 'Debited from'} Journal NO ${record.journalNumber}`))}
           ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', accountStatus)}
-          ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', 'Staff Operational')}
+          ${amountRow('jpmAmount', `Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', 'Staff Operational')}
         </div>
         <div class="journal-post-panel">
           <div class="cs2-title" style="text-align:center;margin-bottom:8px;">${journalPanelTitle}</div>
@@ -2807,7 +2815,7 @@ function hideProcessing() {
           ${row('Journal Name', escapeHtml(st?.name || record.staffName || '—'))}
           ${row('Description', escapeHtml(record.counterparty || '—'))}
           ${row(isCredit ? 'Received By' : 'Paid By', escapeHtml(record.staffName || '—'))}
-          ${row('Journal Value', money(record.formAmount || 0))}
+          ${amountRow('jpmJournalValue', 'Journal Value', money(record.formAmount || 0))}
           ${row('Journal Review', '—')}
         </div>
       </div>`;
@@ -2816,15 +2824,17 @@ function hideProcessing() {
       {
         label: 'Post',
         onClick: async () => {
+          // Read whatever the staff has actually typed for this posting —
+          // Journal Value is authoritative; Amount mirrors it live (see
+          // binding below) so either field can be used to edit it.
+          const postedAmount = Number(String(byId('jpmJournalValue')?.value || '').replace(/,/g, '')) || 0;
+          if (!(postedAmount > 0)) return showToast('Enter the Journal Value before posting');
           closeModal();
           showProcessing('Sending journal...'); await nextPaint();
           try {
-            // Frozen at Save time: the rows were balanced against
-            // formAmount as it stood then — re-checking against whatever
-            // the balance is NOW would risk rejecting a journal that was
-            // already valid when saved, so we send exactly what was saved.
-            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
+            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, postedAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
             if (!result?.ok) return showToast(result?.error?.message || 'Unable to send journal');
+            record.formAmount = postedAmount;
             record.status = 'sent';
             save();
             showToast(`${record.journalNumber} sent for approval`);
@@ -2833,6 +2843,14 @@ function hideProcessing() {
         }
       }
     ]);
+    bindAmountCommaFormatting('jpmAmount');
+    bindAmountCommaFormatting('jpmJournalValue');
+    const jpmAmountEl = byId('jpmAmount');
+    const jpmJournalValueEl = byId('jpmJournalValue');
+    if (jpmAmountEl && jpmJournalValueEl) {
+      jpmAmountEl.oninput = () => { jpmJournalValueEl.value = jpmAmountEl.value; };
+      jpmJournalValueEl.oninput = () => { jpmAmountEl.value = jpmJournalValueEl.value; };
+    }
   }
 
   // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal is
@@ -2967,6 +2985,7 @@ function hideProcessing() {
     return `
       <div class="tellering-stack spec-color-scheme">
         <div class="tellering-sheet journal-sheet standalone-posting-sheet">
+          <div class="cs2-title">${title} Entry</div>
           <div class="posting-modal-rows polished-posting-modal">
             <div class="posting-row posting-row-acc-kpi" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <div class="posting-acc-search-inline">
@@ -3043,15 +3062,14 @@ function hideProcessing() {
     telleringDraft.journalCharges.checked ||= {};
     telleringDraft.journalCharges.values ||= {};
     if (!journalVisible) {
-      // SURGICAL PATCH 2026-08-24 (client request): Journal Form Amount is
-      // no longer something the teller types — it IS their operational
-      // balance, always. If that balance is zero or negative, there's
-      // nothing to post against, so journal creation stops here rather
-      // than letting them generate a journal they can never balance/submit.
-      const opBalanceForStart = getStaffOperationalBalance(st?.id);
-      if (!(opBalanceForStart > 0)) {
-        return `<div class="tellering-sheet journal-start-sheet form-card spec-color-scheme"><div class="note warning-note" style="text-align:center;padding:24px 0">Your operational balance is ${money(opBalanceForStart)}. You need a positive balance before you can post a ${kind === 'credit' ? 'Credit' : 'Debit'} Journal — ask Treasury to fund your operational account.</div></div>`;
-      }
+      // SURGICAL PATCH 2026-09-22 (client-confirmed design): a Journal is now
+      // disconnected from the teller's operational balance entirely — the
+      // Journal Value is typed out by the staff on the Journal form itself
+      // (see journalFormAmount below), not derived from/limited by their
+      // current operational balance. So journal creation is never gated on
+      // balance here; the operational account only gets called up later, at
+      // Journal Posting time (openJournalPostModal), when a specific saved
+      // journal is actually sent for approval.
       return `<div class="tellering-sheet journal-start-sheet form-card spec-color-scheme"><div class="action-row" style="justify-content:center;padding:24px 0"><button id="genJournalStartBtn" class="sheet-btn">Generate ${kind === 'credit' ? 'Credit' : 'Debit'} Journal</button></div></div>`;
     }
     return `<div class="w-full flex justify-center journal-center-wrap spec-color-scheme" id="journalPaneWrap">
@@ -3071,7 +3089,7 @@ function hideProcessing() {
             </div>
             <div class="journal-entry-top row-zero journal-form-row" style="display:grid;grid-template-columns:max-content 160px max-content max-content;column-gap:10px;align-items:end;margin-bottom:10px;">
               <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Value</label>
-              <div id="journalFormAmount" class="display-field" data-op-balance="${getStaffOperationalBalance(st?.id)}" style="margin:0;">${money(getStaffOperationalBalance(st?.id))}</div>
+              <input id="journalFormAmount" class="entry-input" type="text" inputmode="decimal" style="margin:0;width:150px;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}" placeholder="0.00">
               <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${(telleringDraft.journalFormMode || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${(telleringDraft.journalFormMode || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
               <div class="posting-kpis-inline">
                 <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL BALANCE</span><span class="mini-kpi-pill-value" id="journalFormRunning">${money(0)}</span></div>
@@ -6096,20 +6114,14 @@ function normalizeStaffLedgerEntryType(row) {
     };
 
     const recalcPreview = () => {
-      // Staff operational balance — funded by Cash Officer credits, drawn by all postings.
-      const opBalance = getStaffOperationalBalance(staff.id);
-      const otherPendingDraftForms = pendingJournalTotal(staff.id, businessDate());
-      const dailyRunning = opBalance - otherPendingDraftForms;
-
-      // This journal's own FORM — no longer typed; it IS the teller's
-      // current operational balance, always. Also update the display in
-      // case the balance changed since this journal was opened (e.g. a
-      // Treasury credit landed mid-session).
-      const journalForm = opBalance;
-      if (byId('journalFormAmount')) {
-        byId('journalFormAmount').textContent = money(journalForm);
-        byId('journalFormAmount').dataset.opBalance = journalForm;
-      }
+      // SURGICAL PATCH 2026-09-22 (client-confirmed design): the Journal is
+      // disconnected from the teller's operational balance — Journal Value
+      // is whatever the staff has typed into the journalFormAmount input,
+      // not a derived display of getStaffOperationalBalance(). Read it live
+      // from the input (falling back to the saved draft value) so typing
+      // updates the running/variance figures below as they go.
+      const journalFormRaw = String(byId('journalFormAmount')?.value ?? telleringDraft.journalFormAmount ?? '');
+      const journalForm = Number(journalFormRaw.replace(/,/g, '')) || 0;
       let jRunning = journalForm;
       const withBalances = journal.map((row) => {
         jRunning -= Number(row.amount||0);
@@ -6366,9 +6378,16 @@ function normalizeStaffLedgerEntryType(row) {
       save();
       updateJournalCommissionPreview();
     };
-    // journalFormAmount is now a derived display (teller's operational
-    // balance), not a typed input — no bind handler needed, it's rendered
-    // fresh from getStaffOperationalBalance() on every render.
+    if (byId('journalFormAmount')) {
+      bindAmountCommaFormatting('journalFormAmount');
+      const journalFormInput = byId('journalFormAmount');
+      journalFormInput.oninput = () => {
+        if (journalFormInput.dataset?.restoring === '1') return;
+        telleringDraft.journalFormAmount = journalFormInput.value || '';
+        recalcPreview();
+      };
+      journalFormInput.onchange = () => { telleringDraft.journalFormAmount = journalFormInput.value || ''; save(); };
+    }
     qq('input[name="journalFormMode"]').forEach(radio => radio.onchange = () => {
       if (radio.checked) { telleringDraft.journalFormMode = radio.value; save(); recalcPreview(); }
     });
@@ -6647,7 +6666,8 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('journalSaveDraft')) byId('journalSaveDraft').onclick = () => {
       if (!journal.length) return showToast('Add at least one row before saving');
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
-      const journalFormAmount = getStaffOperationalBalance(staff.id);
+      const journalFormAmount = Number(String(byId('journalFormAmount')?.value ?? telleringDraft.journalFormAmount ?? '').replace(/,/g, '')) || 0;
+      if (!(journalFormAmount > 0)) return showToast('Enter the Journal Value before saving');
       const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
       const fieldNoteSnapshot = attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null;
       // If this draft was opened from the Journal Register ("Resume"), keep
@@ -6700,13 +6720,11 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('journalSubmit')) byId('journalSubmit').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      // SURGICAL PATCH 2026-08-24 (client request): Journal Form Amount is
-      // no longer typed — it's always the teller's current operational
-      // balance. Applies to both credit and debit now (previously this
-      // guard only checked debit): if the balance is zero or negative,
-      // there's nothing to post against, so submission stops here.
-      const journalFormAmount = getStaffOperationalBalance(staff.id);
-      if (!(journalFormAmount > 0)) return showToast('No operational balance to post against — request a credit from Treasury first');
+      // SURGICAL PATCH 2026-09-22 (client-confirmed design): Journal Value is
+      // typed out by the staff on the form — disconnected from the teller's
+      // operational balance. It's read from the input here, not derived.
+      const journalFormAmount = Number(String(byId('journalFormAmount')?.value ?? telleringDraft.journalFormAmount ?? '').replace(/,/g, '')) || 0;
+      if (!(journalFormAmount > 0)) return showToast('Enter the Journal Value before submitting');
       const alreadySubmitted = (state.approvals || []).some(r =>
         r.type === (kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal') &&
         r.payload?.staffId === staff.id && r.payload?.date === businessDate() &&
@@ -6716,11 +6734,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (!journal.length) return showToast('Generate journal first');
       // Journal must balance: sum of rows must exactly equal the journal form amount
       const rowTotal = journal.reduce((s, r) => s + Number(r.amount || 0), 0);
-      if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal your operational balance ${money(journalFormAmount)}`);
-      // NOTE: journalFormAmount IS getStaffOperationalBalance(staff.id) now
-      // (see above) — the old "form amount can't exceed balance" check is
-      // gone because it can no longer be anything other than the balance;
-      // there's nothing left for it to exceed.
+      if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal the Journal Value ${money(journalFormAmount)}`);
       const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
