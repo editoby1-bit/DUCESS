@@ -2790,16 +2790,12 @@ function hideProcessing() {
     const accountStatus = myAccount ? ((isCustomerFrozen(myAccount) || myAccount.active === false) ? 'Frozen' : 'Active') : '—';
     const balance = record.staffId ? getStaffOperationalBalance(record.staffId) : 0;
     const row = (label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="display-field">${value}</div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
-    // SURGICAL ADDITION 2026-09-22 (client-confirmed design): this is the
-    // moment the teller's own operational account is actually called up
-    // against ONE specific journal — the amount posted against it is typed
-    // in here by the staff, not silently pulled from the saved draft, so
-    // amountRow renders an editable input (matching the reference sheet,
-    // which shows these as hand-filled values), pre-filled from the saved
-    // Journal Value only as a starting point.
-    const amountRow = (id, label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="cs2-input-wrap"><input id="${id}" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(value))}"></div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
-    const body = `
-      <div class="spec-color-scheme journal-post-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+    // SURGICAL PATCH 2026-09-22 (client-confirmed design): this screen is
+    // strictly read-only — the amount posted here always inherits the
+    // Journal Value that was set on the Journal itself (Generate Journal /
+    // Resume). To change the amount, the staff must go back and edit the
+    // saved journal there, not here at posting time.
+    const accountPanelHtml = `
         <div class="journal-post-panel">
           <div class="cs2-title" style="text-align:center;margin-bottom:8px;">${accountPanelTitle}</div>
           ${row('Account Number', escapeHtml(myAccount?.accountNumber || myAccount?.account_number || '—'), 'Teller ID', escapeHtml(myAccount?.accountNumber || '—'))}
@@ -2807,34 +2803,43 @@ function hideProcessing() {
           ${row('Account Balance', money(balance))}
           ${row('Description', escapeHtml(`Bng amount ${isCredit ? 'creditted to' : 'Debited from'} Journal NO ${record.journalNumber}`))}
           ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', accountStatus)}
-          ${amountRow('jpmAmount', `Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', 'Staff Operational')}
-        </div>
+          ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', 'Staff Operational')}
+        </div>`;
+    const journalPanelHtml = `
         <div class="journal-post-panel">
           <div class="cs2-title" style="text-align:center;margin-bottom:8px;">${journalPanelTitle}</div>
           ${row('Journal Number', escapeHtml(record.journalNumber))}
           ${row('Journal Name', escapeHtml(st?.name || record.staffName || '—'))}
           ${row('Description', escapeHtml(record.counterparty || '—'))}
           ${row(isCredit ? 'Received By' : 'Paid By', escapeHtml(record.staffName || '—'))}
-          ${amountRow('jpmJournalValue', 'Journal Value', money(record.formAmount || 0))}
+          ${row('Journal Value', money(record.formAmount || 0))}
           ${row('Journal Review', '—')}
-        </div>
+        </div>`;
+    // Debits always come before credits: for a Credit journal the account
+    // panel IS the debit side (accountPanelTitle 'Debit Account'), so it
+    // stays first. For a Debit journal the journal panel IS the debit side
+    // ('Debit Journal'), so it goes first instead — swap the two.
+    const firstPanelHtml = isCredit ? accountPanelHtml : journalPanelHtml;
+    const secondPanelHtml = isCredit ? journalPanelHtml : accountPanelHtml;
+    const body = `
+      <div class="spec-color-scheme journal-post-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+        ${firstPanelHtml}
+        ${secondPanelHtml}
       </div>`;
     openModal(`${record.journalNumber} — ${journalPanelTitle} Posting`, body, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       {
         label: 'Post',
         onClick: async () => {
-          // Read whatever the staff has actually typed for this posting —
-          // Journal Value is authoritative; Amount mirrors it live (see
-          // binding below) so either field can be used to edit it.
-          const postedAmount = Number(String(byId('jpmJournalValue')?.value || '').replace(/,/g, '')) || 0;
-          if (!(postedAmount > 0)) return showToast('Enter the Journal Value before posting');
           closeModal();
           showProcessing('Sending journal...'); await nextPaint();
           try {
-            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, postedAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
+            // Frozen at Save time: the rows were balanced against
+            // formAmount as it stood then — re-checking against whatever
+            // the balance is NOW would risk rejecting a journal that was
+            // already valid when saved, so we send exactly what was saved.
+            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
             if (!result?.ok) return showToast(result?.error?.message || 'Unable to send journal');
-            record.formAmount = postedAmount;
             record.status = 'sent';
             save();
             showToast(`${record.journalNumber} sent for approval`);
@@ -2843,14 +2848,6 @@ function hideProcessing() {
         }
       }
     ]);
-    bindAmountCommaFormatting('jpmAmount');
-    bindAmountCommaFormatting('jpmJournalValue');
-    const jpmAmountEl = byId('jpmAmount');
-    const jpmJournalValueEl = byId('jpmJournalValue');
-    if (jpmAmountEl && jpmJournalValueEl) {
-      jpmAmountEl.oninput = () => { jpmJournalValueEl.value = jpmAmountEl.value; };
-      jpmJournalValueEl.oninput = () => { jpmAmountEl.value = jpmJournalValueEl.value; };
-    }
   }
 
   // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal is
@@ -3105,11 +3102,12 @@ function hideProcessing() {
             </div>
             <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>Details</th><th>Amount Paid</th><th>Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
-              <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 190px;column-gap:6px;align-items:end;justify-content:start;">
+              <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 100px 110px 130px 190px;column-gap:6px;align-items:end;justify-content:start;">
                 <label class="sheet-label posting-label-account" for="journalAcc" style="margin:0;white-space:nowrap;align-self:center;">Account Number</label>
                 <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="12" style="width:100px;min-width:100px;margin:0;" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}">
                 <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
                 <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
+                <div class="journal-cell" style="width:100px;margin:0;"><div class="display-field" id="journalRowTellerId">—</div><div class="journal-cell-label">Teller ID</div></div>
                 <div class="journal-cell" style="width:110px;margin:0;"><div class="display-field" id="journalAccountStatus">—</div><div class="journal-cell-label">Account Status</div></div>
                 <div class="journal-cell" style="width:130px;margin:0;"><div class="display-field" id="journalAccountType">—</div><div class="journal-cell-label">Account Type</div></div>
                 <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount Paid</div></div>
@@ -5971,13 +5969,21 @@ function normalizeStaffLedgerEntryType(row) {
   function updateJournalAccountMeta(customer) {
     const statusEl = byId('journalAccountStatus');
     const typeEl = byId('journalAccountType');
+    const tellerIdEl = byId('journalRowTellerId');
     if (!customer) {
       if (statusEl) statusEl.textContent = '—';
       if (typeEl) typeEl.textContent = '—';
+      if (tellerIdEl) tellerIdEl.textContent = '—';
       return;
     }
     if (statusEl) statusEl.textContent = (isCustomerFrozen(customer) || customer.active === false) ? 'Frozen' : 'Active';
     if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
+    // SURGICAL ADDITION 2026-09-22 (client-confirmed design): the account
+    // being debited/credited for this journal row is looked up here — if
+    // that account is itself a staff operational account, its own T####
+    // number IS its Teller ID, so show it; otherwise there's no Teller ID
+    // to show for an ordinary customer/expense/income account.
+    if (tellerIdEl) tellerIdEl.textContent = customer.accountType === 'staff_operational' ? (customer.accountNumber || customer.account_number || '—') : '—';
   }
 
   function bindJournal(kind) {
@@ -5998,6 +6004,7 @@ function normalizeStaffLedgerEntryType(row) {
         if (restoredCustomer && byId('journalName').textContent === '—') {
           byId('journalName').textContent = restoredCustomer.name;
         }
+        if (restoredCustomer) updateJournalAccountMeta(restoredCustomer);
       }
     });
     const telleringDraft = state.ui.telleringDrafts[visibilityKey] ||= { singleCharges: { apply: false, checked: {}, values: {} }, journalCharges: { apply: false, checked: {}, values: {} } };
@@ -6345,6 +6352,7 @@ function normalizeStaffLedgerEntryType(row) {
       const clearJournalCustomer = () => {
         if (byId('journalName')) byId('journalName').textContent = '—';
         state.ui.selectedJournalCustomerId = null;
+        updateJournalAccountMeta(null);
         // Do NOT call save() here — it can trigger re-renders that wipe the account field
       };
       // SURGICAL FIX 2026-09-03: client does not want the account fetched
@@ -6362,6 +6370,7 @@ function normalizeStaffLedgerEntryType(row) {
         if (selected && String(selected.accountNumber || '') !== v) {
           state.ui.selectedJournalCustomerId = null;
           if (byId('journalName')) byId('journalName').textContent = '—';
+          updateJournalAccountMeta(null);
         }
       };
       byId('journalAcc').onchange = () => {
@@ -6464,6 +6473,7 @@ function normalizeStaffLedgerEntryType(row) {
       setVal('journalDetails', snapshot.details);
       if (byId('journalName')) byId('journalName').textContent = snapshot.name || '—';
       state.ui.selectedJournalCustomerId = snapshot.selectedJournalCustomerId || state.ui.selectedJournalCustomerId || null;
+      updateJournalAccountMeta(state.ui.selectedJournalCustomerId ? state.customers.find(c => c.id === state.ui.selectedJournalCustomerId) : null);
       telleringDraft.journalAmount = snapshot.amount;
       telleringDraft.journalCharges = {
         apply: !!snapshot.charges?.apply,
@@ -6501,6 +6511,7 @@ function normalizeStaffLedgerEntryType(row) {
         // Auto-resolve the customer if we found them by account number
         state.ui.selectedJournalCustomerId = resolvedCustomer.id;
         if (byId('journalName')) byId('journalName').textContent = resolvedCustomer.name || '—';
+        updateJournalAccountMeta(resolvedCustomer);
       }
       if (!journalAccValue || !resolvedCustomer) return showToast('Enter a valid account number');
       if (isCustomerFrozen(resolvedCustomer) || resolvedCustomer.active === false) { freezeInactiveCustomer(resolvedCustomer); save(); return showToast('Frozen account cannot accept transactions'); }
@@ -7481,6 +7492,7 @@ function normalizeStaffLedgerEntryType(row) {
       closeModal();
       if (byId('journalAcc')) byId('journalAcc').value = c.accountNumber || '';
       if (byId('journalName')) byId('journalName').textContent = c.name || '—';
+      updateJournalAccountMeta(c);
     };
     const bindPicks = () => {
       qq('[data-pick-journal]').forEach(el => el.onclick = (event) => { event.stopPropagation(); pickJournalCustomer(el.dataset.pickJournal); });
