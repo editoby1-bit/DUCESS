@@ -198,7 +198,7 @@
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','credit','debit','journal','journal_register','intra_transfer','my_statement']
+      tools: ['check_balance','debit','credit','journal','journal_register','intra_transfer','my_statement']
     },
     approvals: {
       title: 'Approval',
@@ -1983,13 +1983,32 @@ if (approvalRecord.type === 'float_topup') {
           requestedBy:req.requestedBy
         }));
         // The journal's own FORM amount (not its row totals) is what draws down
-        // the staff's daily FORM, posted once per journal.
+        // the funding side, posted once per journal. SURGICAL ADDITION
+        // 2026-09-22 (client-confirmed design, cont'd): the teller can fund a
+        // journal from ANY account, not just a staff operational one. When
+        // fundingLeg is set (a non-staff account was chosen), post it as an
+        // ordinary customer_debit transaction against that account (opposite
+        // direction from the rows, which were credited above) instead of a
+        // staff cash ledger entry. Otherwise, fall back to the staff ledger
+        // path exactly as before (fundingStaffId, defaulting to the
+        // performing teller's own account).
         const journalFormAmount = Number(req.payload.formAmount || 0);
-        if (journalFormAmount > 0 && !ensureStaffAccount(req.payload.staffId).entries.some(e => e.sourceApprovalId === req.id && e.type === 'customer_credit_journal')) {
-          // SURGICAL FIX 2026-09-04 (client-confirmed bug): same direction fix
-          // as plain customer_credit above — a credit journal's FORM amount
-          // was reducing the operational balance instead of increasing it.
-          addStaffEntry(req.payload.staffId, 'customer_credit_journal', journalFormAmount, journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
+        if (req.payload.fundingLeg && req.payload.fundingLeg.accountId) {
+          applyRequest({
+            id: req.id,
+            type: 'customer_debit',
+            payload: { customerId: req.payload.fundingLeg.accountId, accountNumber: req.payload.fundingLeg.accountNumber, amount: journalFormAmount, details: `Journal funding leg for ${req.payload.journalNumber || ''}`, staffId: req.payload.staffId, date: req.payload.date, sourceApprovalId: req.id, sourceRowKey: 'funding-leg' },
+            requestedByName: req.requestedByName,
+            requestedBy: req.requestedBy
+          });
+        } else {
+          const journalFundingStaffId = req.payload.fundingStaffId || req.payload.staffId;
+          if (journalFormAmount > 0 && !ensureStaffAccount(journalFundingStaffId).entries.some(e => e.sourceApprovalId === req.id && e.type === 'customer_credit_journal')) {
+            // SURGICAL FIX 2026-09-04 (client-confirmed bug): same direction fix
+            // as plain customer_credit above — a credit journal's FORM amount
+            // was reducing the operational balance instead of increasing it.
+            addStaffEntry(journalFundingStaffId, 'customer_credit_journal', journalFormAmount, journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
+          }
         }
         break;
       }
@@ -2002,8 +2021,19 @@ if (approvalRecord.type === 'float_topup') {
           requestedBy:req.requestedBy
         }));
         const journalFormAmount = Number(req.payload.formAmount || 0);
-        if (journalFormAmount > 0 && !ensureStaffAccount(req.payload.staffId).entries.some(e => e.sourceApprovalId === req.id && e.type === 'customer_debit_journal')) {
-          addStaffEntry(req.payload.staffId, 'customer_debit_journal', journalFormAmount, -journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
+        if (req.payload.fundingLeg && req.payload.fundingLeg.accountId) {
+          applyRequest({
+            id: req.id,
+            type: 'customer_credit',
+            payload: { customerId: req.payload.fundingLeg.accountId, accountNumber: req.payload.fundingLeg.accountNumber, amount: journalFormAmount, details: `Journal funding leg for ${req.payload.journalNumber || ''}`, staffId: req.payload.staffId, date: req.payload.date, sourceApprovalId: req.id, sourceRowKey: 'funding-leg' },
+            requestedByName: req.requestedByName,
+            requestedBy: req.requestedBy
+          });
+        } else {
+          const journalFundingStaffId = req.payload.fundingStaffId || req.payload.staffId;
+          if (journalFormAmount > 0 && !ensureStaffAccount(journalFundingStaffId).entries.some(e => e.sourceApprovalId === req.id && e.type === 'customer_debit_journal')) {
+            addStaffEntry(journalFundingStaffId, 'customer_debit_journal', journalFormAmount, -journalFormAmount, `Journal form for ${req.payload.date}`, { date: `${req.payload.date}T12:00:00.000Z`, sourceApprovalId: req.id, formPaymentMode: req.payload.formPaymentMode || 'cash' });
+          }
         }
         break;
       }
@@ -2320,7 +2350,7 @@ function hideProcessing() {
         // so navigating straight to a tool (or re-rendering) never hides
         // the very button that's active.
         const groupDefs = [
-          ['direct', 'Direct Posting', ['credit', 'debit']],
+          ['direct', 'Direct Posting', ['debit', 'credit']],
           ['non_cash', 'Non Cash Posting', ['intra_transfer']],
           ['journal', 'Journal Posting', ['journal', 'journal_register']]
         ];
@@ -2474,7 +2504,7 @@ function hideProcessing() {
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Number</div>
-            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(lookupVal)}" placeholder="e.g. 1024, T0012, S1"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="lookupAcc" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(lookupVal)}"></div>
             <button id="lookupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Search</button>
           </div>
           <div class="cs2-row">
@@ -2545,7 +2575,7 @@ function hideProcessing() {
               ${isStaffOp
                 ? `<div class="display-field" id="openNameDisplay">${escapeHtml(String(openingDraft.name || 'Select a teller below'))}</div><input type="hidden" id="openName" value="${escapeHtml(String(openingDraft.name || ''))}">`
                 : `<input id="openName" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.name || ''))}" autocomplete="off"
-                placeholder="${isStaffSalary ? 'e.g. John Doe Salary' : ''}">`}
+               >`}
             </div>
           </div>
           ${needsStaffLink ? `
@@ -2562,7 +2592,7 @@ function hideProcessing() {
           ${isCustomer ? `
           <div class="cs2-row">
             <div class="cs2-label">Account Number <span style="font-weight:400;color:var(--muted);font-size:0.85em">(required — assigned by Customer Service)</span></div>
-            <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off" placeholder="Enter account number"></div>
+            <div class="cs2-input-wrap cs2-short"><input id="openAccountNumber" class="entry-input cs2-input" maxlength="6" inputmode="numeric" value="${escapeHtml(String(openingDraft.accountNumber || ''))}" autocomplete="off"></div>
           </div>` : ''}
           <div class="cs2-row">
             <div class="cs2-label">Address</div>
@@ -2747,10 +2777,24 @@ function hideProcessing() {
   // "Send for Approval" action, so a saved draft is sent through the exact
   // same approval path as one typed and submitted in one sitting — no
   // parallel/duplicate logic to keep in sync.
-  async function submitJournalRows(kind, staffId, staffName, formAmount, formPaymentMode, rows, fieldNote, journalNumber) {
+  async function submitJournalRows(kind, staffId, staffName, formAmount, formPaymentMode, rows, fieldNote, journalNumber, funding) {
     const type = kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal';
+    // SURGICAL PATCH 2026-09-22 (client-confirmed design, cont'd): the
+    // performing teller can fund a journal from ANY account, not just a
+    // staff operational one. `funding` (when passed) is the resolved
+    // customer record chosen at posting time: { id, accountNumber,
+    // accountType, name, linkedStaffId }. A staff_operational account (or
+    // no funding chosen at all, i.e. the old default) still goes through
+    // the staff cash ledger via fundingStaffId; anything else goes through
+    // fundingLeg, which the gateway posts as an ordinary customer
+    // transaction (opposite direction from the journal's rows) against
+    // that account instead. staffId above always stays the performing
+    // teller for audit/attribution either way.
+    const isFundingStaffAccount = !funding || funding.accountType === 'staff_operational';
     return await submitApprovalThroughGateway(type, {
       staffId, staffName, date: businessDate(), formAmount, formPaymentMode, journalNumber,
+      fundingStaffId: isFundingStaffAccount ? (funding?.linkedStaffId || staffId) : null,
+      fundingLeg: isFundingStaffAccount ? null : { accountId: funding.id, accountNumber: funding.accountNumber, accountType: funding.accountType, name: funding.name },
       rows: (rows || []).map(row => ({
         customerId: row.customerId, customerName: row.customerName, accountNumber: row.accountNumber,
         accountType: row.accountType || 'customer', staffAccountId: row.staffAccountId || '', staffAccountUuid: row.staffAccountUuid || '',
@@ -2783,27 +2827,36 @@ function hideProcessing() {
   // front of it first, matching the reference sheet exactly.
   function openJournalPostModal(record) {
     const st = (state.staff || []).find(s => s.id === record.staffId);
-    const myAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === record.staffId);
+    const defaultAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === record.staffId);
     const isCredit = record.kind === 'credit';
     const accountPanelTitle = isCredit ? 'Debit Account' : 'Credit Account';
     const journalPanelTitle = isCredit ? 'Credit Journal' : 'Debit Journal';
-    const accountStatus = myAccount ? ((isCustomerFrozen(myAccount) || myAccount.active === false) ? 'Frozen' : 'Active') : '—';
-    const balance = record.staffId ? getStaffOperationalBalance(record.staffId) : 0;
     const row = (label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="display-field">${value}</div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
-    // SURGICAL PATCH 2026-09-22 (client-confirmed design): this screen is
-    // strictly read-only — the amount posted here always inherits the
-    // Journal Value that was set on the Journal itself (Generate Journal /
-    // Resume). To change the amount, the staff must go back and edit the
-    // saved journal there, not here at posting time.
+    const accountTypeLabel = (t) => t === 'staff_operational' ? 'Staff Operational' : (t === 'staff_salary' ? 'Staff Salary' : (t === 'expense' ? 'Expense' : (t === 'income' ? 'Income' : 'Customer')));
+    const balanceFor = (c) => c ? (c.accountType === 'staff_operational' ? getStaffOperationalBalance(c.linkedStaffId) : (c.balance || 0)) : 0;
+    // SURGICAL PATCH 2026-09-22 (client-confirmed design, cont'd 2): the
+    // performing teller can fund a journal from ANY account — not
+    // restricted to staff operational. Whichever account is chosen still
+    // gets the actual debit/credit (via the staff cash ledger if it's a
+    // staff operational account, or an ordinary customer transaction
+    // otherwise — see submitJournalRows/gateway). Defaults to the
+    // performing teller's own account, but is a live search field.
     const accountPanelHtml = `
         <div class="journal-post-panel">
           <div class="cs2-title" style="text-align:center;margin-bottom:8px;">${accountPanelTitle}</div>
-          ${row('Account Number', escapeHtml(myAccount?.accountNumber || myAccount?.account_number || '—'), 'Teller ID', escapeHtml(myAccount?.accountNumber || '—'))}
-          ${row('Account Name', escapeHtml(myAccount?.name || st?.name || '—'))}
-          ${row('Account Balance', money(balance))}
+          <div class="cs2-row">
+            <div class="cs2-label">Account Number</div>
+            <div class="cs2-input-wrap" style="display:flex;gap:6px;align-items:center;">
+              <input id="jpmFundAcc" class="entry-input" style="width:110px;" maxlength="12" value="${escapeHtml(String(defaultAccount?.accountNumber || ''))}">
+              <button id="jpmFundSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
+            </div>
+            <div class="cs2-label" style="margin-left:10px">Teller ID</div><div class="display-field" id="jpmFundTellerId">${escapeHtml(String(defaultAccount?.accountNumber || '—'))}</div>
+          </div>
+          ${row('Account Name', `<span id="jpmFundName">${escapeHtml(defaultAccount?.name || st?.name || '—')}</span>`)}
+          ${row('Account Balance', `<span id="jpmFundBalance">${money(balanceFor(defaultAccount))}</span>`)}
           ${row('Description', escapeHtml(`Bng amount ${isCredit ? 'creditted to' : 'Debited from'} Journal NO ${record.journalNumber}`))}
-          ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', accountStatus)}
-          ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', 'Staff Operational')}
+          ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', `<span id="jpmFundStatus">${defaultAccount ? ((isCustomerFrozen(defaultAccount) || defaultAccount.active === false) ? 'Frozen' : 'Active') : '—'}</span>`)}
+          ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', `<span id="jpmFundType">${defaultAccount ? accountTypeLabel(defaultAccount.accountType) : '—'}</span>`)}
         </div>`;
     const journalPanelHtml = `
         <div class="journal-post-panel">
@@ -2815,22 +2868,23 @@ function hideProcessing() {
           ${row('Journal Value', money(record.formAmount || 0))}
           ${row('Journal Review', '—')}
         </div>`;
-    // Debits always come before credits: for a Credit journal the account
-    // panel IS the debit side (accountPanelTitle 'Debit Account'), so it
-    // stays first. For a Debit journal the journal panel IS the debit side
-    // ('Debit Journal'), so it goes first instead — swap the two.
-    const firstPanelHtml = isCredit ? accountPanelHtml : journalPanelHtml;
-    const secondPanelHtml = isCredit ? journalPanelHtml : accountPanelHtml;
+    // Account panel is always first (left), journal panel always second
+    // (right) — the debit/credit terminology in the panel TITLES already
+    // flips correctly with kind; the panel POSITIONS don't swap.
     const body = `
       <div class="spec-color-scheme journal-post-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
-        ${firstPanelHtml}
-        ${secondPanelHtml}
+        ${accountPanelHtml}
+        ${journalPanelHtml}
       </div>`;
     openModal(`${record.journalNumber} — ${journalPanelTitle} Posting`, body, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       {
         label: 'Post',
         onClick: async () => {
+          const typedAcc = String(byId('jpmFundAcc')?.value || '').trim();
+          const fundingAccount = typedAcc ? getCustomerByAccountNo(typedAcc) : defaultAccount;
+          if (!fundingAccount) return showToast('Enter a valid account number to fund this journal');
+          if (isCustomerFrozen(fundingAccount) || fundingAccount.active === false) return showToast('That account is frozen');
           closeModal();
           showProcessing('Sending journal...'); await nextPaint();
           try {
@@ -2838,8 +2892,12 @@ function hideProcessing() {
             // formAmount as it stood then — re-checking against whatever
             // the balance is NOW would risk rejecting a journal that was
             // already valid when saved, so we send exactly what was saved.
-            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber);
+            const funding = { id: fundingAccount.id, accountNumber: fundingAccount.accountNumber, accountType: fundingAccount.accountType, name: fundingAccount.name, linkedStaffId: fundingAccount.linkedStaffId };
+            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber, funding);
             if (!result?.ok) return showToast(result?.error?.message || 'Unable to send journal');
+            // Business date is captured here, at actual posting time — not
+            // when the draft was merely saved.
+            record.date = businessDate();
             record.status = 'sent';
             save();
             showToast(`${record.journalNumber} sent for approval`);
@@ -2848,6 +2906,23 @@ function hideProcessing() {
         }
       }
     ]);
+    // Live-refresh the funding-account display fields when the staff
+    // searches a different account to fund this journal from. Any account
+    // type can be chosen now — staff operational funds it via the staff
+    // ledger, anything else funds it as an ordinary customer transaction
+    // (see submitJournalRows/gateway), so no type restriction here.
+    const refreshFundDisplay = () => {
+      const typedAcc = String(byId('jpmFundAcc')?.value || '').trim();
+      const found = typedAcc ? getCustomerByAccountNo(typedAcc) : null;
+      if (byId('jpmFundName')) byId('jpmFundName').textContent = found?.name || '—';
+      if (byId('jpmFundTellerId')) byId('jpmFundTellerId').textContent = found?.accountType === 'staff_operational' ? (found.accountNumber || '—') : '—';
+      if (byId('jpmFundStatus')) byId('jpmFundStatus').textContent = found ? ((isCustomerFrozen(found) || found.active === false) ? 'Frozen' : 'Active') : '—';
+      if (byId('jpmFundBalance')) byId('jpmFundBalance').textContent = money(balanceFor(found));
+      if (byId('jpmFundType')) byId('jpmFundType').textContent = found ? accountTypeLabel(found.accountType) : '—';
+      if (!found) showToast('Account not found');
+    };
+    if (byId('jpmFundSearchBtn')) byId('jpmFundSearchBtn').onclick = refreshFundDisplay;
+    if (byId('jpmFundAcc')) byId('jpmFundAcc').onkeyup = (e) => { if (e.key === 'Enter') refreshFundDisplay(); };
   }
 
   // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal is
@@ -2885,7 +2960,7 @@ function hideProcessing() {
         <div class="action-inline"><h3 style="margin:0">Journal Register</h3></div>
         <div class="note" style="margin:6px 0">Every Journal ever saved or sent, by Journal Number — draft journals here haven't been sent for approval yet.</div>
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-journal-register-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="journalRegisterFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="journalRegisterTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="journalRegisterCustomApply">Apply Custom</button></div>
-        <div class="action-inline" style="margin-top:8px"><input id="journalRegisterSearch" class="entry-input" placeholder="Jump to Journal Number (e.g. JN7)" value="${escapeHtml(searchNumber)}" style="max-width:260px"></div>
+        <div class="action-inline" style="margin-top:8px"><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" style="max-width:260px"></div>
         <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Journal No.</th><th>Date</th><th>Kind</th><th>Staff</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No journals found</td></tr>'}</tbody></table></div>
       </div>`;
   }
@@ -3012,7 +3087,7 @@ function hideProcessing() {
 
             <div class="posting-row posting-row-details">
               <label class="sheet-label posting-label-name" for="txDetails">Description</label>
-              <input id="txDetails" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}" placeholder="What is this transaction for?">
+              <input id="txDetails" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}">
             </div>
 
             <div class="posting-row posting-row-counterparty">
@@ -3082,11 +3157,10 @@ function hideProcessing() {
                 const resuming = state.ui.resumingJournalId ? (state.journals || []).find(j => j.id === state.ui.resumingJournalId) : null;
                 return resuming ? resuming.journalNumber : `${nextJournalNumber()} (will be assigned on Save/Submit)`;
               })()}</strong></div>
-              <div><span class="sheet-label">Journal Date</span> <strong>${fmtDate(businessDate())}</strong></div>
             </div>
             <div class="journal-entry-top row-zero journal-form-row" style="display:grid;grid-template-columns:max-content 160px max-content max-content;column-gap:10px;align-items:end;margin-bottom:10px;">
               <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Value</label>
-              <input id="journalFormAmount" class="entry-input" type="text" inputmode="decimal" style="margin:0;width:150px;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}" placeholder="0.00">
+              <input id="journalFormAmount" class="entry-input" type="text" inputmode="decimal" style="margin:0;width:150px;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}">
               <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${(telleringDraft.journalFormMode || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${(telleringDraft.journalFormMode || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
               <div class="posting-kpis-inline">
                 <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL BALANCE</span><span class="mini-kpi-pill-value" id="journalFormRunning">${money(0)}</span></div>
@@ -3132,7 +3206,7 @@ function hideProcessing() {
     return `<div class="tellering-stack">
         <div class="tellering-sheet journal-toggle-sheet standalone-posting-sheet">
           <div class="posting-row" style="padding:10px 14px">
-            <div class="tx-mode-toggle inline-mode-toggle journal-kind-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="credit" ${kind === 'credit' ? 'checked' : ''}> <span>Credit</span></label><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="debit" ${kind === 'debit' ? 'checked' : ''}> <span>Debit</span></label></div>
+            <div class="tx-mode-toggle inline-mode-toggle journal-kind-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="debit" ${kind === 'debit' ? 'checked' : ''}> <span>Debit</span></label><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="credit" ${kind === 'credit' ? 'checked' : ''}> <span>Credit</span></label></div>
           </div>
         </div>
         ${renderJournalPaneMarkup(kind)}
@@ -3782,7 +3856,7 @@ function nextPaint() {
         <div class="table-card">
           <div class="action-inline"><h3 style="margin:0">All Customers' Balance</h3></div>
           <div class="form-grid one" style="margin-top:12px">
-            <div class="field"><label>Search Customer</label><input id="customerDirectorySearch" class="entry-input" placeholder="Search by name, account number, phone or email" value="${escapeHtml(state.ui.customerDirectorySearch || '')}"></div>
+            <div class="field"><label>Search Customer</label><input id="customerDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.customerDirectorySearch || '')}"></div>
           </div>
           <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="9">No matching customers</td></tr>'}${filteredCustomers.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="3"></td></tr>` : ''}</tbody></table></div>
           <div class="action-row" style="margin-top:14px"><button id="customerDirectoryCloseBtn" class="secondary">Collapse Directory</button></div>
@@ -3818,7 +3892,7 @@ function nextPaint() {
         <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button>${isSupabaseApprovalMode() ? `<button id="backfillTreasuryAccountsBtn" class="secondary tiny-btn" title="One-time: opens a TREASURY/ADMIN operational account for any Treasury or Admin staff who doesn't have one yet">Backfill Operational Accounts</button>` : ''}<button id="addStaffBtn">ADD STAFF</button></div>
         ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
-          <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" placeholder="Search staff" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
+          <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
         </div>
         <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Full Name</th><th>Staff ID</th><th>Account Number</th><th>Op. Account (Cash Receipt/Fund Account)</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="8">No staff found</td></tr>'}</tbody></table></div>
       </div>`;
@@ -3849,7 +3923,7 @@ function nextPaint() {
         <div class="action-inline"><h3 style="margin:0">Staff Salary Balance</h3></div>
         <div class="note" style="margin:6px 0">Shows Staff Salary account balances. Teller operational balances are on the separate "Teller Balances" report.</div>
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
-          <input id="staffSalarySearch" class="entry-input" value="${escapeHtml(state.ui.staffSalarySearch || '')}" placeholder="Search by account number or name" style="height:24px;max-width:220px;font-size:0.78em;padding:2px 8px">
+          <input id="staffSalarySearch" class="entry-input" value="${escapeHtml(state.ui.staffSalarySearch || '')}" style="height:24px;max-width:220px;font-size:0.78em;padding:2px 8px">
           ${loading ? '<span class="muted" style="font-size:0.8em">Loading…</span>' : ''}
         </div>
         <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Balance</th><th>Opened</th><th>Status</th></tr></thead><tbody>${bodyRows || `<tr><td colspan="6">${loading ? 'Loading…' : 'No staff salary accounts found'}</td></tr>`}${filtered.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
@@ -4848,7 +4922,7 @@ function normalizeStaffLedgerEntryType(row) {
         <div class="field"><label>Amount</label><input id="floatTopupAmount" class="entry-input" type="number"></div>
       </div>
       <div class="form-grid one">
-        <div class="field"><label>Note</label><input id="floatTopupNote" class="entry-input" placeholder="Reason for top-up"></div>
+        <div class="field"><label>Note</label><input id="floatTopupNote" class="entry-input"></div>
       </div>
       <div class="note">This request goes to Approvals → Others. Once approved, it increases the available form immediately for the selected staff on the current business date.</div>
     </div>`, [
@@ -5285,7 +5359,7 @@ function normalizeStaffLedgerEntryType(row) {
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Debit — Account Number</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="itrSourceAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="itrSourceAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
             <button id="itrLookupSource" class="sheet-btn secondary tiny-btn" ${sourceLocked ? 'disabled' : ''}>Search</button>
             <span class="sheet-label" style="margin-left:10px">Teller ID</span>
             <div class="display-field" id="itrTellerId">${escapeHtml(myTellerId)}</div>
@@ -5295,11 +5369,11 @@ function normalizeStaffLedgerEntryType(row) {
           <div id="itrSourceBalance" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
           <div class="cs2-row">
             <div class="cs2-label">Description</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}" placeholder="e.g. Loan repayment"></div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}"></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Paid By</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrPaidBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.paidBy || ''))}" placeholder="Who authorized/paid this out"></div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrPaidBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.paidBy || ''))}"></div>
             <div class="cs2-label" style="margin-left:14px">Account Status</div>
             <div class="display-field" id="itrSourceStatus">${statusOf(sourceAccount)}</div>
           </div>
@@ -5311,14 +5385,14 @@ function normalizeStaffLedgerEntryType(row) {
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Credit — Account Number</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="itrDestAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" placeholder="Account number" autocomplete="off"></div>
+            <div class="cs2-input-wrap cs2-medium"><input id="itrDestAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" autocomplete="off"></div>
             <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
           <div id="itrDestBalance" class="cs2-note-box" style="min-height:24px">${draft.destId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.destBalance || 0)}` : ''}</div>
           <div class="cs2-row">
             <div class="cs2-label">Received By</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrReceivedBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.receivedBy || ''))}" placeholder="Who received this"></div>
+            <div class="cs2-input-wrap cs2-wide"><input id="itrReceivedBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.receivedBy || ''))}"></div>
             <div class="cs2-label" style="margin-left:14px">Account Status</div>
             <div class="display-field" id="itrDestStatus">${statusOf(destAccount)}</div>
           </div>
@@ -6687,9 +6761,13 @@ function normalizeStaffLedgerEntryType(row) {
       const resumingId = state.ui.resumingJournalId;
       const existing = resumingId ? (state.journals || []).find(j => j.id === resumingId) : null;
       let journalNumber;
+      // SURGICAL PATCH 2026-09-22 (client-confirmed design): a saved draft
+      // has no date yet — the business date is captured by the system only
+      // at actual posting time (see openJournalPostModal's Post handler and
+      // journalSubmit below), not when merely saved as a draft.
       if (existing) {
         journalNumber = existing.journalNumber;
-        existing.date = businessDate();
+        existing.date = existing.date || '';
         existing.counterparty = byId('journalCounterparty')?.value.trim() || '';
         existing.formAmount = journalFormAmount;
         existing.formPaymentMode = journalFormMode;
@@ -6701,7 +6779,7 @@ function normalizeStaffLedgerEntryType(row) {
           id: uid('jn'),
           journalNumber,
           kind,
-          date: businessDate(),
+          date: '',
           staffId: staff.id,
           staffName: staff.name,
           counterparty: byId('journalCounterparty')?.value.trim() || '',
@@ -7081,7 +7159,7 @@ function normalizeStaffLedgerEntryType(row) {
         </div>
       </div>
       <div id="cashReceiptCustomerWrap" class="form-grid two compact-modal-grid" style="margin-top:8px; display:none">
-        <div class="field"><label>Customer Account Number</label><input id="cashReceiptCustomerAcct" class="entry-input" placeholder="Enter account number, press Enter"></div>
+        <div class="field"><label>Customer Account Number</label><input id="cashReceiptCustomerAcct" class="entry-input"></div>
         <div class="field"><label>&nbsp;</label><div id="cashReceiptCustomerInfo" class="cs2-note-box" style="min-height:24px"></div></div>
       </div>
       ${myOpAccount ? `<div class="note">This will credit your operational account: <strong>${escapeHtml(myOpAccount.name || myOpAccount.account_number || 'your account')}</strong></div>` : '<div class="note warning-note">No operational account linked to your staff profile. Ask admin to open one.</div>'}
@@ -7242,7 +7320,7 @@ function normalizeStaffLedgerEntryType(row) {
           ${fundingSource === 'account' ? `
           <div class="cs2-row">
             <div class="cs2-label">Source Account</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="staffCreditSourceAcc" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" placeholder="Account number to debit — Enter to fetch" autocomplete="off"></div>
+            <div class="cs2-input-wrap cs2-wide"><input id="staffCreditSourceAcc" class="entry-input cs2-input" value="${escapeHtml(String(draft.sourceAcct || ''))}" autocomplete="off"></div>
             <button id="staffCreditSourceSearch" class="sheet-btn secondary tiny-btn">Search</button>
           </div>
           <div id="staffCreditSourceInfo" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<strong>${escapeHtml(draft.sourceName || '')}</strong> <span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
@@ -7465,7 +7543,7 @@ function normalizeStaffLedgerEntryType(row) {
 
   function openCustomerSearchModal(list) {
     const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const pickCustomer = (id) => { state.ui.selectedCustomerId = id; save(); closeModal(); applySelectedCustomerToActiveTool(); };
     const bindPicks = () => {
       qq('[data-pick]').forEach(el => el.onclick = (event) => { event.stopPropagation(); pickCustomer(el.dataset.pick); });
@@ -7483,7 +7561,7 @@ function normalizeStaffLedgerEntryType(row) {
 
   function openJournalCustomerSearchModal(list) {
     const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-journal-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick-journal="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick-journal="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalJournalCustomerSearch" class="entry-input" placeholder="Search customer by name or account number"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalJournalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalJournalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalJournalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const pickJournalCustomer = (id) => {
       const c = state.customers.find(x => x.id === id);
       if (!c) return showToast('Customer not found');
@@ -7794,7 +7872,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           <div class="kpi"><div class="label">Overdraw</div><div class="number ${currentOverdraw>0?'balance-negative':''}">${money(currentOverdraw)}</div></div>
         </div>
         <div class="form-grid two cod-resolution-grid">
-          <div class="field"><label>Final Agreed Amount</label><input id="codAcceptedPosition" class="entry-input" type="number" placeholder="Enter final agreed system amount" value="${savedAcceptedPosition}" ${isAdminOfficer ? '' : 'readonly'}></div>
+          <div class="field"><label>Final Agreed Amount</label><input id="codAcceptedPosition" class="entry-input" type="number" value="${savedAcceptedPosition}" ${isAdminOfficer ? '' : 'readonly'}></div>
           <div class="field"><label>Adjustment</label><input id="codAdjustment" class="entry-input" type="number" value="${savedAdjustment}" readonly></div>
         </div>
         <div class="form-grid two cod-resolution-grid">
@@ -7802,7 +7880,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           <div class="field"><label>Create Teller Debt</label><select id="codCreateDebt" class="entry-input"><option value="yes" ${savedCreateDebt?'selected':''}>Yes</option><option value="no" ${!savedCreateDebt?'selected':''}>No</option></select></div>
         </div>
         <div class="form-grid two cod-resolution-grid">
-          <div class="field"><label>Debt Amount</label><input id="codDebtAmount" class="entry-input" type="number" placeholder="Enter teller debt amount" value="${cod.debtAmount || defaultDebt}"></div>
+          <div class="field"><label>Debt Amount</label><input id="codDebtAmount" class="entry-input" type="number" value="${cod.debtAmount || defaultDebt}"></div>
           <div class="field"><label>Resolution Note</label><textarea id="codResolutionNote" class="entry-input">${cod.resolutionNote || ''}</textarea></div>
         </div>
       </div>
@@ -8194,7 +8272,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     openModal('Change Password', `
       <div class="form-grid two" style="gap:10px;max-width:520px">
         <div class="field" style="grid-column:1/-1"><label>Old Password</label>${passwordInputRow('<input id="changeOldPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'changeOldPassword')}</div>
-        <div class="field"><label>New Password</label>${passwordInputRow('<input id="changeNewPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'changeNewPassword')}</div>
+        <div class="field"><label>New Password</label>${passwordInputRow('<input id="changeNewPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'changeNewPassword')}</div>
         <div class="field"><label>Confirm New Password</label>${passwordInputRow('<input id="changeConfirmPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'changeConfirmPassword')}</div>
       </div>
       <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">After a refresh or reopen, DUCESS will require login again.</p>
@@ -8233,9 +8311,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const loginStaffValue = (byId('loginStaffId')?.value || '').trim().toUpperCase();
     openModal('Change Password', `
       <div class="form-grid two" style="gap:10px;max-width:520px">
-        <div class="field" style="grid-column:1/-1"><label>Staff ID</label><input id="loginChangeStaffId" class="entry-input" value="${escapeHtml(loginStaffValue)}" placeholder="e.g. ADMIN001" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" style="text-transform:uppercase"></div>
+        <div class="field" style="grid-column:1/-1"><label>Staff ID</label><input id="loginChangeStaffId" class="entry-input" value="${escapeHtml(loginStaffValue)}" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" style="text-transform:uppercase"></div>
         <div class="field" style="grid-column:1/-1"><label>Current Password</label>${passwordInputRow('<input id="loginChangeOldPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'loginChangeOldPassword')}</div>
-        <div class="field"><label>New Password</label>${passwordInputRow('<input id="loginChangeNewPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'loginChangeNewPassword')}</div>
+        <div class="field"><label>New Password</label>${passwordInputRow('<input id="loginChangeNewPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'loginChangeNewPassword')}</div>
         <div class="field"><label>Confirm New Password</label>${passwordInputRow('<input id="loginChangeConfirmPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'loginChangeConfirmPassword')}</div>
       </div>
       <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Use your current Staff ID and password. After the update, sign in with the new password.</p>
@@ -8292,7 +8370,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <p style="margin:0 0 10px;font-size:0.86em">Reset password for <strong>${escapeHtml(target.name || target.full_name || staffCode)}</strong>.</p>
         <div class="form-grid two" style="gap:10px">
           <div class="field"><label>Staff ID</label><div class="display-field">${escapeHtml(String(staffCode))}</div></div>
-          <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="adminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'adminTempPassword')}</div>
+          <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="adminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'adminTempPassword')}</div>
           <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="adminTempPasswordConfirm" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'adminTempPasswordConfirm')}</div>
         </div>
         <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Give this temporary password to the staff securely.</p>
@@ -8519,13 +8597,13 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     if (addBtn) addBtn.onclick = () => {
       openModal('Onboard New Staff', `
       <div class="form-grid two" style="gap:12px">
-        <div class="field"><label>Full Name <span style="color:red">*</span></label><input id="newStaffName" class="entry-input" placeholder="e.g. Amaka Obi"></div>
-        <div class="field"><label>Staff ID / Login ID <span style="color:red">*</span></label><input id="newStaffCode" class="entry-input" placeholder="e.g. TLR001" style="text-transform:uppercase" maxlength="10"></div>
+        <div class="field"><label>Full Name <span style="color:red">*</span></label><input id="newStaffName" class="entry-input"></div>
+        <div class="field"><label>Staff ID / Login ID <span style="color:red">*</span></label><input id="newStaffCode" class="entry-input" style="text-transform:uppercase" maxlength="10"></div>
         <div class="field"><label>Role <span style="color:red">*</span></label><select id="newStaffRole" class="entry-input">${Object.keys(ROLE_LABELS).map(k=>`<option value="${k}">${ROLE_LABELS[k]}</option>`).join('')}</select></div>
-        <div class="field"><label>Temporary Password <span style="color:red">*</span></label>${passwordInputRow('<input id="newStaffPassword" class="entry-input" type="password" placeholder="Minimum 6 characters">', 'newStaffPassword')}</div>
-        <div class="field" style="grid-column:1/-1"><label>Branch (optional)</label><input id="newStaffBranch" class="entry-input" placeholder="e.g. Main Branch"></div>
+        <div class="field"><label>Temporary Password <span style="color:red">*</span></label>${passwordInputRow('<input id="newStaffPassword" class="entry-input" type="password">', 'newStaffPassword')}</div>
+        <div class="field" style="grid-column:1/-1"><label>Branch (optional)</label><input id="newStaffBranch" class="entry-input"></div>
       </div>
-      <p style="margin:10px 0 0;font-size:0.82em;color:var(--text-muted)">Staff will log in using their Staff ID and this password. Keep it short and memorable — e.g. TLR001, CSO002. They can change their password after first login.</p>
+      <p style="margin:10px 0 0;font-size:0.82em;color:var(--text-muted)">Staff will log in using their Staff ID and this password. Keep it short and memorable. They can change their password after first login.</p>
     `,[
       {label:'Cancel', className:'secondary', onClick: closeModal},
       {label:'Create Staff Account', onClick: async () => {
@@ -8654,7 +8732,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         openModal('Confirm Deactivation', `
           <p>Are you sure you want to deactivate <strong>${escapeHtml(st.name || st.full_name)}</strong>?</p>
           <p style="font-size:0.85em;color:var(--text-muted)">Their login will be disabled. All historical records are preserved.</p>
-          <div class="field" style="margin-top:10px"><label>Reason (optional)</label><input id="deactivateReason" class="entry-input" placeholder="e.g. Resigned, transferred…"></div>
+          <div class="field" style="margin-top:10px"><label>Reason (optional)</label><input id="deactivateReason" class="entry-input"></div>
         `, [
           {label:'Cancel', className:'secondary', onClick: closeModal},
           {label:'Deactivate', onClick: async () => {
@@ -8803,9 +8881,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function openAdminRecoveryModal() {
     openModal('Admin Password Recovery', `
       <div class="grid two compact-grid">
-        <div class="field"><label>Admin Staff ID</label><input id="recoverAdminStaffId" class="entry-input" type="text" autocomplete="username" placeholder="e.g. ADMIN001"></div>
-        <div class="field"><label>Recovery Key</label>${passwordInputRow('<input id="recoverAdminCode" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="DUCESS-RK-...">', 'recoverAdminCode')}</div>
-        <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="recoverAdminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" placeholder="Minimum 6 characters">', 'recoverAdminTempPassword')}</div>
+        <div class="field"><label>Admin Staff ID</label><input id="recoverAdminStaffId" class="entry-input" type="text" autocomplete="username"></div>
+        <div class="field"><label>Recovery Key</label>${passwordInputRow('<input id="recoverAdminCode" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'recoverAdminCode')}</div>
+        <div class="field"><label>Temporary Password</label>${passwordInputRow('<input id="recoverAdminTempPassword" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'recoverAdminTempPassword')}</div>
         <div class="field"><label>Confirm Password</label>${passwordInputRow('<input id="recoverAdminTempConfirm" class="entry-input" type="password" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true">', 'recoverAdminTempConfirm')}</div>
       </div>
       <p style="margin:8px 0 0;font-size:0.78em;color:var(--text-muted)">Use the Admin Recovery Key generated inside Administration. The key is shown once and should be stored offline. After reset, sign in with the temporary password and change it immediately.</p>
