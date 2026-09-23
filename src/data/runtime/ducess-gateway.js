@@ -1446,6 +1446,21 @@ if (inserted.error) {
 
       const txType = (type === 'customer_debit' || type === 'customer_debit_journal') ? 'debit' : 'credit';
       const entries = resolveRequestEntries(requestRow);
+      // Direct customer_credit/customer_debit draw on the daily FORM directly,
+      // using the actual posted amount. Journals draw on it via their own
+      // declared FORM amount instead (not the sum of their rows).
+      const isJournal = (type === 'customer_credit_journal' || type === 'customer_debit_journal');
+      // SURGICAL ADDITION 2026-09-22 (client-confirmed design, cont'd 2): a
+      // journal's funding account can be ANY account, not just a staff
+      // operational one. When fundingLeg is set, that account gets an
+      // ordinary customer transaction (opposite direction from the rows,
+      // posted further below) instead of a staff cash ledger entry. It's
+      // one extra posted transaction beyond the row entries, so it has to
+      // be counted into the idempotency checks below or a retry would
+      // either think a partial post happened, or (worse) skip the funding
+      // leg forever after the rows already posted once.
+      const hasFundingLeg = isJournal && !!(payload.fundingLeg && payload.fundingLeg.accountId);
+      const expectedEntryCount = entries.length + (hasFundingLeg ? 1 : 0);
 
       // Staff account transactions are handled entirely by local state (applyRequest).
       // Skip Supabase posting for them to avoid "customer not found" errors.
@@ -1457,10 +1472,10 @@ if (inserted.error) {
 
       const existingTxResult = await fetchExistingPostedTransactionsByRequest(requestRow.id);
       if (!existingTxResult.ok) return existingTxResult;
-      if (existingTxResult.data.length >= entries.length && entries.length > 0) {
+      if (existingTxResult.data.length >= expectedEntryCount && expectedEntryCount > 0) {
         return defaultResult.ok({ posted: true, requestType: type, transactions: existingTxResult.data, cashLedger: null, decisionNote: decisionNote || '', alreadyPosted: true });
       }
-      if (existingTxResult.data.length > 0 && existingTxResult.data.length < entries.length) {
+      if (existingTxResult.data.length > 0 && existingTxResult.data.length < expectedEntryCount) {
         return defaultResult.err('PARTIAL_POST_DETECTED', 'A partial backend posting was detected for this approval request. Resolve before retrying.');
       }
       const results = [];
@@ -1470,10 +1485,26 @@ if (inserted.error) {
         results.push(postedResult.data);
       }
 
-      // Direct customer_credit/customer_debit draw on the daily FORM directly,
-      // using the actual posted amount. Journals draw on it via their own
-      // declared FORM amount instead (not the sum of their rows).
-      const isJournal = (type === 'customer_credit_journal' || type === 'customer_debit_journal');
+      // Post the funding leg — opposite direction from the rows above,
+      // against whichever account the teller chose to fund this journal
+      // from. Guarded by its own idempotency check (against the SAME
+      // pre-loop snapshot used above) since it isn't one of `entries`.
+      if (hasFundingLeg) {
+        const alreadyPostedFundingLeg = (existingTxResult.data || []).some(tx => String(tx.account_id) === String(payload.fundingLeg.accountId));
+        if (!alreadyPostedFundingLeg) {
+          const fundingTxType = txType === 'credit' ? 'debit' : 'credit';
+          const fundingResult = await postSingleCustomerTransaction(requestRow, {
+            customerId: payload.fundingLeg.accountId,
+            accountId: payload.fundingLeg.accountId,
+            accountNumber: payload.fundingLeg.accountNumber,
+            amount: normalizeNumber(payload.formAmount),
+            details: `Journal funding leg for ${payload.journalNumber || ''}`
+          }, fundingTxType, approver, { skipExistingCheck: true });
+          if (!fundingResult.ok) return fundingResult;
+          results.push(fundingResult.data);
+        }
+      }
+
       const journalFormAmount = normalizeNumber(payload.formAmount);
       const directTotalAmount = results.reduce((sum, item) => sum + normalizeNumber(item?.sourceAmount || item?.amount), 0);
       const ledgerAmount = isJournal ? journalFormAmount : directTotalAmount;
@@ -1484,20 +1515,28 @@ if (inserted.error) {
       // operational balance/ledger balance instead of increasing it. Now
       // signed by txType, matching postSingleCustomerTransaction's delta
       // convention above (credit=+, debit=-).
-      const ledgerResult = await insertStaffCashLedgerEntry({
-        approvalRequestId: requestRow.id,
-        staffId: payload.staffId || payload.requestedByStaffId || requestRow.requested_by_staff_id || null,
-        entryType: type,
-        amount: ledgerAmount,
-        delta: ledgerAmount ? (txType === 'credit' ? Math.abs(ledgerAmount) : -Math.abs(ledgerAmount)) : 0,
-        note: payload.note || `${type}${isJournal ? ' form' : ''} posted from approval ${requestRow.id}`,
-        floatDate: payload.date || payload.businessDate || null,
-        createdByStaffId: requestRow.requested_by_staff_id || null,
-        approvedByStaffId: approver?.staffId || null,
-      });
-      if (!ledgerResult.ok) return ledgerResult;
+      // A journal funded via fundingLeg (a non-staff account) already had
+      // its ledger effect posted above as an ordinary customer transaction
+      // — skip the staff cash ledger entry entirely in that case. Otherwise
+      // post it against fundingStaffId (falling back to staffId) exactly
+      // as before.
+      if (!hasFundingLeg) {
+        const ledgerResult = await insertStaffCashLedgerEntry({
+          approvalRequestId: requestRow.id,
+          staffId: (isJournal && payload.fundingStaffId) ? payload.fundingStaffId : (payload.staffId || payload.requestedByStaffId || requestRow.requested_by_staff_id || null),
+          entryType: type,
+          amount: ledgerAmount,
+          delta: ledgerAmount ? (txType === 'credit' ? Math.abs(ledgerAmount) : -Math.abs(ledgerAmount)) : 0,
+          note: payload.note || `${type}${isJournal ? ' form' : ''} posted from approval ${requestRow.id}`,
+          floatDate: payload.date || payload.businessDate || null,
+          createdByStaffId: requestRow.requested_by_staff_id || null,
+          approvedByStaffId: approver?.staffId || null,
+        });
+        if (!ledgerResult.ok) return ledgerResult;
+        return defaultResult.ok({ posted: true, requestType: type, transactions: results, cashLedger: ledgerResult.data, decisionNote: decisionNote || '' });
+      }
 
-      return defaultResult.ok({ posted: true, requestType: type, transactions: results, cashLedger: ledgerResult.data, decisionNote: decisionNote || '' });
+      return defaultResult.ok({ posted: true, requestType: type, transactions: results, cashLedger: null, decisionNote: decisionNote || '' });
     }
 
     async function markApprovalDecision(requestId, status, actor, note, payloadPatch) {
