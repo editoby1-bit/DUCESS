@@ -198,7 +198,7 @@
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','debit','credit','journal','journal_register','intra_transfer','my_statement']
+      tools: ['check_balance','debit','credit','journal_debit','journal_credit','journal_register','intra_transfer','my_statement']
     },
     approvals: {
       title: 'Approval',
@@ -251,7 +251,8 @@
     staff_credit: 'Credit Staff Account',
     credit: 'Credit Entry',
     debit: 'Debit Entry',
-    journal: 'Generate Journal',
+    journal_debit: 'Debit Entry',
+    journal_credit: 'Credit Entry',
     journal_register: 'Journal Register',
     intra_transfer: 'Debit To Credit Entry',
     my_close_day: 'My Close of Day',
@@ -286,13 +287,13 @@
     // funds tellers via Non Cash (still role-agnostic), just without a
     // Journal Register view of their own.
     cash_officer: ['intra_transfer','cash_receipt','my_statement'],
-    teller: ['check_balance','credit','debit','journal','journal_register','intra_transfer','my_statement'],
+    teller: ['check_balance','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','my_statement'],
     // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
     // own totals view ("my_approvals" — how much they've approved, by date)
     // rather than the cash statement everyone else gets, since they never
     // hold a cash account themselves.
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal','journal_register','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary','my_statement'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary','my_statement'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory']
   };
 
@@ -2352,7 +2353,7 @@ function hideProcessing() {
         const groupDefs = [
           ['direct', 'Direct Posting', ['debit', 'credit']],
           ['non_cash', 'Non Cash Posting', ['intra_transfer']],
-          ['journal', 'Journal Posting', ['journal', 'journal_register']]
+          ['journal', 'Journal Posting', ['journal_debit', 'journal_credit', 'journal_register']]
         ];
         const groupHtml = groupDefs.map(([key, label, tools]) => {
           const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
@@ -2428,6 +2429,11 @@ function hideProcessing() {
           state.ui.generatedJournals[journalKey] = false;
           state.ui.collapsedJournals[journalKey] = false;
         }
+        if (nextTool === 'journal_debit' || nextTool === 'journal_credit') {
+          state.ui.journalStandaloneKind = nextTool === 'journal_debit' ? 'debit' : 'credit';
+          state.ui.journalAccDraft = '';
+          state.ui.selectedJournalCustomerId = null;
+        }
         if (nextTool === 'approval_customer_service') state.ui.approvalsSection = 'customer_service';
         if (nextTool === 'approval_tellering') state.ui.approvalsSection = 'tellering';
         if (nextTool === 'approval_non_cash') state.ui.approvalsSection = 'non_cash';
@@ -2463,7 +2469,7 @@ function hideProcessing() {
       case 'staff_credit': return renderStaffCredit();
       case 'credit': return renderJournalTool('credit');
       case 'debit': return renderJournalTool('debit');
-      case 'journal': return renderJournalStandalone();
+      case 'journal_debit': case 'journal_credit': return renderJournalStandalone();
       case 'journal_register': return renderJournalRegister();
       case 'intra_transfer': return renderIntraTransfer();
       case 'transaction_summary': return renderTransactionSummary();
@@ -2936,7 +2942,14 @@ function hideProcessing() {
     const searchNumber = (state.ui.journalRegisterSearch || '').trim().toUpperCase();
     let list = (state.journals || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     if (searchNumber) {
-      list = list.filter(j => String(j.journalNumber || '').toUpperCase().includes(searchNumber));
+      // SURGICAL FIX 2026-09-24 (client-reported bug): the search box had no
+      // label and only ever matched Journal Number — searching by an
+      // account number involved in the journal silently returned nothing,
+      // which read as "broken". Now matches either.
+      list = list.filter(j =>
+        String(j.journalNumber || '').toUpperCase().includes(searchNumber) ||
+        (j.rows || []).some(r => String(r.accountNumber || '').toUpperCase().includes(searchNumber))
+      );
     } else {
       list = filterByDate(list, filter);
     }
@@ -2960,7 +2973,7 @@ function hideProcessing() {
         <div class="action-inline"><h3 style="margin:0">Journal Register</h3></div>
         <div class="note" style="margin:6px 0">Every Journal ever saved or sent, by Journal Number — draft journals here haven't been sent for approval yet.</div>
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-journal-register-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="journalRegisterFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="journalRegisterTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="journalRegisterCustomApply">Apply Custom</button></div>
-        <div class="action-inline" style="margin-top:8px"><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" style="max-width:260px"></div>
+        <div class="action-inline" style="margin-top:8px"><label class="inline-field"><span>Search by Journal Number or Account Number</span><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" style="max-width:260px"></label></div>
         <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Journal No.</th><th>Date</th><th>Kind</th><th>Staff</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No journals found</td></tr>'}</tbody></table></div>
       </div>`;
   }
@@ -2989,7 +3002,7 @@ function hideProcessing() {
       // for this staff/kind, and remembers the draft's id so Save/Submit
       // update THIS record instead of minting a new Journal Number.
       state.ui.journalStandaloneKind = record.kind;
-      state.ui.tool = 'journal';
+      state.ui.tool = record.kind === 'debit' ? 'journal_debit' : 'journal_credit';
       const visibilityKey = `${staff.id}:${businessDate()}:${record.kind}`;
       state.ui.staffJournals ||= {};
       state.ui.staffJournalAttachments ||= {};
@@ -3148,7 +3161,7 @@ function hideProcessing() {
         <div class="journal-wrapper">
         <div class="journal-pane form-card spacious-journal-pane standalone-journal-pane" id="journalPane">
           <div class="journal-pane-head compact-journal-head">
-            <h3>Journal Generated</h3>
+            <div class="cs2-title" style="margin:0;">${kind === 'credit' ? 'Credit' : 'Debit'} Entries</div>
             <div class="journal-pane-actions ${journalCollapsed ? "" : "journal-pane-actions-hidden"}"><button id="journalCollapseTopBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
           </div>
           <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
@@ -3174,7 +3187,7 @@ function hideProcessing() {
             <div class="journal-entry-top row-counterparty-top" style="display:grid;grid-template-columns:max-content 240px;column-gap:10px;align-items:end;margin-bottom:10px;">
               <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.journalCounterpartyDraft || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid By'}</div></div>
             </div>
-            <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>Details</th><th>Amount Paid</th><th>Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
+            <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>Details</th><th>${kind === 'credit' ? 'Amount Received' : 'Amount Paid'}</th><th>Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
             <div class="journal-entry-shell journal-entry-foot">
               <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 100px 110px 130px 190px;column-gap:6px;align-items:end;justify-content:start;">
                 <label class="sheet-label posting-label-account" for="journalAcc" style="margin:0;white-space:nowrap;align-self:center;">Account Number</label>
@@ -3184,7 +3197,7 @@ function hideProcessing() {
                 <div class="journal-cell" style="width:100px;margin:0;"><div class="display-field" id="journalRowTellerId">—</div><div class="journal-cell-label">Teller ID</div></div>
                 <div class="journal-cell" style="width:110px;margin:0;"><div class="display-field" id="journalAccountStatus">—</div><div class="journal-cell-label">Account Status</div></div>
                 <div class="journal-cell" style="width:130px;margin:0;"><div class="display-field" id="journalAccountType">—</div><div class="journal-cell-label">Account Type</div></div>
-                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">Amount Paid</div></div>
+                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Amount Received' : 'Amount Paid'}</div></div>
               </div>
               <div class="journal-entry-top row-two">
                 <div class="journal-cell grow"><input id="journalDetails" class="entry-input"><div class="journal-cell-label">Details</div></div>
@@ -3202,13 +3215,12 @@ function hideProcessing() {
   }
 
   function renderJournalStandalone() {
+    // SURGICAL PATCH 2026-09-23 (client-confirmed design): the Credit/Debit
+    // choice is now made by which sidebar item was clicked ("Debit Entry" /
+    // "Credit Entry" under Journal Posting, mirroring Direct Posting) — no
+    // more in-page toggle to switch it after the fact.
     const kind = state.ui.journalStandaloneKind === 'debit' ? 'debit' : 'credit';
     return `<div class="tellering-stack">
-        <div class="tellering-sheet journal-toggle-sheet standalone-posting-sheet">
-          <div class="posting-row" style="padding:10px 14px">
-            <div class="tx-mode-toggle inline-mode-toggle journal-kind-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="debit" ${kind === 'debit' ? 'checked' : ''}> <span>Debit</span></label><label class="tx-toggle-pill"><input type="radio" name="journalStandaloneKind" value="credit" ${kind === 'credit' ? 'checked' : ''}> <span>Credit</span></label></div>
-          </div>
-        </div>
         ${renderJournalPaneMarkup(kind)}
       </div>`;
   }
@@ -4816,7 +4828,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'transaction_summary': bindTransactionSummary(); break;
       case 'credit': bindJournal('credit'); break;
       case 'debit': bindJournal('debit'); break;
-      case 'journal': bindJournalStandalone(); break;
+      case 'journal_debit': case 'journal_credit': bindJournalStandalone(); break;
       case 'journal_register': bindJournalRegister(); break;
       case 'central_close_day':
       case 'approval_queue':
@@ -6001,12 +6013,6 @@ function normalizeStaffLedgerEntryType(row) {
 
   function bindJournalStandalone() {
     const kind = state.ui.journalStandaloneKind === 'debit' ? 'debit' : 'credit';
-    qq('input[name="journalStandaloneKind"]').forEach(radio => radio.onchange = () => {
-      if (!radio.checked) return;
-      state.ui.journalStandaloneKind = radio.value === 'debit' ? 'debit' : 'credit';
-      save();
-      renderWorkspace();
-    });
     const startBtn = byId('genJournalStartBtn');
     if (startBtn) startBtn.onclick = () => {
       const staff = currentStaff();
