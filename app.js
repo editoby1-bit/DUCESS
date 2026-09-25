@@ -2831,9 +2831,17 @@ function hideProcessing() {
   // "Post" here IS what sends it — functionally identical to what
   // "Send for Approval" already did, just with this specific layout in
   // front of it first, matching the reference sheet exactly.
-  function openJournalPostModal(record) {
+  function openJournalPostModal(record, presetAccountNumber) {
     const st = (state.staff || []).find(s => s.id === record.staffId);
     const defaultAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === record.staffId);
+    // SURGICAL FIX 2026-09-24 (client-reported bug): the "Search" button
+    // here only did a silent exact-match lookup on whatever was already
+    // typed — unlike every other "Search" button in the app (Direct
+    // Posting, the journal row-add form), which opens a browsable customer
+    // picker. presetAccountNumber lets the picker "return" to this modal
+    // with the chosen account already filled in, since picking from a
+    // separate modal has to close this one first.
+    const initialAccount = presetAccountNumber ? (getCustomerByAccountNo(presetAccountNumber) || defaultAccount) : defaultAccount;
     const isCredit = record.kind === 'credit';
     const accountPanelTitle = isCredit ? 'Debit Account' : 'Credit Account';
     const journalPanelTitle = isCredit ? 'Credit Journal' : 'Debit Journal';
@@ -2853,16 +2861,16 @@ function hideProcessing() {
           <div class="cs2-row">
             <div class="cs2-label">Account Number</div>
             <div class="cs2-input-wrap" style="display:flex;gap:6px;align-items:center;">
-              <input id="jpmFundAcc" class="entry-input" style="width:110px;" maxlength="12" value="${escapeHtml(String(defaultAccount?.accountNumber || ''))}">
+              <input id="jpmFundAcc" class="entry-input" style="width:110px;" maxlength="12" value="${escapeHtml(String(initialAccount?.accountNumber || ''))}">
               <button id="jpmFundSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
             </div>
-            <div class="cs2-label" style="margin-left:10px">Teller ID</div><div class="display-field" id="jpmFundTellerId">${escapeHtml(String(defaultAccount?.accountNumber || '—'))}</div>
+            <div class="cs2-label" style="margin-left:10px">Teller ID</div><div class="display-field" id="jpmFundTellerId">${escapeHtml(String(initialAccount?.accountType === 'staff_operational' ? (initialAccount.accountNumber || '—') : '—'))}</div>
           </div>
-          ${row('Account Name', `<span id="jpmFundName">${escapeHtml(defaultAccount?.name || st?.name || '—')}</span>`)}
-          ${row('Account Balance', `<span id="jpmFundBalance">${money(balanceFor(defaultAccount))}</span>`)}
+          ${row('Account Name', `<span id="jpmFundName">${escapeHtml(initialAccount?.name || st?.name || '—')}</span>`)}
+          ${row('Account Balance', `<span id="jpmFundBalance">${money(balanceFor(initialAccount))}</span>`)}
           ${row('Description', escapeHtml(`Bng amount ${isCredit ? 'creditted to' : 'Debited from'} Journal NO ${record.journalNumber}`))}
-          ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', `<span id="jpmFundStatus">${defaultAccount ? ((isCustomerFrozen(defaultAccount) || defaultAccount.active === false) ? 'Frozen' : 'Active') : '—'}</span>`)}
-          ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', `<span id="jpmFundType">${defaultAccount ? accountTypeLabel(defaultAccount.accountType) : '—'}</span>`)}
+          ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', `<span id="jpmFundStatus">${initialAccount ? ((isCustomerFrozen(initialAccount) || initialAccount.active === false) ? 'Frozen' : 'Active') : '—'}</span>`)}
+          ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', `<span id="jpmFundType">${initialAccount ? accountTypeLabel(initialAccount.accountType) : '—'}</span>`)}
         </div>`;
     const journalPanelHtml = `
         <div class="journal-post-panel">
@@ -2888,7 +2896,7 @@ function hideProcessing() {
         label: 'Post',
         onClick: async () => {
           const typedAcc = String(byId('jpmFundAcc')?.value || '').trim();
-          const fundingAccount = typedAcc ? getCustomerByAccountNo(typedAcc) : defaultAccount;
+          const fundingAccount = typedAcc ? getCustomerByAccountNo(typedAcc) : initialAccount;
           if (!fundingAccount) return showToast('Enter a valid account number to fund this journal');
           if (isCustomerFrozen(fundingAccount) || fundingAccount.active === false) return showToast('That account is frozen');
           closeModal();
@@ -2912,11 +2920,10 @@ function hideProcessing() {
         }
       }
     ]);
-    // Live-refresh the funding-account display fields when the staff
-    // searches a different account to fund this journal from. Any account
-    // type can be chosen now — staff operational funds it via the staff
-    // ledger, anything else funds it as an ordinary customer transaction
-    // (see submitJournalRows/gateway), so no type restriction here.
+    // Live-refresh the funding-account display fields for a typed-and-
+    // Enter'd exact account number (matches the app-wide convention: Enter
+    // does a quick exact lookup, the Search BUTTON opens the full picker —
+    // see openJournalFundSearchModal below).
     const refreshFundDisplay = () => {
       const typedAcc = String(byId('jpmFundAcc')?.value || '').trim();
       const found = typedAcc ? getCustomerByAccountNo(typedAcc) : null;
@@ -2927,8 +2934,41 @@ function hideProcessing() {
       if (byId('jpmFundType')) byId('jpmFundType').textContent = found ? accountTypeLabel(found.accountType) : '—';
       if (!found) showToast('Account not found');
     };
-    if (byId('jpmFundSearchBtn')) byId('jpmFundSearchBtn').onclick = refreshFundDisplay;
+    if (byId('jpmFundSearchBtn')) byId('jpmFundSearchBtn').onclick = () => {
+      const currentTyped = String(byId('jpmFundAcc')?.value || '').trim();
+      openJournalFundSearchModal(state.customers, record, currentTyped);
+    };
     if (byId('jpmFundAcc')) byId('jpmFundAcc').onkeyup = (e) => { if (e.key === 'Enter') refreshFundDisplay(); };
+  }
+
+  // SURGICAL ADDITION 2026-09-24 (client-reported bug fix): a browsable
+  // customer picker for the Journal Posting funding-account field, matching
+  // every other "Search" button in the app (openCustomerSearchModal,
+  // openJournalCustomerSearchModal) instead of the silent exact-match-only
+  // lookup it had before. Picking a customer here has to close this modal
+  // and re-open the posting modal with that account preset, since only one
+  // modal can be shown at a time.
+  function openJournalFundSearchModal(list, record, currentTyped) {
+    const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-fund-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick-fund="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick-fund="${c.id}">Select</button></td></tr>`).join('');
+    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalFundCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalFundCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [
+      { label: 'Cancel', className: 'secondary', onClick: () => openJournalPostModal(record, currentTyped) }
+    ]);
+    const pickFundCustomer = (id) => {
+      const c = state.customers.find(x => x.id === id);
+      if (!c) return showToast('Customer not found');
+      openJournalPostModal(record, c.accountNumber);
+    };
+    const bindPicks = () => {
+      qq('[data-pick-fund]').forEach(el => el.onclick = (event) => { event.stopPropagation(); pickFundCustomer(el.dataset.pickFund); });
+      qq('[data-pick-fund-row]').forEach(row => row.onclick = () => pickFundCustomer(row.dataset.pickFundRow));
+    };
+    bindPicks();
+    const search = byId('modalFundCustomerSearch');
+    if (search) search.oninput = () => {
+      const qv = search.value.trim().toLowerCase();
+      const filtered = !qv ? list : list.filter(c => String(c.accountNumber).includes(qv) || String(c.name || '').toLowerCase().includes(qv));
+      byId('modalFundCustomerRows').innerHTML = renderRows(filtered); bindPicks();
+    };
   }
 
   // SURGICAL ADDITION 2026-09-14 (client-confirmed design): every Journal is
