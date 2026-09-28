@@ -608,6 +608,15 @@
     return true;
   }
   function staffById(id){ return state.staff.find(s=>s.id===id) || null; }
+  // SURGICAL ADDITION 2026-09-28 (client correction): "Teller ID" is the
+  // staff's FIRST NAME, not their T#### operational account number.
+  function staffFirstName(st){ return String(st?.name || '').trim().split(/\s+/)[0] || '—'; }
+  function tellerIdForAccount(c){ return c?.accountType === 'staff_operational' ? staffFirstName(staffById(c.linkedStaffId)) : '—'; }
+  // SURGICAL ADDITION 2026-09-28 (client correction): Account Status is a
+  // small colour-coded box, not a full-size display field.
+  function accountStatusOf(c){ return c ? ((isCustomerFrozen(c) || c.active === false) ? 'Frozen' : 'Active') : '—'; }
+  function accountStatusChip(c, id){ const v = accountStatusOf(c); return `<span class="acct-status-chip ${v === 'Frozen' ? 'is-frozen' : (v === 'Active' ? 'is-active' : '')}"${id ? ` id="${id}"` : ''}>${v}</span>`; }
+  function setAccountStatusChip(el, c){ if (!el) return; const v = accountStatusOf(c); el.textContent = v; el.classList.add('acct-status-chip'); el.classList.toggle('is-active', v === 'Active'); el.classList.toggle('is-frozen', v === 'Frozen'); }
   function customerName(id){ return state.customers.find(c=>c.id===id)?.name || ''; }
   function getStaffWalletCustomer(staffId){ const acc=ensureStaffAccount(staffId); return state.customers.find(c=>c.id===acc.linkedCustomerId) || null; }
   function ensureStaffWalletCustomer(staffId, sourceState=state){
@@ -2864,12 +2873,12 @@ function hideProcessing() {
               <input id="jpmFundAcc" class="entry-input" style="width:110px;" maxlength="12" value="${escapeHtml(String(initialAccount?.accountNumber || ''))}">
               <button id="jpmFundSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
             </div>
-            <div class="cs2-label" style="margin-left:10px">Teller ID</div><div class="display-field" id="jpmFundTellerId">${escapeHtml(String(initialAccount?.accountType === 'staff_operational' ? (initialAccount.accountNumber || '—') : '—'))}</div>
+            <div class="cs2-label" style="margin-left:10px">Teller ID</div><div class="display-field" id="jpmFundTellerId">${escapeHtml(tellerIdForAccount(initialAccount))}</div>
           </div>
           ${row('Account Name', `<span id="jpmFundName">${escapeHtml(initialAccount?.name || st?.name || '—')}</span>`)}
           ${row('Account Balance', `<span id="jpmFundBalance">${money(balanceFor(initialAccount))}</span>`)}
           ${row('Description', escapeHtml(`Bng amount ${isCredit ? 'creditted to' : 'Debited from'} Journal NO ${record.journalNumber}`))}
-          ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', `<span id="jpmFundStatus">${initialAccount ? ((isCustomerFrozen(initialAccount) || initialAccount.active === false) ? 'Frozen' : 'Active') : '—'}</span>`)}
+          ${row('Paid By', escapeHtml(record.counterparty || '—'), 'Account Status', accountStatusChip(initialAccount, 'jpmFundStatus'))}
           ${row(`Amount ${isCredit ? 'Received' : 'Paid'}`, money(record.formAmount || 0), 'Account Type', `<span id="jpmFundType">${initialAccount ? accountTypeLabel(initialAccount.accountType) : '—'}</span>`)}
         </div>`;
     const journalPanelHtml = `
@@ -2928,8 +2937,8 @@ function hideProcessing() {
       const typedAcc = String(byId('jpmFundAcc')?.value || '').trim();
       const found = typedAcc ? getCustomerByAccountNo(typedAcc) : null;
       if (byId('jpmFundName')) byId('jpmFundName').textContent = found?.name || '—';
-      if (byId('jpmFundTellerId')) byId('jpmFundTellerId').textContent = found?.accountType === 'staff_operational' ? (found.accountNumber || '—') : '—';
-      if (byId('jpmFundStatus')) byId('jpmFundStatus').textContent = found ? ((isCustomerFrozen(found) || found.active === false) ? 'Frozen' : 'Active') : '—';
+      if (byId('jpmFundTellerId')) byId('jpmFundTellerId').textContent = tellerIdForAccount(found);
+      setAccountStatusChip(byId('jpmFundStatus'), found);
       if (byId('jpmFundBalance')) byId('jpmFundBalance').textContent = money(balanceFor(found));
       if (byId('jpmFundType')) byId('jpmFundType').textContent = found ? accountTypeLabel(found.accountType) : '—';
       if (!found) showToast('Account not found');
@@ -3118,7 +3127,7 @@ function hideProcessing() {
                 <input id="txAcc" class="entry-input sheet-input short-code" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
                 <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
                 <span class="sheet-label" style="margin-left:10px">Teller ID</span>
-                <div class="display-field" id="txTellerId">${escapeHtml(String((state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id)?.accountNumber || '—'))}</div>
+                <div class="display-field" id="txTellerId">${escapeHtml(staffFirstName(st))}</div>
               </div>
               <div class="posting-business-date-corner"><span class="sheet-label">Business Date</span> <strong>${fmtDate(businessDate())}</strong></div>
             </div>
@@ -3147,7 +3156,7 @@ function hideProcessing() {
               <label class="sheet-label posting-label-name" for="txCounterparty">${kind === 'credit' ? 'Received By' : 'Paid By'}</label>
               <input id="txCounterparty" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}">
               <label class="sheet-label posting-label-name" style="margin-left:14px">Account Status</label>
-              <div class="display-field" id="txAccountStatus">—</div>
+              <span class="acct-status-chip" id="txAccountStatus">—</span>
             </div>
 
             <div class="posting-row posting-row-amount">
@@ -3235,7 +3244,7 @@ function hideProcessing() {
                 <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
                 <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
                 <div class="journal-cell" style="width:100px;margin:0;"><div class="display-field" id="journalRowTellerId">—</div><div class="journal-cell-label">Teller ID</div></div>
-                <div class="journal-cell" style="width:110px;margin:0;"><div class="display-field" id="journalAccountStatus">—</div><div class="journal-cell-label">Account Status</div></div>
+                <div class="journal-cell" style="width:110px;margin:0;"><span class="acct-status-chip" id="journalAccountStatus">—</span><div class="journal-cell-label">Account Status</div></div>
                 <div class="journal-cell" style="width:130px;margin:0;"><div class="display-field" id="journalAccountType">—</div><div class="journal-cell-label">Account Type</div></div>
                 <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Amount Received' : 'Amount Paid'}</div></div>
               </div>
@@ -5402,58 +5411,78 @@ function normalizeStaffLedgerEntryType(row) {
     const destAccount = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
     const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational');
     const st = currentStaff();
-    const myTellerId = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id)?.accountNumber || '—';
-    const statusOf = (c) => c ? ((isCustomerFrozen(c) || c.active === false) ? 'Frozen' : 'Active') : '—';
+    const myTellerId = staffFirstName(st);
     const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')))) : '—';
+    const amountVal = escapeHtml(String(draft.amount || ''));
+    // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
+    // the client's sheet — "Non Cash Posting / Debit To Credit Entry" sits
+    // at the SIDE, and the two top-level headings of the form are Debit and
+    // Credit. Element ids are unchanged, so bindIntraTransfer and the
+    // customer picker keep working as before.
     return `
-      <div class="form-card cs2-card opening-card spec-color-scheme">
-        <div class="cs2-title">Debit To Credit Entry</div>
-        <div class="cs2-stack">
-          <div class="cs2-row">
-            <div class="cs2-label">Debit — Account Number</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="itrSourceAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
-            <button id="itrLookupSource" class="sheet-btn secondary tiny-btn" ${sourceLocked ? 'disabled' : ''}>Search</button>
-            <span class="sheet-label" style="margin-left:10px">Teller ID</span>
-            <div class="display-field" id="itrTellerId">${escapeHtml(myTellerId)}</div>
-          </div>
-          <div id="itrSourceLockNote" class="note" style="${sourceLocked ? '' : 'display:none'}">Crediting a staff account always debits <strong>your own</strong> operational account — locked so you stay the accountable issuer. To fund it with someone else's money, first move that money into your own account with a separate Non Cash entry, then fund the staff account from there.</div>
-          <div id="itrSourceName" class="cs2-note-box" style="min-height:24px">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div>
-          <div id="itrSourceBalance" class="cs2-note-box" style="min-height:24px">${draft.sourceId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.sourceBalance || 0)}` : ''}</div>
-          <div class="cs2-row">
-            <div class="cs2-label">Description</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrDetails" class="entry-input cs2-input" value="${escapeHtml(String(draft.details || ''))}"></div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Paid By</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrPaidBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.paidBy || ''))}"></div>
-            <div class="cs2-label" style="margin-left:14px">Account Status</div>
-            <div class="display-field" id="itrSourceStatus">${statusOf(sourceAccount)}</div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Amount</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="itrAmount" class="entry-input cs2-input" type="text" inputmode="decimal" value="${escapeHtml(String(draft.amount || ''))}"></div>
-            <div class="cs2-label" style="margin-left:14px">Account Type</div>
-            <div class="display-field" id="itrSourceType">${typeOf(sourceAccount)}</div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Credit — Account Number</div>
-            <div class="cs2-input-wrap cs2-medium"><input id="itrDestAcct" class="entry-input cs2-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" autocomplete="off"></div>
-            <button id="itrLookupDest" class="sheet-btn secondary tiny-btn">Search</button>
-          </div>
-          <div id="itrDestName" class="cs2-note-box" style="min-height:24px">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div>
-          <div id="itrDestBalance" class="cs2-note-box" style="min-height:24px">${draft.destId ? `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft.destBalance || 0)}` : ''}</div>
-          <div class="cs2-row">
-            <div class="cs2-label">Received By</div>
-            <div class="cs2-input-wrap cs2-wide"><input id="itrReceivedBy" class="entry-input cs2-input" value="${escapeHtml(String(draft.receivedBy || ''))}"></div>
-            <div class="cs2-label" style="margin-left:14px">Account Status</div>
-            <div class="display-field" id="itrDestStatus">${statusOf(destAccount)}</div>
-          </div>
-          <div class="cs2-row">
-            <div class="cs2-label">Account Type</div>
-            <div class="display-field" id="itrDestType">${typeOf(destAccount)}</div>
-          </div>
-          <div class="cs2-button-row">
-            <button id="submitIntraTransfer" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
+      <div class="nc-sheet spec-color-scheme">
+        <div class="nc-side">
+          <div class="nc-side-title">Non Cash Posting</div>
+          <div class="nc-side-sub">Debit To Credit Entry</div>
+        </div>
+        <div class="nc-form">
+          <div class="nc-grid">
+            <div class="nc-head">Debit</div>
+            <div class="nc-label">Account Number</div>
+            <div class="nc-cell"><input id="itrSourceAcct" class="entry-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
+            <div class="nc-cell"><button id="itrLookupSource" class="nc-mini-btn" ${sourceLocked ? 'disabled' : ''}>Search</button></div>
+            <div class="nc-cell nc-tag">Teller ID</div>
+            <div class="nc-cell"><div class="display-field" id="itrTellerId">${escapeHtml(myTellerId)}</div></div>
+
+            <div id="itrSourceLockNote" class="note nc-span-all" style="${sourceLocked ? '' : 'display:none'}">Crediting a staff account always debits <strong>your own</strong> operational account — locked so you stay the accountable issuer. To fund it with someone else's money, first move that money into your own account with a separate Non Cash entry, then fund the staff account from there.</div>
+
+            <div class="nc-label">Account Name</div>
+            <div class="nc-cell nc-span-4"><div id="itrSourceName" class="display-field">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div></div>
+
+            <div class="nc-label">Account Balance</div>
+            <div class="nc-cell nc-span-2"><div id="itrSourceBalance" class="display-field">${draft.sourceId ? balanceHtml(draft.sourceBalance || 0) : ''}</div></div>
+            <div class="nc-cell nc-span-2"></div>
+
+            <div class="nc-label">Description</div>
+            <div class="nc-cell nc-span-4"><input id="itrDetails" class="entry-input" value="${escapeHtml(String(draft.details || ''))}"></div>
+
+            <div class="nc-label nc-label-grey">Paid By</div>
+            <div class="nc-cell"><input id="itrPaidBy" class="entry-input" value="${escapeHtml(String(draft.paidBy || ''))}"></div>
+            <div class="nc-cell nc-tag">Account Status</div>
+            <div class="nc-cell nc-span-2">${accountStatusChip(sourceAccount, 'itrSourceStatus')}</div>
+
+            <div class="nc-label nc-label-grey">Amount Paid</div>
+            <div class="nc-cell"><input id="itrAmount" class="entry-input" type="text" inputmode="decimal" value="${amountVal}"></div>
+            <div class="nc-cell nc-tag">Account Type</div>
+            <div class="nc-cell nc-span-2"><div class="display-field" id="itrSourceType">${typeOf(sourceAccount)}</div></div>
+
+            <div class="nc-head">Credit</div>
+            <div class="nc-label">Account Number</div>
+            <div class="nc-cell"><input id="itrDestAcct" class="entry-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" autocomplete="off"></div>
+            <div class="nc-cell"><button id="itrLookupDest" class="nc-mini-btn">Search</button></div>
+            <div class="nc-cell nc-tag">Teller ID</div>
+            <div class="nc-cell"><div class="display-field" id="itrDestTellerId">${escapeHtml(myTellerId)}</div></div>
+
+            <div class="nc-label">Account Name</div>
+            <div class="nc-cell nc-span-4"><div id="itrDestName" class="display-field">${draft.destName ? `<strong>${escapeHtml(draft.destName)}</strong>` : ''}</div></div>
+
+            <div class="nc-label">Account Balance</div>
+            <div class="nc-cell nc-span-2"><div id="itrDestBalance" class="display-field">${draft.destId ? balanceHtml(draft.destBalance || 0) : ''}</div></div>
+            <div class="nc-cell nc-span-2"></div>
+
+            <div class="nc-label">Description</div>
+            <div class="nc-cell nc-span-4"><input id="itrDestDetails" class="entry-input" value="${escapeHtml(String(draft.destDetails || ''))}"></div>
+
+            <div class="nc-label nc-label-grey">Received By</div>
+            <div class="nc-cell"><input id="itrReceivedBy" class="entry-input" value="${escapeHtml(String(draft.receivedBy || ''))}"></div>
+            <div class="nc-cell nc-tag">Account Status</div>
+            <div class="nc-cell">${accountStatusChip(destAccount, 'itrDestStatus')}</div>
+            <div class="nc-cell nc-post-cell"><button id="submitIntraTransfer" class="nc-post-btn">Post</button></div>
+
+            <div class="nc-label nc-label-grey">Amount Received</div>
+            <div class="nc-cell"><div class="display-field" id="itrAmountReceived">${amountVal}</div></div>
+            <div class="nc-cell nc-tag">Account Type</div>
+            <div class="nc-cell"><div class="display-field" id="itrDestType">${typeOf(destAccount)}</div></div>
           </div>
         </div>
       </div>`;
@@ -5489,13 +5518,13 @@ function normalizeStaffLedgerEntryType(row) {
           return;
         }
         if (byId(nameElId)) byId(nameElId).innerHTML = `<strong>${escapeHtml(draft[nameKey])}</strong>`;
-        if (byId(balanceElId)) byId(balanceElId).innerHTML = `<span class="journal-cell-label">Account Balance: </span>${balanceHtml(draft[balanceKey])}`;
-        if (byId(statusElId)) byId(statusElId).textContent = (isCustomerFrozen(match) || match.active === false) ? 'Frozen' : 'Active';
+        if (byId(balanceElId)) byId(balanceElId).innerHTML = balanceHtml(draft[balanceKey]);
+        setAccountStatusChip(byId(statusElId), match);
         if (byId(typeElId)) byId(typeElId).textContent = typeLabel(match);
       } else {
         if (byId(nameElId)) byId(nameElId).innerHTML = `<span style="color:var(--accent-red)">Account not found</span>`;
         if (byId(balanceElId)) byId(balanceElId).innerHTML = '';
-        if (byId(statusElId)) byId(statusElId).textContent = '—';
+        setAccountStatusChip(byId(statusElId), null);
         if (byId(typeElId)) byId(typeElId).textContent = '—';
       }
     };
@@ -5533,8 +5562,12 @@ function normalizeStaffLedgerEntryType(row) {
       const v = destInput.value.trim();
       if (v) lookupAcct(v, 'itrDestName', 'destId', 'destName', 'itrDestBalance', 'destBalance', true);
     };
-    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.oninput = () => { draft.amount = amtInput.value; }; }
+    // Amount Received on the Credit side is always the same figure as
+    // Amount Paid on the Debit side (one transfer), so it just mirrors it.
+    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.addEventListener('input', () => { draft.amount = amtInput.value; if (byId('itrAmountReceived')) byId('itrAmountReceived').textContent = amtInput.value; }); }
     if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
+    const destDetailsInput = byId('itrDestDetails');
+    if (destDetailsInput) destDetailsInput.oninput = () => { draft.destDetails = destDetailsInput.value; };
 
     // SURGICAL FIX 2026-08-28 (client correction): Search used to just
     // re-run the account-NUMBER lookup on whatever was already typed — no
@@ -5566,6 +5599,7 @@ function normalizeStaffLedgerEntryType(row) {
       const details = (byId('itrDetails')?.value || '').trim();
       const paidBy = (byId('itrPaidBy')?.value || '').trim();
       const receivedBy = (byId('itrReceivedBy')?.value || '').trim();
+      const destDetails = (byId('itrDestDetails')?.value || '').trim();
       confirmAction(`Debit To Credit Entry: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
         showProcessing('Submitting Debit To Credit Entry...'); await nextPaint();
         try {
@@ -5589,13 +5623,13 @@ function normalizeStaffLedgerEntryType(row) {
                 amount, paymentMode: 'transfer', date: businessDate(), note: details,
                 fundingSource: 'treasury_balance',
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
-                collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy
+                collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy, destDetails
               })
             : await submitApprovalThroughGateway('intra_bank_transfer', {
                 staffId: st.id, staffName: st.name, date: businessDate(),
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
                 destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
-                amount, details, paidBy, receivedBy
+                amount, details, destDetails, paidBy, receivedBy
               });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
           if (isStaffFunding) {
@@ -6077,12 +6111,11 @@ function normalizeStaffLedgerEntryType(row) {
   function updateTxAccountMeta(customer) {
     const statusEl = byId('txAccountStatus');
     const typeEl = byId('txAccountType');
+    setAccountStatusChip(statusEl, customer);
     if (!customer) {
-      if (statusEl) statusEl.textContent = '—';
       if (typeEl) typeEl.textContent = '—';
       return;
     }
-    if (statusEl) statusEl.textContent = (isCustomerFrozen(customer) || customer.active === false) ? 'Frozen' : 'Active';
     if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
   }
 
@@ -6090,20 +6123,19 @@ function normalizeStaffLedgerEntryType(row) {
     const statusEl = byId('journalAccountStatus');
     const typeEl = byId('journalAccountType');
     const tellerIdEl = byId('journalRowTellerId');
+    setAccountStatusChip(statusEl, customer);
     if (!customer) {
-      if (statusEl) statusEl.textContent = '—';
       if (typeEl) typeEl.textContent = '—';
       if (tellerIdEl) tellerIdEl.textContent = '—';
       return;
     }
-    if (statusEl) statusEl.textContent = (isCustomerFrozen(customer) || customer.active === false) ? 'Frozen' : 'Active';
     if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
     // SURGICAL ADDITION 2026-09-22 (client-confirmed design): the account
     // being debited/credited for this journal row is looked up here — if
-    // that account is itself a staff operational account, its own T####
-    // number IS its Teller ID, so show it; otherwise there's no Teller ID
-    // to show for an ordinary customer/expense/income account.
-    if (tellerIdEl) tellerIdEl.textContent = customer.accountType === 'staff_operational' ? (customer.accountNumber || customer.account_number || '—') : '—';
+    // that account is itself a staff operational account, its owner's
+    // first name IS its Teller ID (2026-09-28), so show it; otherwise
+    // there's no Teller ID for an ordinary customer/expense/income account.
+    if (tellerIdEl) tellerIdEl.textContent = tellerIdForAccount(customer);
   }
 
   function bindJournal(kind) {
@@ -6264,7 +6296,11 @@ function normalizeStaffLedgerEntryType(row) {
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
       const totalPosted = journal.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       if (byId('journalTotalPosted')) byId('journalTotalPosted').textContent = money(totalPosted);
-      const openingCashLive = getStaffOperationalBalance(staff.id);
+      // SURGICAL FIX 2026-09-28 (client: Opening Cash + Cash Received -
+      // Cash Withdrawal = Till): Opening Cash must be the start-of-day
+      // balance, exactly as in the initial render — the full balance
+      // already includes today's postings, so they were counted twice.
+      const openingCashLive = getStaffOperationalBalance(staff.id, businessDate());
       const cashReceivedLive = approvedCreditTotalForDateByMode(staff.id, businessDate(), 'cash');
       const cashWithdrawalLive = approvedDebitTotalForDateByMode(staff.id, businessDate(), 'cash');
       const tillLive = openingCashLive + cashReceivedLive - cashWithdrawalLive;
@@ -8260,19 +8296,16 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           renderWorkspace();
           return;
         }
-        if (byId('itrDestAcct')) byId('itrDestAcct').value = c.accountNumber || '';
-        if (byId('itrDestName')) byId('itrDestName').innerHTML = `<strong>${escapeHtml(c.name || '')}</strong>`;
-        if (byId('itrDestBalance')) byId('itrDestBalance').innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.destBalance)}`;
       } else {
         draft.sourceAcct = c.accountNumber || '';
         draft.sourceName = c.name || '';
         draft.sourceId = c.id;
         draft.sourceBalance = Number(c.balance || 0);
-        if (byId('itrSourceAcct')) byId('itrSourceAcct').value = c.accountNumber || '';
-        if (byId('itrSourceName')) byId('itrSourceName').innerHTML = `<strong>${escapeHtml(c.name || '')}</strong>`;
-        if (byId('itrSourceBalance')) byId('itrSourceBalance').innerHTML = `<span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance)}`;
       }
+      // Full re-render so Name, Balance, Account Status and Account Type
+      // all refresh together from the draft.
       save();
+      renderWorkspace();
       return;
     }
     if (state.ui.tool === 'staff_credit' && state.ui.nonCashSearchTarget === 'staffCreditSource') {
