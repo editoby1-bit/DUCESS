@@ -1278,7 +1278,6 @@
     }, 120);
     const refreshCustomers = debounceAsync(async () => { await syncCustomersListFromGateway(); scheduleRender(); }, 160);
     const refreshStaff = debounceAsync(async () => { await syncStaffFromGateway(); scheduleRender(); }, 160);
-    const refreshAll = debounceAsync(async () => { await refreshRealtimeState('realtime-event'); }, 220);
     realtimeUnsub = gateway.__realtime.subscribe({
       approval: refreshApprovals,
       cod: refreshCod,
@@ -1286,12 +1285,26 @@
       balance: refreshBalances,
       customer: refreshCustomers,
       staff: refreshStaff,
-      onEvent: refreshAll,
+      // SURGICAL FIX 2026-09-29 (Supabase egress): every change used to ALSO
+      // run a full six-query refresh on every open screen, on top of the
+      // targeted handler above for that table — double the reads per event.
+      // Each table kind already has its own targeted refresh, so an event
+      // now only marks live data as fresh (keeps the fallback poll quiet).
+      onEvent: () => { state.__lastRealtimeRefresh = { reason: 'realtime-event', at: new Date().toISOString() }; },
       onStatus: (status) => { state.__realtimeStatus = status; save(); }
     });
-    window.addEventListener('focus', () => refreshRealtimeState('window-focus').catch(err => console.warn('[DUCESS realtime sync failed]', err)));
+    // SURGICAL FIX 2026-09-29 (Supabase egress): returning to the tab fires
+    // BOTH 'focus' and 'visibilitychange', which ran two full refreshes back
+    // to back. One shared handler now, skipped if data was refreshed in the
+    // last 20s.
+    const refreshOnReturn = (reason) => {
+      const lastAt = state.__lastRealtimeRefresh?.at ? new Date(state.__lastRealtimeRefresh.at).getTime() : 0;
+      if (Date.now() - lastAt < 20000) return;
+      refreshRealtimeState(reason).catch(err => console.warn('[DUCESS realtime sync failed]', err));
+    };
+    window.addEventListener('focus', () => refreshOnReturn('window-focus'));
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) refreshRealtimeState('visibility-return').catch(err => console.warn('[DUCESS realtime sync failed]', err));
+      if (!document.hidden) refreshOnReturn('visibility-return');
     });
     // SURGICAL FIX 2026-08-22 (Supabase egress overage — org hit 141% of
     // free-tier quota, grace period ends Sep 20 2026): this was labeled a
@@ -1322,7 +1335,12 @@
     // already update state.__lastRealtimeRefresh), regardless of what the
     // channel status claims. This makes the poll self-healing: cheap when
     // realtime genuinely works, but never silently stuck if it doesn't.
-    const STALE_DATA_MS = 90000;
+    // SURGICAL FIX 2026-09-29 (Supabase egress): 90s meant a quiet office
+    // with a healthy realtime connection still did a full refresh roughly
+    // every 90s per open tab. 5 minutes keeps the self-healing safety net
+    // while cutting idle reads ~70%. When realtime is NOT connected, the
+    // 45s fallback below still applies as before.
+    const STALE_DATA_MS = 300000;
     if (!realtimePollingTimer) {
       realtimePollingTimer = setInterval(() => {
         const lastAt = state.__lastRealtimeRefresh?.at ? new Date(state.__lastRealtimeRefresh.at).getTime() : 0;

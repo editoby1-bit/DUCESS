@@ -2194,14 +2194,33 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!canUseSupabase()) return defaultResult.err('SUPABASE_UNAVAILABLE', 'Supabase client is not available.');
       const ids = Array.isArray(customerIds) ? customerIds.filter(Boolean) : [];
       if (!ids.length) return defaultResult.ok([]);
-      const { data, error: queryError } = await client
-        .from(customerTransactionsTable)
-        .select(customerTransactionsSelect)
-        .in('customer_id', ids)
-        .order('effective_at', { ascending: true, nullsFirst: false })
-        .order('created_at', { ascending: true });
-      if (queryError) return defaultResult.err('CUSTOMER_TX_FETCH_FAILED', 'Could not fetch customer transactions from Supabase.', queryError);
-      return defaultResult.ok(Array.isArray(data) ? data : []);
+      // SURGICAL FIX 2026-09-29: Supabase returns at most 1000 rows per
+      // request, and customer balances are summed from these rows — past
+      // 1000 transactions the newest were silently dropped (wrong
+      // balances). Now pages through with .range(), and batches customer
+      // ids so the request URL can't outgrow server limits. Each customer
+      // lives in exactly one batch, so per-customer order is preserved.
+      const PAGE = 1000;
+      const ID_BATCH = 150;
+      const all = [];
+      for (let i = 0; i < ids.length; i += ID_BATCH) {
+        const batch = ids.slice(i, i + ID_BATCH);
+        for (let from = 0; ; from += PAGE) {
+          const { data, error: queryError } = await client
+            .from(customerTransactionsTable)
+            .select(customerTransactionsSelect)
+            .in('customer_id', batch)
+            .order('effective_at', { ascending: true, nullsFirst: false })
+            .order('created_at', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, from + PAGE - 1);
+          if (queryError) return defaultResult.err('CUSTOMER_TX_FETCH_FAILED', 'Could not fetch customer transactions from Supabase.', queryError);
+          const rows = Array.isArray(data) ? data : [];
+          all.push(...rows);
+          if (rows.length < PAGE) break;
+        }
+      }
+      return defaultResult.ok(all);
     }
 
     async function fetchTransactionsByAccountId(accountId) {
