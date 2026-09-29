@@ -3060,6 +3060,12 @@ function hideProcessing() {
       state.ui.staffJournalAttachments[visibilityKey] = { fieldNote: record.fieldNote || null, loading: false };
       state.ui.generatedJournals[visibilityKey] = record.rows.length > 0;
       state.ui.resumingJournalId = record.id;
+      state.ui.telleringDrafts ||= {};
+      const resumeDraft = state.ui.telleringDrafts[visibilityKey] ||= { singleCharges: { apply: false, checked: {}, values: {} }, journalCharges: { apply: false, checked: {}, values: {} } };
+      resumeDraft.journalFormAmount = record.formAmount ? String(record.formAmount) : '';
+      resumeDraft.journalFormMode = record.formPaymentMode || 'cash';
+      resumeDraft.journalDescription = record.description || '';
+      state.ui.journalCounterpartyDraft = record.counterparty || '';
       save();
       renderWorkspace();
     });
@@ -3116,68 +3122,55 @@ function hideProcessing() {
     telleringDraft.journalCharges ||= { apply: false, checked: {}, values: {} };
     telleringDraft.journalCharges.checked ||= {};
     telleringDraft.journalCharges.values ||= {};
+    const isCreditKind = kind === 'credit';
+    // SURGICAL FIX 2026-09-29 (client-confirmed paper design): Direct
+    // Posting laid out as the client's sheet — same grid as Non Cash, with
+    // the till breakdown (values over labels) and the red Post button at
+    // the foot. Element ids are unchanged, so bindJournal keeps working.
     return `
       <div class="tellering-stack spec-color-scheme">
-        <div class="tellering-sheet journal-sheet standalone-posting-sheet">
-          <div class="cs2-title">${title} Entry</div>
-          <div class="posting-modal-rows polished-posting-modal">
-            <div class="posting-row posting-row-acc-kpi" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-              <div class="posting-acc-search-inline">
-                <label class="sheet-label posting-label-account" for="txAcc">Account Number</label>
-                <input id="txAcc" class="entry-input sheet-input short-code" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" />
-                <button id="txSearch" class="sheet-btn tiny-btn ultra-compact-btn">Search</button>
-                <span class="sheet-label" style="margin-left:10px">Teller ID</span>
-                <div class="display-field" id="txTellerId">${escapeHtml(staffFirstName(st))}</div>
-              </div>
-              <div class="posting-business-date-corner"><span class="sheet-label">Business Date</span> <strong>${fmtDate(businessDate())}</strong></div>
-            </div>
+        <div class="nc-sheet dp-sheet">
+          <div class="nc-form">
+            <div class="nc-grid">
+              <div class="nc-head">${title} Entry <span class="nc-head-date">Business Date: ${fmtDate(businessDate())}</span></div>
+              <div class="nc-label">Account Number</div>
+              <div class="nc-cell"><input id="txAcc" class="entry-input" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" autocomplete="off"></div>
+              <div class="nc-cell"><button id="txSearch" class="nc-mini-btn">Search</button></div>
+              <div class="nc-cell nc-tag">Teller ID</div>
+              <div class="nc-cell"><div class="display-field" id="txTellerId">${escapeHtml(staffFirstName(st))}</div></div>
 
-            <div class="posting-row posting-row-name">
-              <label class="sheet-label posting-label-name" for="txName">Account Name</label>
-              <div class="display-field value-wide" id="txName">—</div>
-            </div>
+              <div class="nc-label">Account Name</div>
+              <div class="nc-cell nc-span-4"><div class="display-field" id="txName">—</div></div>
 
-            <div class="posting-row posting-row-balance">
-              <label class="sheet-label posting-label-name" for="txBalance">Account Balance</label>
-              <div class="display-field" id="txBalance">—</div>
-            </div>
+              <div class="nc-label">Account Balance</div>
+              <div class="nc-cell nc-span-2"><div class="display-field" id="txBalance">—</div></div>
+              <div class="nc-cell nc-tag">Payment Method</div>
+              <div class="nc-cell nc-mode-cell"><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div></div>
 
-            <div class="posting-row posting-row-mode">
-              <label class="sheet-label posting-label-name">Payment Method</label>
-              <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
-            </div>
+              <div class="nc-label">Description</div>
+              <div class="nc-cell nc-span-4"><input id="txDetails" class="entry-input" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}"></div>
 
-            <div class="posting-row posting-row-details">
-              <label class="sheet-label posting-label-name" for="txDetails">Description</label>
-              <input id="txDetails" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}">
-            </div>
+              <div class="nc-label nc-label-grey">${isCreditKind ? 'Received By' : 'Paid By'}</div>
+              <div class="nc-cell"><input id="txCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}"></div>
+              <div class="nc-cell nc-tag">Account Status</div>
+              <div class="nc-cell nc-status-cell nc-span-2"><span class="acct-status-chip" id="txAccountStatus">—</span></div>
 
-            <div class="posting-row posting-row-counterparty">
-              <label class="sheet-label posting-label-name" for="txCounterparty">${kind === 'credit' ? 'Received By' : 'Paid By'}</label>
-              <input id="txCounterparty" class="entry-input sheet-input posting-input-half" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}">
-              <label class="sheet-label posting-label-name" style="margin-left:14px">Account Status</label>
-              <span class="acct-status-chip" id="txAccountStatus">—</span>
-            </div>
+              <div class="nc-label nc-label-grey">${isCreditKind ? 'Amount Received' : 'Amount Paid'}</div>
+              <div class="nc-cell"><input id="txAmount" class="entry-input" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}"></div>
+              <div class="nc-cell nc-tag">Account Type</div>
+              <div class="nc-cell nc-span-2"><div class="display-field" id="txAccountType">—</div></div>
 
-            <div class="posting-row posting-row-amount">
-              <label class="sheet-label posting-label-name" for="txAmount">Amount ${kind === 'credit' ? 'Received' : 'Paid'}</label>
-              <input id="txAmount" class="entry-input sheet-input medium-amt" type="number" value="${escapeHtml(String(state.ui.txAmountDraft || ''))}" />
-              <label class="sheet-label posting-label-name" style="margin-left:14px">Account Type</label>
-              <div class="display-field" id="txAccountType">—</div>
+              <div class="nc-cell nc-till-val"><span id="postingOpeningCash">${money(tillBreakdown.openingCash)}</span></div>
+              <div class="nc-cell nc-till-val"><span id="postingCashReceived">${money(tillBreakdown.cashReceived)}</span></div>
+              <div class="nc-cell nc-till-val"><span id="postingCashWithdrawal">${money(tillBreakdown.cashWithdrawal)}</span></div>
+              <div class="nc-cell nc-till-val"><span class="${tillBreakdown.till < 0 ? 'balance-negative' : ''}" id="postingTill">${money(tillBreakdown.till)}</span></div>
+              <div class="nc-cell nc-post-cell"><button id="txPostSingle" class="nc-post-btn">Post</button></div>
+              <div class="nc-till-label">Opening Cash</div>
+              <div class="nc-till-label">Cash Received</div>
+              <div class="nc-till-label">Cash Withdrawal</div>
+              <div class="nc-till-label">Till</div>
             </div>
-
-            <div class="posting-row posting-row-post-action">
-              <button id="txPostSingle" class="sheet-btn secondary tiny-btn ultra-compact-btn">Post</button>
-            </div>
-            ${kind === 'credit' ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
-            <div class="posting-row posting-row-opbox">
-              <div class="op-breakdown-box" id="txOpBreakdown">
-                <div class="op-breakdown-cell"><span class="op-breakdown-label">Opening Cash</span><span class="op-breakdown-value" id="postingOpeningCash">${money(tillBreakdown.openingCash)}</span></div>
-                <div class="op-breakdown-cell"><span class="op-breakdown-label">Cash Received</span><span class="op-breakdown-value" id="postingCashReceived">${money(tillBreakdown.cashReceived)}</span></div>
-                <div class="op-breakdown-cell"><span class="op-breakdown-label">Cash Withdrawal</span><span class="op-breakdown-value" id="postingCashWithdrawal">${money(tillBreakdown.cashWithdrawal)}</span></div>
-                <div class="op-breakdown-cell"><span class="op-breakdown-label">Till</span><span class="op-breakdown-value ${tillBreakdown.till < 0 ? 'balance-negative' : ''}" id="postingTill">${money(tillBreakdown.till)}</span></div>
-              </div>
-            </div>
+            ${isCreditKind ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row nc-extra-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row nc-extra-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
           </div>
         </div>
       </div>`;
@@ -3206,59 +3199,78 @@ function hideProcessing() {
       // journal is actually sent for approval.
       return `<div class="tellering-sheet journal-start-sheet form-card spec-color-scheme"><div class="action-row" style="justify-content:center;padding:24px 0"><button id="genJournalStartBtn" class="sheet-btn">Generate ${kind === 'credit' ? 'Credit' : 'Debit'} Journal</button></div></div>`;
     }
-    return `<div class="w-full flex justify-center journal-center-wrap spec-color-scheme" id="journalPaneWrap">
-        <div class="journal-wrapper">
-        <div class="journal-pane form-card spacious-journal-pane standalone-journal-pane" id="journalPane">
-          <div class="journal-pane-head compact-journal-head">
-            <div class="cs2-title" style="margin:0;">${kind === 'credit' ? 'Credit' : 'Debit'} Entries</div>
-            <div class="journal-pane-actions ${journalCollapsed ? "" : "journal-pane-actions-hidden"}"><button id="journalCollapseTopBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
+    const isCreditKind = kind === 'credit';
+    const resumingRecord = state.ui.resumingJournalId ? (state.journals || []).find(j => j.id === state.ui.resumingJournalId) : null;
+    const journalNumberText = resumingRecord ? resumingRecord.journalNumber : `${nextJournalNumber()} (assigned on Save)`;
+    const modeVal = telleringDraft.journalFormMode || 'cash';
+    // SURGICAL FIX 2026-09-29 (client-confirmed paper design): Journal
+    // laid out as the client's sheet — header block (Journal Number/Date,
+    // Name/Confirmed By, Description/Value), the S/N table with Edit/Delete
+    // and a Total + Save Journal row, then the single-entry form with its
+    // red Post button. Element ids are unchanged, so bindJournal keeps
+    // working; the extra controls (payment method, balance/variance,
+    // charges, submit/clear/collapse, field note) are kept below.
+    return `<div class="journal-center-wrap spec-color-scheme jr-sheet" id="journalPaneWrap">
+        <div class="journal-pane" id="journalPane">
+          <div class="nc-form">
+            <div class="jr-grid">
+              <div class="nc-head">${isCreditKind ? 'Credit' : 'Debit'} Entries</div>
+              <div class="jr-label">Journal Number</div>
+              <div class="jr-cell"><div class="display-field" id="journalNumberPreview">${escapeHtml(journalNumberText)}</div></div>
+              <div class="jr-label">Journal Date</div>
+              <div class="jr-cell"><div class="display-field">${fmtDate(businessDate())}</div></div>
+
+              <div class="jr-label">Journal Name</div>
+              <div class="jr-cell"><input id="journalCounterparty" class="entry-input" placeholder="${isCreditKind ? 'e.g. Received By Daniel' : 'e.g. Paid By Daniel'}" value="${escapeHtml(String(state.ui.journalCounterpartyDraft || ''))}"></div>
+              <div class="jr-label">Confirmed By</div>
+              <div class="jr-cell"><div class="display-field" id="journalConfirmedBy">—</div></div>
+
+              <div class="jr-label">Journal Description</div>
+              <div class="jr-cell"><input id="journalDescription" class="entry-input" value="${escapeHtml(String(telleringDraft.journalDescription || ''))}"></div>
+              <div class="jr-label">Journal Value</div>
+              <div class="jr-cell"><input id="journalFormAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}"></div>
+
+              <div class="jr-label">Payment Method</div>
+              <div class="jr-cell nc-mode-cell"><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${modeVal === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${modeVal === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div></div>
+              <div class="jr-label">Balance / Variance</div>
+              <div class="jr-cell jr-kpis"><span id="journalFormRunning">${money(0)}</span><span class="jr-variance balance-negative" id="journalFormVariance">${money(0)}</span></div>
+            </div>
+            <div class="journal-pane-actions ${journalCollapsed ? '' : 'journal-pane-actions-hidden'}"><button id="journalCollapseTopBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
+            <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
+              <table class="jr-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>${isCreditKind ? 'Amount Received' : 'Amount Paid'}</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody>
+                <tfoot><tr><td colspan="3" class="jr-total-label">Total</td><td class="jr-total-value" id="journalTotalPosted">${money(0)}</td><td class="jr-save-cell"><button id="journalSaveDraft" class="nc-post-btn">Save Journal</button></td></tr></tfoot>
+              </table>
+
+              <div class="nc-grid jr-entry-grid">
+                <div class="nc-head">${isCreditKind ? 'Credit' : 'Debit'} Entry</div>
+                <div class="nc-label">Account Number</div>
+                <div class="nc-cell"><input id="journalAcc" class="entry-input" maxlength="12" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}" autocomplete="off"></div>
+                <div class="nc-cell"><button id="journalSearchBtn" type="button" class="nc-mini-btn">Search</button></div>
+                <div class="nc-cell nc-tag">Account Status</div>
+                <div class="nc-cell nc-status-cell"><span class="acct-status-chip" id="journalAccountStatus">—</span></div>
+
+                <div class="nc-label">Account Name</div>
+                <div class="nc-cell nc-span-4"><div class="display-field" id="journalName">—</div></div>
+
+                <div class="nc-label">Description</div>
+                <div class="nc-cell nc-span-4"><input id="journalDetails" class="entry-input"></div>
+
+                <div class="nc-label">Account Balance</div>
+                <div class="nc-cell"><div class="display-field" id="journalAccBalance">—</div></div>
+                <div class="nc-cell nc-tag">Teller ID</div>
+                <div class="nc-cell"><div class="display-field" id="journalRowTellerId">—</div></div>
+                <div class="nc-cell nc-post-cell"><button id="journalAddRow" type="button" class="nc-post-btn">Post</button></div>
+
+                <div class="nc-label nc-label-grey">${isCreditKind ? 'Amount Received' : 'Amount Paid'}</div>
+                <div class="nc-cell"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"></div>
+                <div class="nc-cell nc-tag">Account Type</div>
+                <div class="nc-cell"><div class="display-field" id="journalAccountType">—</div></div>
+              </div>
+              ${isCreditKind ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row nc-extra-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row nc-extra-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
+              <div class="action-row journal-submit-row nc-extra-row"><button id="journalSubmit" class="secondary">Submit Journal</button><button class="secondary" id="journalClear">Clear Journal</button><button id="journalCollapseBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note Photo</label><input id="journalFieldNoteInput" type="file" accept="image/*" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
+              <div id="journalFieldNotePreview" class="field-note-preview hidden"></div>
+            </div>
           </div>
-          <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
-            <div class="journal-entry-top row-journal-number" style="display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-              <div><span class="sheet-label">Journal Number</span> <strong id="journalNumberPreview">${(() => {
-                const resuming = state.ui.resumingJournalId ? (state.journals || []).find(j => j.id === state.ui.resumingJournalId) : null;
-                return resuming ? resuming.journalNumber : `${nextJournalNumber()} (will be assigned on Save/Submit)`;
-              })()}</strong></div>
-            </div>
-            <div class="journal-entry-top row-zero journal-form-row" style="display:grid;grid-template-columns:max-content 160px max-content max-content;column-gap:10px;align-items:end;margin-bottom:10px;">
-              <label class="sheet-label" for="journalFormAmount" style="margin:0;white-space:nowrap;align-self:center;">Journal Value</label>
-              <input id="journalFormAmount" class="entry-input" type="text" inputmode="decimal" style="margin:0;width:150px;" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}">
-              <div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${(telleringDraft.journalFormMode || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${(telleringDraft.journalFormMode || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div>
-              <div class="posting-kpis-inline">
-                <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL BALANCE</span><span class="mini-kpi-pill-value" id="journalFormRunning">${money(0)}</span></div>
-                <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">JOURNAL VARIANCE</span><span class="mini-kpi-pill-value balance-negative" id="journalFormVariance">${money(0)}</span></div>
-                <div class="mini-kpi-pill"><span class="mini-kpi-pill-label">TOTAL POSTED</span><span class="mini-kpi-pill-value" id="journalTotalPosted">${money(0)}</span></div>
-              </div>
-            </div>
-            <!-- SURGICAL FIX 2026-09-03: Received By / Paid To applies to the whole
-                 journal, not one row — moved above the table so it's set once per
-                 journal instead of re-typed for every entry added. -->
-            <div class="journal-entry-top row-counterparty-top" style="display:grid;grid-template-columns:max-content 240px;column-gap:10px;align-items:end;margin-bottom:10px;">
-              <div class="journal-cell grow"><input id="journalCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.journalCounterpartyDraft || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Received By' : 'Paid By'}</div></div>
-            </div>
-            <div class="table-wrap journal-table-wrap"><table class="table journal-table"><thead><tr><th>S/N</th><th>Account Number</th><th>Account Name</th><th>Details</th><th>${kind === 'credit' ? 'Amount Received' : 'Amount Paid'}</th><th>Balance</th><th>Variance</th><th>Action</th></tr></thead><tbody id="journalRows"></tbody></table></div>
-            <div class="journal-entry-shell journal-entry-foot">
-              <div class="journal-entry-top row-one" style="display:grid;grid-template-columns:max-content 76px max-content 240px 100px 110px 130px 190px;column-gap:6px;align-items:end;justify-content:start;">
-                <label class="sheet-label posting-label-account" for="journalAcc" style="margin:0;white-space:nowrap;align-self:center;">Account Number</label>
-                <input id="journalAcc" class="entry-input sheet-input short-code" maxlength="12" style="width:100px;min-width:100px;margin:0;" value="${escapeHtml(String(state.ui.journalAccDraft || ''))}">
-                <button id="journalSearchBtn" type="button" class="sheet-btn tiny-btn ultra-compact-btn" style="margin:0;height:28px;align-self:center;">Search</button>
-                <div class="journal-cell" style="width:240px;margin:0;"><div class="display-field" id="journalName">—</div><div class="journal-cell-label">Account Name</div></div>
-                <div class="journal-cell" style="width:100px;margin:0;"><div class="display-field" id="journalRowTellerId">—</div><div class="journal-cell-label">Teller ID</div></div>
-                <div class="journal-cell" style="width:110px;margin:0;"><span class="acct-status-chip" id="journalAccountStatus">—</span><div class="journal-cell-label">Account Status</div></div>
-                <div class="journal-cell" style="width:130px;margin:0;"><div class="display-field" id="journalAccountType">—</div><div class="journal-cell-label">Account Type</div></div>
-                <div class="journal-cell" style="width:190px;margin:0;"><input id="journalAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalAmount || ''))}"><div class="journal-cell-label">${kind === 'credit' ? 'Amount Received' : 'Amount Paid'}</div></div>
-              </div>
-              <div class="journal-entry-top row-two">
-                <div class="journal-cell grow"><input id="journalDetails" class="entry-input"><div class="journal-cell-label">Details</div></div>
-                <div class="journal-cell action"><button id="journalAddRow" type="button" class="sheet-btn">Add to Journal</button></div>
-                <div class="journal-cell action"><button id="journalCollapseBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
-              </div>
-              ${kind === 'credit' ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
-            </div>
-            <div class="action-row journal-submit-row"><button id="journalSubmit">Submit Journal</button><button class="secondary" id="journalSaveDraft">Save Journal</button><button class="secondary" id="journalClear">Clear Journal</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note Photo</label><input id="journalFieldNoteInput" type="file" accept="image/*" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
-            <div id="journalFieldNotePreview" class="field-note-preview hidden"></div>
-          </div>
-        </div>
         </div>
         </div>`;
   }
@@ -5447,7 +5459,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-label nc-label-grey">Paid By</div>
             <div class="nc-cell"><input id="itrPaidBy" class="entry-input" value="${escapeHtml(String(draft.paidBy || ''))}"></div>
             <div class="nc-cell nc-tag">Account Status</div>
-            <div class="nc-cell nc-span-2">${accountStatusChip(sourceAccount, 'itrSourceStatus')}</div>
+            <div class="nc-cell nc-status-cell nc-span-2">${accountStatusChip(sourceAccount, 'itrSourceStatus')}</div>
 
             <div class="nc-label nc-label-grey">Amount Paid</div>
             <div class="nc-cell"><input id="itrAmount" class="entry-input" type="text" inputmode="decimal" value="${amountVal}"></div>
@@ -5474,7 +5486,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-label nc-label-grey">Received By</div>
             <div class="nc-cell"><input id="itrReceivedBy" class="entry-input" value="${escapeHtml(String(draft.receivedBy || ''))}"></div>
             <div class="nc-cell nc-tag">Account Status</div>
-            <div class="nc-cell">${accountStatusChip(destAccount, 'itrDestStatus')}</div>
+            <div class="nc-cell nc-status-cell">${accountStatusChip(destAccount, 'itrDestStatus')}</div>
             <div class="nc-cell nc-post-cell"><button id="submitIntraTransfer" class="nc-post-btn">Post</button></div>
 
             <div class="nc-label nc-label-grey">Amount Received</div>
@@ -6125,8 +6137,10 @@ function normalizeStaffLedgerEntryType(row) {
     if (!customer) {
       if (typeEl) typeEl.textContent = '—';
       if (tellerIdEl) tellerIdEl.textContent = '—';
+      if (byId('journalAccBalance')) byId('journalAccBalance').textContent = '—';
       return;
     }
+    if (byId('journalAccBalance')) byId('journalAccBalance').innerHTML = balanceHtml(customer.accountType === 'staff_operational' ? getStaffOperationalBalance(customer.linkedStaffId) : (customer.balance || 0));
     if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
     // SURGICAL ADDITION 2026-09-22 (client-confirmed design): the account
     // being debited/credited for this journal row is looked up here — if
@@ -6286,11 +6300,17 @@ function normalizeStaffLedgerEntryType(row) {
         const variance = Math.max(0, -remaining);
         return { row, formBase: journalForm, remaining, variance };
       });
-      // SURGICAL FIX 2026-09-03: reordered to client spec — S/N, Account
-      // Number, Account Name, Details, Amount, Balance — then the existing
-      // Variance/Action columns kept as-is (not part of the client's list,
-      // but still functionally needed here).
-      const rows = withBalances.map(({ row, remaining, variance }, displayIndex) => { const chargeMeta = getTotalChargeAmount(row) > 0 ? `<div class="journal-inline-meta">${chargeInlineMeta(row)}</div>` : ''; return `<tr><td>${displayIndex+1}</td><td>${escapeHtml(row.accountNumber || '')}</td><td>${escapeHtml(row.customerName || '')}${chargeMeta}</td><td>${escapeHtml(row.details || '')}</td><td>${money(row.amount)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><span class="linklike" data-remove-row="${row.id}">Remove</span></td></tr>`; }).join('') || '<tr><td colspan="8">No journal entries yet</td></tr>';
+      // SURGICAL FIX 2026-09-29 (client-confirmed paper design): table is
+      // S/N, Account Number, Account Name, Amount, Action (Edit / Delete),
+      // always showing at least 10 numbered lines like the client's sheet.
+      // Per-row details/charges show as small meta under the name; the
+      // running Balance/Variance stay in the header's Balance / Variance.
+      const filledRows = withBalances.map(({ row }, displayIndex) => {
+        const meta = [row.details ? escapeHtml(row.details) : '', getTotalChargeAmount(row) > 0 ? chargeInlineMeta(row) : ''].filter(Boolean).join(' • ');
+        return `<tr><td class="jr-sn">${displayIndex+1}</td><td>${escapeHtml(row.accountNumber || '')}</td><td>${escapeHtml(row.customerName || '')}${meta ? `<div class="journal-inline-meta">${meta}</div>` : ''}</td><td class="jr-amt">${money(row.amount)}</td><td class="jr-actions"><button type="button" class="jr-act" data-edit-row="${row.id}">Edit</button><button type="button" class="jr-act jr-act-del" data-remove-row="${row.id}">Delete</button></td></tr>`;
+      });
+      for (let i = filledRows.length; i < 10; i++) filledRows.push(`<tr class="jr-empty"><td class="jr-sn">${i+1}</td><td></td><td></td><td class="jr-amt"></td><td class="jr-actions"></td></tr>`);
+      const rows = filledRows.join('');
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
       const totalPosted = journal.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       if (byId('journalTotalPosted')) byId('journalTotalPosted').textContent = money(totalPosted);
@@ -6340,6 +6360,31 @@ function normalizeStaffLedgerEntryType(row) {
           save();
           recalcPreview();
         }
+      });
+      // Edit pulls the row back into the entry form below (account, amount,
+      // details, charges) and takes it out of the list — press Post again
+      // to put the corrected entry back.
+      qq('[data-edit-row]').forEach(el => el.onclick = () => {
+        const idx = journal.findIndex(r => r.id === el.dataset.editRow);
+        if (idx < 0) return;
+        const row = journal[idx];
+        const customer = state.customers.find(c => c.id === row.customerId) || getCustomerByAccountNo(row.accountNumber);
+        const charges = { apply: false, checked: {}, values: {} };
+        (row.chargeBreakdown || []).forEach(ch => { charges.apply = true; charges.checked[ch.key] = true; charges.values[ch.key] = String(ch.amount); });
+        restoreJournalEntrySnapshot({
+          acc: String(row.accountNumber || ''),
+          amount: String(row.amount || ''),
+          counterparty: String(byId('journalCounterparty')?.value || ''),
+          details: String(row.details || ''),
+          name: row.customerName || '—',
+          selectedJournalCustomerId: customer?.id || '',
+          charges
+        });
+        state.ui.journalAccDraft = String(row.accountNumber || '');
+        journal.splice(idx, 1);
+        save();
+        recalcPreview();
+        requestAnimationFrame(() => byId('journalAmount')?.focus({ preventScroll: true }));
       });
     };
 
@@ -6571,6 +6616,7 @@ function normalizeStaffLedgerEntryType(row) {
       };
       journalAmountInput.onchange = () => { protectJournalAccountDraft(); telleringDraft.journalAmount = journalAmountInput.value || ''; };
     }
+    if (byId('journalDescription')) byId('journalDescription').oninput = () => { telleringDraft.journalDescription = byId('journalDescription').value || ''; };
     if (byId('journalCounterparty')) {
       // SURGICAL FIX 2026-09-03: persist the whole-journal Received By/Paid
       // To value so it survives re-renders across multiple "Add to Journal"
@@ -6748,6 +6794,7 @@ function normalizeStaffLedgerEntryType(row) {
       telleringDraft.journalAmount = '';
       telleringDraft.journalFormAmount = '';
       telleringDraft.journalFormMode = 'cash';
+      telleringDraft.journalDescription = '';
       const input = byId('journalFieldNoteInput');
       if (input) input.value = '';
       save();
@@ -6849,6 +6896,7 @@ function normalizeStaffLedgerEntryType(row) {
         journalNumber = existing.journalNumber;
         existing.date = existing.date || '';
         existing.counterparty = byId('journalCounterparty')?.value.trim() || '';
+        existing.description = byId('journalDescription')?.value.trim() || '';
         existing.formAmount = journalFormAmount;
         existing.formPaymentMode = journalFormMode;
         existing.rows = journal.map(row => ({ ...row }));
@@ -6863,6 +6911,7 @@ function normalizeStaffLedgerEntryType(row) {
           staffId: staff.id,
           staffName: staff.name,
           counterparty: byId('journalCounterparty')?.value.trim() || '',
+          description: byId('journalDescription')?.value.trim() || '',
           formAmount: journalFormAmount,
           formPaymentMode: journalFormMode,
           rows: journal.map(row => ({ ...row })),
@@ -6879,6 +6928,7 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.journalCounterpartyDraft = '';
       telleringDraft.journalFormAmount = '';
       telleringDraft.journalFormMode = 'cash';
+      telleringDraft.journalDescription = '';
       const input = byId('journalFieldNoteInput');
       if (input) input.value = '';
       save();
@@ -6926,6 +6976,7 @@ function normalizeStaffLedgerEntryType(row) {
           // is just the initial state right after a successful submit.
           if (existing) {
             existing.date = businessDate();
+            existing.description = byId('journalDescription')?.value.trim() || existing.description || '';
             existing.formAmount = journalFormAmount;
             existing.formPaymentMode = journalFormMode;
             existing.rows = rowsSnapshot;
@@ -6936,6 +6987,7 @@ function normalizeStaffLedgerEntryType(row) {
               id: uid('jn'), journalNumber, kind, date: businessDate(),
               staffId: staff.id, staffName: staff.name,
               counterparty: byId('journalCounterparty')?.value.trim() || '',
+              description: byId('journalDescription')?.value.trim() || '',
               formAmount: journalFormAmount, formPaymentMode: journalFormMode,
               rows: rowsSnapshot, fieldNote: fieldNoteSnapshot,
               status: 'sent', createdAt: new Date().toISOString()
@@ -6949,6 +7001,7 @@ function normalizeStaffLedgerEntryType(row) {
           state.ui.journalCounterpartyDraft = '';
           telleringDraft.journalFormAmount = '';
           telleringDraft.journalFormMode = 'cash';
+          telleringDraft.journalDescription = '';
           const input = byId('journalFieldNoteInput');
           if (input) input.value = '';
           save();

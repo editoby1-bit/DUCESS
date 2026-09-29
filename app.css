@@ -13084,3 +13084,90 @@ input.date-mirror-native {
   background:#d3e2ea !important;color:#0a2b2b !important;box-shadow:inset 3px 0 0 #19b8c0 !important;
 }
 .workspace-card .tellering-tool-tabs .tool-group-body .tool-tab:disabled{opacity:.5}
+
+/* SURGICAL ADDITION 2026-09-29 (client): standalone sidebar items (Check
+   Balance, My Statement, Cash Receipt) get the same dark header-bar look
+   as the posting groups so the whole sidebar reads as one sheet column. */
+.workspace-card .tellering-tool-tabs .tellering-tools-only > .tool-tab{
+  width:100% !important;box-sizing:border-box;text-align:left !important;justify-content:flex-start !important;
+  background:#3a3a3a !important;color:#fff !important;border:0 !important;border-radius:0 !important;
+  padding:5px 8px !important;margin:6px 0 0 !important;font-size:11px !important;font-weight:800 !important;
+  letter-spacing:.03em;text-transform:uppercase;box-shadow:none !important;transform:none !important;
+}
+.workspace-card .tellering-tool-tabs .tellering-tools-only > .tool-tab.active{
+  background:#222 !important;box-shadow:inset 3px 0 0 #19e6ee !important;
+}
+.workspace-card .tellering-tool-tabs .tellering-tools-only > .tool-tab:disabled{opacity:.5}
+
+/* SURGICAL ADDITION 2026-09-29 (client): the Account Status box is only as
+   big as the status indicator itself — no oversized cell/field around it. */
+.nc-grid > .nc-cell.nc-status-cell{background:#fff !important}
+.display-field:has(> .acct-status-chip),
+.spec-color-scheme .display-field:has(> .acct-status-chip){
+  background:transparent !important;border:0 !important;padding:0 !important;min-height:0 !important;
+}
+
+/* SURGICAL ADDITION 2026-09-29 (client paper design): Direct Posting and
+   Journal Posting share the Non Cash sheet grid (.nc-*). */
+.nc-head-date{float:right;font-weight:600;font-size:10px;opacity:.85;letter-spacing:0}
+.nc-mode-cell .tx-mode-toggle{margin:0;gap:4px}
+.nc-mode-cell .tx-toggle-pill{padding:2px 8px !important;min-height:0 !important}
+.nc-till-val{justify-content:center;font-weight:800;font-size:13px;min-height:40px;background:#fff !important}
+.nc-till-label{background:#f1f2f4;font-size:10px;font-weight:700;text-align:center;padding:3px 4px;color:#222}
+.nc-extra-row{margin-top:10px;max-width:820px}
+.dp-sheet .nc-grid{max-width:760px}
+
+.jr-sheet{display:block}
+.jr-sheet .journal-pane{padding:0;border:0;background:transparent;box-shadow:none}
+.jr-grid{
+  display:grid;grid-template-columns:150px minmax(150px,1.3fr) 130px minmax(130px,1fr);
+  border:2px solid #111;min-width:600px;max-width:820px;background:#fff;
+}
+.jr-grid > *{border-right:1px solid #cfcfcf;border-bottom:1px solid #cfcfcf;min-width:0}
+.jr-label{background:#d3e2ea;color:#111;font-weight:700;font-size:12px;padding:5px 8px;display:flex;align-items:center}
+.jr-cell{padding:3px 4px;display:flex;align-items:center;background:#FBEFD0}
+.jr-cell > input,.jr-cell > .display-field{width:100%;min-height:24px}
+.jr-kpis{gap:10px;font-weight:800;font-size:12px;padding-left:8px}
+.jr-variance{font-size:11px}
+.jr-table{width:100%;min-width:600px;max-width:820px;border-collapse:collapse;border:2px solid #111;border-top:0;background:#FBEFD0;font-size:12px}
+.jr-table th{background:#19e6ee;color:#0a2b2b;font-weight:800;text-align:left;padding:5px 8px;border:1px solid #9fdfe2}
+.jr-table td{border:1px solid #d8c896;padding:3px 8px;height:24px;vertical-align:middle}
+.jr-table .jr-sn{background:#19e6ee;color:#0a2b2b;font-weight:800;width:44px}
+.jr-table .jr-amt{text-align:right;font-weight:700;white-space:nowrap}
+.jr-table .jr-actions{width:110px;white-space:nowrap}
+.jr-act{background:#f1f2f4 !important;color:#222 !important;border:1px solid #cfd6dd !important;font-size:10px !important;padding:1px 6px !important;margin-right:4px;border-radius:3px}
+.jr-act-del{color:#b42318 !important}
+.jr-total-label{background:#19e6ee;text-align:center;font-weight:800;font-size:14px}
+.jr-total-value{background:#fff;text-align:right;font-weight:800;font-size:14px}
+.jr-save-cell{background:#c00000;padding:0 !important}
+.jr-save-cell .nc-post-btn{background:#c00000 !important;font-size:11px;padding:6px}
+.jr-entry-grid{margin-top:12px}
+.jr-sheet .journal-pane-actions{margin:8px 0}
+.jr-sheet .journal-pane-actions-hidden{display:none}
+
+/* SURGICAL ADDITION 2026-09-29: older id-level rules (#txPostSingle,
+   #journalAcc, #journalName, ...) size these controls as pills/fixed
+   widths for the previous layout. Inside the new sheet grids they fill
+   their cell instead. Scoped to .nc-grid/.jr-grid so nothing else moves. */
+.spec-color-scheme .nc-grid .nc-post-cell > #txPostSingle,
+.spec-color-scheme .nc-grid .nc-post-cell > #journalAddRow,
+.spec-color-scheme .nc-grid .nc-post-cell > #submitIntraTransfer{
+  width:100% !important;max-width:none !important;min-width:0 !important;height:100% !important;min-height:40px !important;
+  margin:0 !important;padding:6px !important;border-radius:0 !important;background:#ff0000 !important;color:#fff !important;
+  font-size:13px !important;font-weight:800 !important;box-shadow:none !important;transform:none !important;line-height:1.2 !important;
+}
+.spec-color-scheme .nc-grid .nc-cell > #txSearch,
+.spec-color-scheme .nc-grid .nc-cell > #journalSearchBtn{
+  width:100% !important;max-width:none !important;min-width:0 !important;height:24px !important;min-height:24px !important;
+  margin:0 !important;padding:3px 6px !important;border-radius:4px !important;font-size:11px !important;place-self:center stretch !important;
+}
+.spec-color-scheme .nc-grid .nc-cell > #journalAcc,
+.spec-color-scheme .nc-grid .nc-cell > #journalAmount,
+.spec-color-scheme .nc-grid .nc-cell > #journalDetails,
+.spec-color-scheme .nc-grid .nc-cell > #journalName,
+.spec-color-scheme .jr-grid .jr-cell > #journalCounterparty,
+.spec-color-scheme .jr-grid .jr-cell > #journalFormAmount,
+.spec-color-scheme .jr-grid .jr-cell > #journalDescription{
+  width:100% !important;max-width:none !important;min-width:0 !important;margin:0 !important;text-align:left !important;
+  background:#FBEFD0 !important;border:1px solid #d8c896 !important;color:#2b2410 !important;
+}
