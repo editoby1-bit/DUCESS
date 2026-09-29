@@ -13034,11 +13034,9 @@ input.date-mirror-native {
 .acct-status-chip.is-frozen,.spec-color-scheme .acct-status-chip.is-frozen{background:#fde6e6 !important;border-color:#eea3a3 !important;color:#b42318 !important}
 
 /* SURGICAL ADDITION 2026-09-28 (client paper design): Non Cash Posting —
-   side title "Debit To Credit Entry", top-level headings Debit / Credit. */
-.nc-sheet{display:flex;gap:14px;align-items:flex-start}
-.nc-side{flex:0 0 170px}
-.nc-side-title{background:#3a3a3a;color:#fff;font-weight:800;font-size:12px;padding:6px 8px;text-transform:uppercase;letter-spacing:.03em}
-.nc-side-sub{background:#d3e2ea;color:#111;font-weight:700;font-size:12px;padding:6px 8px}
+   top-level headings Debit / Credit; the sheet's side column is the app
+   sidebar (see the sidebar block below). */
+.nc-sheet{display:block}
 .nc-form{flex:1 1 auto;min-width:0;overflow-x:auto}
 .nc-grid{
   display:grid;grid-template-columns:150px minmax(120px,1.2fr) 110px minmax(110px,1fr) minmax(100px,1fr);
@@ -13058,7 +13056,31 @@ input.date-mirror-native {
 .nc-post-cell{grid-row:span 2;background:#ff0000;padding:0}
 .nc-post-btn{width:100%;height:100%;background:#ff0000 !important;color:#fff !important;border-radius:0;font-size:13px;font-weight:800}
 .nc-post-btn:hover{background:#d90000 !important}
-@media (max-width:760px){
-  .nc-sheet{flex-direction:column}
-  .nc-side{flex:none;align-self:stretch;min-width:170px}
+
+/* SURGICAL ADDITION 2026-09-29 (client paper design): the Tellering /
+   Treasury sidebar posting groups are the sheet's side column — dark
+   group header bar (e.g. DIRECT POSTING), entry types listed underneath
+   as pale cells, the open one highlighted — so the sidebar and the form
+   read as one sheet instead of repeating the same title twice. */
+.workspace-card .tellering-tool-tabs .tool-group-toggle{
+  background:#3a3a3a !important;color:#fff !important;border:0 !important;border-radius:0 !important;
+  padding:5px 8px !important;margin:6px 0 0 !important;font-size:11px !important;font-weight:800 !important;
+  letter-spacing:.03em;text-transform:uppercase;box-shadow:none !important;
 }
+.workspace-card .tellering-tool-tabs .tool-group-toggle .tool-group-caret{color:#fff;opacity:.85}
+.workspace-card .tellering-tool-tabs .tool-group-body{
+  gap:0 !important;padding:0 !important;margin:0 0 4px !important;border:1px solid #cfd6dd;border-top:0;
+  width:100% !important;box-sizing:border-box;align-self:stretch !important;
+}
+.workspace-card .tellering-tool-tabs .tool-group-toggle,
+.workspace-card .tellering-tool-tabs .tool-group-body .tool-tab{width:100% !important;box-sizing:border-box}
+.workspace-card .tellering-tool-tabs .tool-group-body .tool-tab{
+  background:#eef4f7 !important;color:#111 !important;border:0 !important;border-bottom:1px solid #d7e0e6 !important;
+  border-radius:0 !important;padding:4px 8px !important;font-size:12px !important;font-weight:700 !important;
+  text-align:left !important;justify-content:flex-start !important;box-shadow:none !important;transform:none !important;
+}
+.workspace-card .tellering-tool-tabs .tool-group-body .tool-tab:last-child{border-bottom:0 !important}
+.workspace-card .tellering-tool-tabs .tool-group-body .tool-tab.active{
+  background:#d3e2ea !important;color:#0a2b2b !important;box-shadow:inset 3px 0 0 #19b8c0 !important;
+}
+.workspace-card .tellering-tool-tabs .tool-group-body .tool-tab:disabled{opacity:.5}

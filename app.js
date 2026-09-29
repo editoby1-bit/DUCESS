@@ -5415,16 +5415,14 @@ function normalizeStaffLedgerEntryType(row) {
     const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')))) : '—';
     const amountVal = escapeHtml(String(draft.amount || ''));
     // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
-    // the client's sheet — "Non Cash Posting / Debit To Credit Entry" sits
-    // at the SIDE, and the two top-level headings of the form are Debit and
-    // Credit. Element ids are unchanged, so bindIntraTransfer and the
+    // the client's sheet — the two top-level headings of the form are Debit
+    // and Credit. The sheet's side column ("Non Cash Posting / Debit To
+    // Credit Entry") IS the app sidebar (styled to match, see
+    // .tellering-tool-tabs .tool-group-* in app.css), so it isn't repeated
+    // here. Element ids are unchanged, so bindIntraTransfer and the
     // customer picker keep working as before.
     return `
       <div class="nc-sheet spec-color-scheme">
-        <div class="nc-side">
-          <div class="nc-side-title">Non Cash Posting</div>
-          <div class="nc-side-sub">Debit To Credit Entry</div>
-        </div>
         <div class="nc-form">
           <div class="nc-grid">
             <div class="nc-head">Debit</div>
