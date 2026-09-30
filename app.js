@@ -3242,8 +3242,7 @@ function hideProcessing() {
 
               <div class="nc-label">Account Balance</div>
               <div class="nc-cell nc-span-2"><div class="display-field" id="txBalance">—</div></div>
-              <div class="nc-cell nc-tag">Payment Method</div>
-              <div class="nc-cell nc-mode-cell"><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="txMode" value="cash" ${(state.ui.txModeDraft || 'cash') === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="txMode" value="transfer" ${(state.ui.txModeDraft || 'cash') === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div></div>
+              <div class="nc-cell nc-span-2"></div>
 
               <div class="nc-label">Description</div>
               <div class="nc-cell nc-span-4"><input id="txDetails" class="entry-input" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}"></div>
@@ -3300,13 +3299,12 @@ function hideProcessing() {
     const isCreditKind = kind === 'credit';
     const resumingRecord = state.ui.resumingJournalId ? (state.journals || []).find(j => j.id === state.ui.resumingJournalId) : null;
     const journalNumberText = resumingRecord ? resumingRecord.journalNumber : `${nextJournalNumber()} (assigned on Save)`;
-    const modeVal = telleringDraft.journalFormMode || 'cash';
     // SURGICAL FIX 2026-09-29 (client-confirmed paper design): Journal
     // laid out as the client's sheet — header block (Journal Number/Date,
     // Name/Confirmed By, Description/Value), the S/N table with Edit/Delete
     // and a Total + Save Journal row, then the single-entry form with its
     // red Post button. Element ids are unchanged, so bindJournal keeps
-    // working; the extra controls (payment method, balance/variance,
+    // working; the extra controls (balance/variance,
     // charges, submit/clear/collapse, field note) are kept below.
     return `<div class="journal-center-wrap spec-color-scheme jr-sheet" id="journalPaneWrap">
         <div class="journal-pane" id="journalPane">
@@ -3328,10 +3326,8 @@ function hideProcessing() {
               <div class="jr-label">Journal Value</div>
               <div class="jr-cell"><input id="journalFormAmount" class="entry-input" type="text" inputmode="decimal" value="${escapeHtml(String(telleringDraft.journalFormAmount || ''))}"></div>
 
-              <div class="jr-label">Payment Method</div>
-              <div class="jr-cell nc-mode-cell"><div class="tx-mode-toggle inline-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="cash" ${modeVal === 'cash' ? 'checked' : ''}> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="journalFormMode" value="transfer" ${modeVal === 'transfer' ? 'checked' : ''}> <span>Transfer</span></label></div></div>
               <div class="jr-label">Balance / Variance</div>
-              <div class="jr-cell jr-kpis"><span id="journalFormRunning">${money(0)}</span><span class="jr-variance balance-negative" id="journalFormVariance">${money(0)}</span></div>
+              <div class="jr-cell jr-kpis" style="grid-column:span 3"><span id="journalFormRunning">${money(0)}</span><span class="jr-variance balance-negative" id="journalFormVariance">${money(0)}</span></div>
             </div>
             <div class="journal-pane-actions ${journalCollapsed ? '' : 'journal-pane-actions-hidden'}"><button id="journalCollapseTopBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
             <div class="journal-pane-body ${journalCollapsed ? 'hidden' : ''}" id="journalPaneBody">
@@ -3538,14 +3534,14 @@ function hideProcessing() {
       const statusBadge = isAnomaly
         ? `<span class="badge flagged">Anomaly</span>`
         : (recomputedVariance > 0 ? `<span class="badge">Variance</span>` : `<span class="badge balanced">Balanced</span>`);
-      return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.staffName || '')}</td><td>${money(formAmount)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${escapeHtml(c.resolutionNote || c.note || '—')}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
+      return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.staffName || '')}</td><td>${money(formAmount)}</td><td>${money(creditCash + creditTransfer)}</td><td>${money(debitCash + debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${escapeHtml(c.resolutionNote || c.note || '—')}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
     const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Credit Cash</th><th>Credit Transfer</th><th>Debit Cash</th><th>Debit Transfer</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
   }
 
   function renderApprovalHistory() {
@@ -3649,8 +3645,8 @@ function hideProcessing() {
   function requestSummary(a) {
     const p = a.payload || {};
     if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${escapeHtml(p.sourceAccountName||p.sourceAccountNumber||'—')} → ${escapeHtml(p.destAccountName||p.destAccountNumber||'—')} • ${p.date}`;
-    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')} • ${escapeHtml(p.paymentMode || 'cash')} • ${p.date}`;
-    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')} • ${escapeHtml(p.paymentMode || 'cash')}${p.collectorName ? ` • Received from ${escapeHtml(p.collectorName)}` : ''} • ${p.date}`;
+    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')} • ${p.date}`;
+    if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')}${p.collectorName ? ` • Received from ${escapeHtml(p.collectorName)}` : ''} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${escapeHtml(p.staffName || 'staff')} for ${p.date}`;
     if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${escapeHtml(p.accountNumber || '')} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
     if (a.type === 'account_opening') return `${escapeHtml(p.name || '')} • Phone ${escapeHtml(p.phone || '—')} • NIN ${escapeHtml(p.nin || '—')} • BVN ${escapeHtml(p.bvn || '—')}`;
@@ -3761,7 +3757,6 @@ function hideProcessing() {
         <td>${esc(row.accountNumber || '—')}</td>
         <td>${money(row.amount)}</td>
         <td>${esc(row.receivedOrPaidBy || row.paidTo || '')}</td>
-        <td>${esc(row.payoutSource || row.paymentMode || '')}</td>
         <td>${esc(detailsText || '—')}</td>
       </tr>`;
     }).join('');
@@ -3772,10 +3767,10 @@ function hideProcessing() {
         ${field('Business Date', p.date || p.businessDate || '—', 'field-date')}
         ${field('Items', rows.length, 'field-account')}
         ${field('Total Amount', money(total), 'field-account')}
-        ${field('Journal Form Amount', `${money(p.formAmount || 0)} (${p.formPaymentMode === 'transfer' ? 'Transfer' : 'Cash'})`, 'field-account')}
+        ${field('Journal Form Amount', money(p.formAmount || 0), 'field-account')}
         ${req.type === 'customer_credit_journal' ? field('Total Charges', money(totalCharges), 'field-account') : ''}
       </div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>${req.type === 'customer_credit_journal' ? 'Received By' : 'Paid By'}</th><th>Mode</th><th>Details</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="7" class="muted">No journal entries</td></tr>'}</tbody></table></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>${req.type === 'customer_credit_journal' ? 'Received By' : 'Paid By'}</th><th>Details</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="6" class="muted">No journal entries</td></tr>'}</tbody></table></div>
       ${noteBlock}
     </div>`;
   } else if (req.type === 'account_reactivation') {
@@ -3799,7 +3794,6 @@ function hideProcessing() {
       ${field('Treasury', p.staffName || '—', 'field-wide')}
       ${field('Date', p.date || '—', 'field-date')}
       ${field('Amount', money(p.amount || 0), 'field-account')}
-      ${field('Payment Mode', p.paymentMode || 'cash', 'field-account')}
       ${p.note ? field('Note', p.note, 'field-wide') : ''}
     </div></div>`;
   } else if (req.type === 'inter_staff_credit') {
@@ -3808,7 +3802,6 @@ function hideProcessing() {
       ${field('To (Account)', `${p.targetAccountName || '—'} (${p.targetAccountNumber || '—'})`, 'field-wide')}
       ${field('Date', p.date || '—', 'field-date')}
       ${field('Amount', money(p.amount || 0), 'field-account')}
-      ${field('Payment Mode', p.paymentMode || 'cash', 'field-account')}
       ${p.note ? field('Note', p.note, 'field-wide') : ''}
     </div></div>`;
   } else {
@@ -4465,14 +4458,14 @@ function staffLedgerEvents(staffId) {
       // Cash receipt: Cash Officer funded their own operational account
       if (req.type === 'cash_receipt' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `cash-receipt-${date}-${amount}`, date, type: 'Cash Receipt', amount, delta: amount, details: `Cash received • ${payload.paymentMode || 'cash'}`, runningType: 'form' });
+        addEvent({ key: req.id || `cash-receipt-${date}-${amount}`, date, type: 'Cash Receipt', amount, delta: amount, details: 'Cash received', runningType: 'form' });
       }
       // Inter-staff credit: operational account topped up by Cash Officer
       if (req.type === 'inter_staff_credit') {
         const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId);
         if (opAccount && (payload.targetAccountId === opAccount.id || payload.operationalAccountId === opAccount.id)) {
           const amount = Number(payload.amount || 0);
-          addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Treasury'} • ${payload.paymentMode || 'cash'}`, runningType: 'form' });
+          addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Treasury'}`, runningType: 'form' });
         }
         // SURGICAL ADDITION 2026-09-09: the ACTING staff who issued this
         // funding (via Non Cash, locked to their own account — see
@@ -5451,7 +5444,7 @@ function normalizeStaffLedgerEntryType(row) {
           if (amount > Number(sourceAccount.balance || 0) + 0.01) return showToast(`Amount exceeds the source account's balance (${money(sourceAccount.balance || 0)})`);
         }
       }
-      const paymentMode = fundingSource === 'admin_injection' ? (q('input[name="staffCreditMode"]:checked')?.value || 'cash') : 'transfer';
+      const paymentMode = 'cash';
       const confirmMessage = fundingSource === 'treasury_balance'
         ? `Debit your Treasury balance ${money(amount)} to fund ${targetAccount?.name || 'this Teller'}?`
         : fundingSource === 'account'
@@ -6978,7 +6971,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       const journalFormAmount = Number(String(byId('journalFormAmount')?.value ?? telleringDraft.journalFormAmount ?? '').replace(/,/g, '')) || 0;
       if (!(journalFormAmount > 0)) return showToast('Enter the Journal Value before saving');
-      const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
+      const journalFormMode = 'cash';
       const fieldNoteSnapshot = attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null;
       // If this draft was opened from the Journal Register ("Resume"), keep
       // updating THAT record and its Journal Number rather than minting a
@@ -7052,7 +7045,7 @@ function normalizeStaffLedgerEntryType(row) {
       // Journal must balance: sum of rows must exactly equal the journal form amount
       const rowTotal = journal.reduce((s, r) => s + Number(r.amount || 0), 0);
       if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal the Journal Value ${money(journalFormAmount)}`);
-      const journalFormMode = (q('input[name="journalFormMode"]:checked')?.value) || telleringDraft.journalFormMode || 'cash';
+      const journalFormMode = 'cash';
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
       confirmAction(`Submit ${kind} journal for approval?`, async () => {
@@ -7369,9 +7362,6 @@ function normalizeStaffLedgerEntryType(row) {
         <div class="field"><label>Amount Received</label><input id="cashReceiptAmount" class="entry-input" type="number"></div>
       </div>
       <div class="form-grid two compact-modal-grid" style="margin-top:8px">
-        <div class="field"><label>Payment Mode</label>
-          <div class="tx-mode-toggle"><label class="tx-toggle-pill"><input type="radio" name="cashReceiptMode" value="cash" checked> <span>Cash</span></label><label class="tx-toggle-pill"><input type="radio" name="cashReceiptMode" value="transfer"> <span>Transfer</span></label></div>
-        </div>
         <div class="field"><label>Note (optional)</label><input id="cashReceiptNote" class="entry-input" type="text"></div>
       </div>
       <div class="form-grid one compact-modal-grid" style="margin-top:8px">
@@ -7561,15 +7551,6 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="cs2-label">Amount</div>
             <div class="cs2-input-wrap cs2-medium"><input id="staffCreditAmount" class="entry-input cs2-input" type="number" value="${escapeHtml(String(draft.amount || ''))}"></div>
           </div>
-          ${targetIsTreasury && fundingSource === 'admin_injection' ? `
-          <div class="cs2-row">
-            <div class="cs2-label">Payment Mode</div>
-            <div class="tx-mode-toggle">
-              <label class="tx-toggle-pill"><input type="radio" name="staffCreditMode" value="cash" ${(draft.mode||'cash')==='cash'?'checked':''}> <span>Cash</span></label>
-              <label class="tx-toggle-pill"><input type="radio" name="staffCreditMode" value="transfer" ${(draft.mode||'')==='transfer'?'checked':''}> <span>Transfer</span></label>
-            </div>
-          </div>
-          ` : ''}
           <div class="cs2-row">
             <div class="cs2-label">Note</div>
             <div class="cs2-input-wrap cs2-wide"><input id="staffCreditNote" class="entry-input cs2-input" value="${escapeHtml(String(draft.note || ''))}"></div>
@@ -7599,9 +7580,9 @@ function normalizeStaffLedgerEntryType(row) {
       const netBook = credits - debits;
       const remaining = opBalance;
       const variance = Math.max(0, -remaining);
-      return `<tr><td>${escapeHtml(st.name || '')}</td><td>${money(opBalance)}</td><td>${money(creditCash)}</td><td>${money(creditTransfer)}</td><td>${money(credits)}</td><td>${money(debitCash)}</td><td>${money(debitTransfer)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
+      return `<tr><td>${escapeHtml(st.name || '')}</td><td>${money(opBalance)}</td><td>${money(credits)}</td><td>${money(debits)}</td><td class="${netBook<0?'balance-negative':''}">${money(netBook)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${variance>0?'balance-negative':''}">${money(variance)}</td><td><input class="entry-input" data-cod-note="${st.id}"></td></tr>`;
     }).join('');
-    openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Operational Balance is the total funded by Treasury. Remaining Balance reduces as staff disburse funds. Net Balance is Total Credits minus Total Debits.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Op. Balance</th><th>Credit Cash</th><th>Credit Transfer</th><th>Total Credits</th><th>Debit Cash</th><th>Debit Transfer</th><th>Total Debits</th><th>Net Balance</th><th>Remaining</th><th>Variance</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
+    openModal('Central Close of Day', `<div class="stack"><div class="note">You are closing business date <strong>${businessDate()}</strong>. Closing opens the next business date immediately.</div><div class="note">Operational Balance is the total funded by Treasury. Remaining Balance reduces as staff disburse funds. Net Balance is Total Credits minus Total Debits.</div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Op. Balance</th><th>Total Credits</th><th>Total Debits</th><th>Net Balance</th><th>Remaining</th><th>Variance</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`, [{label:'Cancel', className:'secondary', onClick: closeModal}, {label:'Close Business Day', onClick: async ()=> {
       closeModal();
       showProcessing('Closing business day...');
       await nextPaint();
@@ -7917,16 +7898,18 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     return String(mode || '').trim().toLowerCase() === 'transfer' ? 'transfer' : 'cash';
   }
 
+  // SURGICAL CHANGE 2026-10-01 (client request): the Cash/Transfer payment
+  // mode is removed from the app entirely — every posting now counts as
+  // cash, including older records that were tagged 'transfer'. So the
+  // 'cash' total is the full amount and the 'transfer' total is always 0
+  // (kept only so existing callers and stored COD fields stay valid).
   function approvalModeAmount(record, mode) {
-    const desiredMode = normalizePaymentMode(mode);
     if (!record || record.status !== 'approved') return 0;
+    if (normalizePaymentMode(mode) === 'transfer') return 0;
     if (record.type === 'customer_credit_journal' || record.type === 'customer_debit_journal') {
-      const journalMode = normalizePaymentMode(record.payload?.formPaymentMode);
-      return journalMode === desiredMode ? Number(record.payload?.formAmount || 0) : 0;
+      return Number(record.payload?.formAmount || 0);
     }
-    // Direct customer_credit/customer_debit draw on the daily FORM directly.
-    const recordMode = normalizePaymentMode(record.payload?.paymentMode || record.payload?.payoutSource);
-    return recordMode === desiredMode ? Number(record.payload?.amount || 0) : 0;
+    return Number(record.payload?.amount || 0);
   }
 
   function approvedCreditTotalForDateByMode(staffId, dateStr, mode) {
@@ -8014,11 +7997,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const summary = c ? `
       <div class="kpi-row wrap cod-summary-grid">
         <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(c.formAmount ?? c.openingBalance ?? getStaffOperationalBalance((st||{}).id))}</div></div>
-        <div class="kpi"><div class="label">Credit Cash</div><div class="number">${money(totalCreditCash)}</div></div>
-        <div class="kpi"><div class="label">Credit Transfer</div><div class="number">${money(totalCreditTransfer)}</div></div>
         <div class="kpi"><div class="label">Total Credits</div><div class="number">${money(totalCredits)}</div></div>
-        <div class="kpi"><div class="label">Debit Cash</div><div class="number">${money(totalDebitCash)}</div></div>
-        <div class="kpi"><div class="label">Debit Transfer</div><div class="number">${money(totalDebitTransfer)}</div></div>
         <div class="kpi"><div class="label">Total Debits</div><div class="number">${money(totalDebits)}</div></div>
         <div class="kpi"><div class="label">Net Balance</div><div class="number ${netBook<0?'balance-negative':''}">${money(netBook)}</div></div>
         <div class="kpi"><div class="label">Remaining Balance</div><div class="number ${remainingBalance<0?'balance-negative':''}">${money(remainingBalance)}</div></div>
@@ -8091,11 +8070,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         ${currentOverdraw > 0 ? `<div class="note" style="background:#fdecea;border-color:var(--danger)"><strong>Anomaly:</strong> this teller closed the day with a negative operational balance of ${money(currentOverdraw)}. Resolve directly with the staff involved before marking this closed.</div>` : ''}
         <div class="kpi-row">
           <div class="kpi"><div class="label">Form</div><div class="number">${money(formAmount)}</div></div>
-          <div class="kpi"><div class="label">Credit Cash</div><div class="number">${money(totalCreditCash)}</div></div>
-          <div class="kpi"><div class="label">Credit Transfer</div><div class="number">${money(totalCreditTransfer)}</div></div>
           <div class="kpi"><div class="label">Total Credits</div><div class="number">${money(totalCredits)}</div></div>
-          <div class="kpi"><div class="label">Debit Cash</div><div class="number">${money(totalDebitCash)}</div></div>
-          <div class="kpi"><div class="label">Debit Transfer</div><div class="number">${money(totalDebitTransfer)}</div></div>
           <div class="kpi"><div class="label">Total Debits</div><div class="number">${money(totalDebits)}</div></div>
           <div class="kpi"><div class="label">Net Balance</div><div class="number ${currentNetBookBalance<0?'balance-negative':''}">${money(currentNetBookBalance)}</div></div>
           <div class="kpi"><div class="label">Remaining Balance</div><div class="number ${currentRemainingBalance<0?'balance-negative':''}">${money(currentRemainingBalance)}</div></div>
