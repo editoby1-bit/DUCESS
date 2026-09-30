@@ -1265,7 +1265,42 @@
 
   function setupRealtimeSubscriptions() {
     if (!isSupabaseApprovalMode() || !gateway.__realtime?.subscribe || realtimeBound) return;
-    const refreshApprovals = debounceAsync(async () => { await syncApprovalsFromGateway(); scheduleRender(); }, 120);
+    // SURGICAL FIX 2026-09-30 (Supabase egress): approvals are now loaded
+    // in FULL (see syncApprovalsFromGateway), so re-downloading the whole
+    // list on every single approval change would grow with the business.
+    // A realtime approval event now fetches only the changed request(s)
+    // (light view, by id) and merges them in; the full list still loads on
+    // login, tab return and the idle safety-net refresh.
+    const changedApprovalIds = new Set();
+    const removedApprovalIds = new Set();
+    const flushApprovalChanges = debounceAsync(async () => {
+      const ids = [...changedApprovalIds]; const removed = [...removedApprovalIds];
+      changedApprovalIds.clear(); removedApprovalIds.clear();
+      if (!ids.length && !removed.length) return;
+      if (!state.approvals?.length) { await syncApprovalsFromGateway(); scheduleRender(); return; }
+      let fresh = [];
+      if (ids.length) {
+        const res = await gateway.approvals.listApprovalRequests({ ids });
+        if (!res?.ok || !Array.isArray(res.data)) { await syncApprovalsFromGateway(); scheduleRender(); return; }
+        fresh = res.data;
+      }
+      const byId = new Map((state.approvals || []).map(a => [a.id, a]));
+      removed.forEach(id => byId.delete(id));
+      fresh.forEach(a => byId.set(a.id, a));
+      state.approvals = [...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+      syncStaffBusinessEffectsFromApprovedRequests();
+      syncOperationalEffectsFromApprovedRequests();
+      reconcileBusinessDateFromClosures();
+      save();
+      scheduleRender();
+    }, 120);
+    const refreshApprovals = (payload) => {
+      const newId = payload?.new?.id; const oldId = payload?.old?.id;
+      if (payload?.eventType === 'DELETE' && oldId) removedApprovalIds.add(String(oldId));
+      else if (newId) changedApprovalIds.add(String(newId));
+      else { syncApprovalsFromGateway().then(scheduleRender).catch(err => console.warn('[DUCESS realtime sync failed]', err)); return; }
+      flushApprovalChanges();
+    };
     const refreshCod = debounceAsync(async () => { await syncCodFromGateway(); await syncDebtBalancesFromGateway(); scheduleRender(); }, 120);
     const refreshBalances = debounceAsync(async (payload) => {
       const row = payload?.new || payload?.old || {};
