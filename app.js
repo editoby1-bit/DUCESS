@@ -965,6 +965,26 @@
     return result;
   }
 
+  // SURGICAL ADDITION 2026-10-01: refresh just the given request(s) and
+  // merge them into state — used right after approve/reject so the step
+  // stays tiny and inside the 20s request deadline (a full reload of every
+  // approval there could make a SUCCESSFUL approval report "timed out").
+  // Falls back to the full sync if the targeted read fails.
+  async function syncApprovalsByIdFromGateway(ids) {
+    const list = (ids || []).filter(Boolean).map(String);
+    if (!list.length || !isSupabaseApprovalMode() || !(state.approvals || []).length) return syncApprovalsFromGateway();
+    const result = await gateway.approvals.listApprovalRequests({ ids: list });
+    if (!result?.ok || !Array.isArray(result.data)) return syncApprovalsFromGateway();
+    const byId = new Map((state.approvals || []).map(a => [a.id, a]));
+    result.data.forEach(a => byId.set(a.id, a));
+    state.approvals = [...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+    syncStaffBusinessEffectsFromApprovedRequests();
+    syncOperationalEffectsFromApprovedRequests();
+    reconcileBusinessDateFromClosures();
+    save();
+    return result;
+  }
+
   function resolveStaffWalletForBusinessPayload(payload = {}) {
     const accountNumber = String(payload.accountNumber || '').trim();
     const staffId = String(payload.staffAccountId || payload.staffId || payload.customerId || '').trim();
@@ -1688,7 +1708,7 @@ if (approvalRecord.type === 'float_topup') {
     }
     // Do not block the teller on a full approvals refresh after submit.
     // The request has already been inserted by Supabase; refresh the queue quietly in the background.
-    syncApprovalsFromGateway().catch(error => console.warn('Background approvals refresh failed after submit', error));
+    syncApprovalsByIdFromGateway([result.data?.id]).catch(error => console.warn('Background approvals refresh failed after submit', error));
     pushAudit('request_created', `${type} by ${staff?.name || 'System'}</div>`);
     return result;
   }
@@ -1738,7 +1758,7 @@ if (approvalRecord.type === 'float_topup') {
             pendingReq.approvedAt = new Date().toISOString();
             applyRequest(pendingReq);
           }
-          await syncApprovalsFromGateway();
+          await syncApprovalsByIdFromGateway([id]);
           syncOperationalEffectsFromApprovedRequests();
           save();
           pushAudit('request_approved', `${pendingReq?.type || 'request'} approved`);
@@ -1753,7 +1773,7 @@ if (approvalRecord.type === 'float_topup') {
           payload: payloadOverride || null
         });
         if (result?.ok) {
-          await syncApprovalsFromGateway();
+          await syncApprovalsByIdFromGateway([id]);
           await syncApprovalEffectsFromGateway(result.data);
           await syncCodFromGateway();
           syncOperationalEffectsFromApprovedRequests();
@@ -1776,7 +1796,7 @@ if (approvalRecord.type === 'float_topup') {
     try {
       return await withRequestTimeout((async () => {
         const result = await gateway.approvals.rejectRequest({ requestId: id, rejectedByStaffId: getStaffBackendId(staff), rejectedByName: staff?.name || 'System' });
-        if (result?.ok) { await syncApprovalsFromGateway(); pushAudit('request_rejected', `${result.data?.type || 'request'} rejected</div>`); render(); }
+        if (result?.ok) { await syncApprovalsByIdFromGateway([id]); pushAudit('request_rejected', `${result.data?.type || 'request'} rejected</div>`); render(); }
         return result;
       })());
     } catch (requestError) {
@@ -3409,7 +3429,7 @@ function hideProcessing() {
         ttlMs: APPROVAL_REVIEW_LOCK_MS
       }).then(async (result) => {
         if (result?.ok) {
-          await syncApprovalsFromGateway();
+          await syncApprovalsByIdFromGateway([id]);
           return result;
         }
         if (result?.error?.code === 'APPROVAL_LOCKED') {
@@ -3417,7 +3437,7 @@ function hideProcessing() {
           state.ui.selectedApprovalIds = (state.ui.selectedApprovalIds || []).filter(x => x !== id);
           save();
           showToast(result.error.message || 'This request is being reviewed by another staff');
-          await syncApprovalsFromGateway();
+          await syncApprovalsByIdFromGateway([id]);
           renderWorkspace();
           return result;
         }
