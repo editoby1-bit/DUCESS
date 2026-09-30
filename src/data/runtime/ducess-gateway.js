@@ -1574,6 +1574,30 @@ if (inserted.error) {
       // full payload, so nothing here can cause a stripped photo to ever
       // get posted to a customer record.
       const listSource = config?.supabase?.approvalRequestsListView || 'approval_requests_list_view';
+      // SURGICAL FIX 2026-09-30: filters.all pages through EVERY request
+      // (500 per request) instead of stopping at the latest 100 — Opening
+      // Cash/Till/COD are summed from all approved requests, so a capped
+      // list silently dropped older funding once there were >100 requests.
+      // filters.ids fetches just those requests (cheap status check).
+      if (filters?.all || (Array.isArray(filters?.ids) && filters.ids.length)) {
+        const PAGE = 500;
+        const collected = [];
+        let useView = true;
+        for (let from = 0; ; from += PAGE) {
+          let q = client.from(useView ? listSource : approvalRequestsTable).select(approvalRequestsSelect).order('requested_at', { ascending: false }).order('id', { ascending: false });
+          if (Array.isArray(filters?.ids) && filters.ids.length) q = q.in('id', filters.ids);
+          if (filters?.status) q = q.eq('status', filters.status);
+          if (filters?.requestType) q = q.eq('request_type', filters.requestType);
+          if (filters?.requestedByStaffId) q = q.eq('requested_by_staff_id', filters.requestedByStaffId);
+          const { data: pageData, error: pageError } = await q.range(from, from + PAGE - 1);
+          if (pageError && useView && from === 0 && isMissingColumnOrRelationError(pageError)) { useView = false; from -= PAGE; continue; }
+          if (pageError) return defaultResult.err('APPROVAL_LIST_FAILED', 'Could not load approval requests from Supabase.', pageError);
+          const rows = Array.isArray(pageData) ? pageData : [];
+          collected.push(...rows);
+          if (rows.length < PAGE) break;
+        }
+        return defaultResult.ok(collected.map(normalizeApprovalRecord).filter(Boolean));
+      }
       let query = client.from(listSource).select(approvalRequestsSelect).order('requested_at', { ascending: false });
       if (filters?.status) query = query.eq('status', filters.status);
       if (filters?.requestType) query = query.eq('request_type', filters.requestType);

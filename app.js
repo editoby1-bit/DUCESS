@@ -302,6 +302,7 @@
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
   let realtimePollingTimer = null;
+  let pendingWatchTimer = null;
   const state = bootstrapState();
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
@@ -949,7 +950,11 @@
 
   async function syncApprovalsFromGateway(filters = {}) {
     if (!isSupabaseApprovalMode() || !gateway.approvals?.listApprovalRequests) return defaultResultOk(state.approvals || []);
-    const result = await gateway.approvals.listApprovalRequests(filters);
+    // SURGICAL FIX 2026-09-30: fetch ALL requests by default (was the
+    // gateway's default of the latest 100) — Opening Cash, Till and COD
+    // are summed over every approved request, so a capped list dropped a
+    // teller's older funding and the figures stopped adding up.
+    const result = await gateway.approvals.listApprovalRequests({ all: true, ...filters });
     if (result?.ok && Array.isArray(result.data)) {
       state.approvals = result.data;
       syncStaffBusinessEffectsFromApprovedRequests();
@@ -1341,6 +1346,26 @@
     // while cutting idle reads ~70%. When realtime is NOT connected, the
     // 45s fallback below still applies as before.
     const STALE_DATA_MS = 300000;
+    // SURGICAL ADDITION 2026-09-30 (client: Cash Received didn't move after
+    // approval): while THIS user has requests awaiting approval, check just
+    // those few rows every 20s (tiny query, visible tab only) and do a full
+    // refresh the moment any of them is approved/rejected — so the Till
+    // box updates promptly even if the realtime channel misses the event.
+    if (!pendingWatchTimer) {
+      pendingWatchTimer = setInterval(async () => {
+        if (document.hidden || realtimeRefreshInFlight) return;
+        const me = currentStaff();
+        if (!me) return;
+        const mine = (state.approvals || []).filter(r => r.status === 'pending' && (r.payload?.staffId === me.id || r.requestedBy === me.id || r.requestedByStaffId === getStaffBackendId(me)));
+        if (!mine.length) return;
+        try {
+          const res = await gateway.approvals.listApprovalRequests({ ids: mine.map(r => r.id) });
+          if (res?.ok && Array.isArray(res.data) && res.data.some(r => r.status !== 'pending')) {
+            await refreshRealtimeState('pending-decided');
+          }
+        } catch (err) { console.warn('[DUCESS pending check failed]', err); }
+      }, 20000);
+    }
     if (!realtimePollingTimer) {
       realtimePollingTimer = setInterval(() => {
         const lastAt = state.__lastRealtimeRefresh?.at ? new Date(state.__lastRealtimeRefresh.at).getTime() : 0;
