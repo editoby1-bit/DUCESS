@@ -5505,6 +5505,14 @@ function normalizeStaffLedgerEntryType(row) {
     return mine;
   }
 
+  // SURGICAL ADDITION 2026-10-01 (client-reported "Admin does not exist in
+  // Supabase"): staff wallets (the 4000-series accounts) live only inside
+  // the app, not in the Supabase customers table, so a Non Cash to/from
+  // one passed submission and then failed at approval. Blocked up front
+  // with a clear pointer to the real account to use.
+  const STAFF_WALLET_NON_CASH_MSG = 'That is an internal staff wallet, not a bank account — use the staff member\'s Staff Operational (T) account. Open one via Account Opening if they don\'t have it.';
+  const isLocalOnlyStaffAccount = (c) => !!c && (c.accountType === 'staff_wallet' || c.accountType === 'staff');
+
   function renderIntraTransfer() {
     const draft = state.ui.intraTransferDraft ||= {};
     const sourceAccount = draft.sourceId ? (state.customers || []).find(c => c.id === draft.sourceId) : null;
@@ -5598,6 +5606,10 @@ function normalizeStaffLedgerEntryType(row) {
     if (receivedByInput) receivedByInput.oninput = () => { draft.receivedBy = receivedByInput.value; };
     const lookupAcct = async (acctNum, nameElId, idKey, nameKey, balanceElId, balanceKey, isDest) => {
       const match = (state.customers || []).find(c => c.accountNumber === acctNum || c.account_number === acctNum);
+      if (isLocalOnlyStaffAccount(match)) {
+        if (byId(nameElId)) byId(nameElId).innerHTML = `<span style="color:var(--accent-red)">Staff wallet — not allowed in Non Cash</span>`;
+        return showToast(STAFF_WALLET_NON_CASH_MSG);
+      }
       const statusElId = isDest ? 'itrDestStatus' : 'itrSourceStatus';
       const typeElId = isDest ? 'itrDestType' : 'itrSourceType';
       const typeLabel = (c) => c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')));
@@ -5687,6 +5699,8 @@ function normalizeStaffLedgerEntryType(row) {
       // slip an arbitrary source past this check.
       if (isStaffFunding && !applyStaffAccountLock(draft)) return;
       if (!draft.sourceId) return showToast('Look up the source account first');
+      const srcAccount = (state.customers || []).find(c => c.id === draft.sourceId);
+      if (isLocalOnlyStaffAccount(srcAccount) || isLocalOnlyStaffAccount(destAccount)) return showToast(STAFF_WALLET_NON_CASH_MSG);
       if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
@@ -6911,14 +6925,19 @@ function normalizeStaffLedgerEntryType(row) {
     if (byId('txPostSingle')) byId('txPostSingle').onclick = () => {
       if (!hasPermission(kind)) return showToast('No access to post');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (kind === 'debit' && getStaffOperationalBalance(staff.id) <= 0) return showToast('No operational balance to debit from — request a credit from Treasury first');
+      // SURGICAL FIX 2026-10-01 (client): a debit is paid out of the Till —
+      // the teller's current balance (Opening Cash + Cash Received - Cash
+      // Withdrawal) — not only out of Opening Cash/funding. Cash collected
+      // from today's credits can be paid out on a debit.
+      const tillNow = getTillBreakdown(staff.id, businessDate()).till;
+      if (kind === 'debit' && tillNow <= 0) return showToast('No cash in your Till to pay out — post a credit or receive a transfer first');
       const accountNumberInput = String(byId('txAcc')?.value || '').trim();
       const customer = getCustomerByAccountNo(accountNumberInput);
       if (!accountNumberInput || !customer) return showToast('Search for customer first');
       if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast('Frozen account cannot accept transactions'); }
       const amount = Number(byId('txAmount').value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
-      if (kind === 'debit' && amount > getStaffOperationalBalance(staff.id) + 0.01) return showToast(`Debit exceeds your operational balance (${money(getStaffOperationalBalance(staff.id))})`);
+      if (kind === 'debit' && amount > tillNow + 0.01) return showToast(`Debit exceeds your Till (${money(tillNow)})`);
       const mode = selectedMode();
       const chargeBreakdown = kind === 'credit' ? collectChargeBreakdownFromUi('single', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -8422,6 +8441,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       // whichever field's Search button was actually clicked.
       const target = state.ui.nonCashSearchTarget;
       const draft = state.ui.intraTransferDraft ||= {};
+      if (isLocalOnlyStaffAccount(c)) { save(); return showToast(STAFF_WALLET_NON_CASH_MSG); }
       if (target === 'dest') {
         draft.destAcct = c.accountNumber || '';
         draft.destName = c.name || '';
