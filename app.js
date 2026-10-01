@@ -3204,10 +3204,7 @@ function hideProcessing() {
       // gives "balance as of the start of today," so the Till math below
       // adds today's activity exactly once (client-confirmed: at a new
       // business date, Till = Opening Cash, then adjusts from there).
-      const openingCash = getStaffOperationalBalance(st?.id, businessDate());
-      const cashReceived = approvedCreditTotalForDateByMode(st?.id, businessDate(), 'cash');
-      const cashWithdrawal = approvedDebitTotalForDateByMode(st?.id, businessDate(), 'cash');
-      return { openingCash, cashReceived, cashWithdrawal, till: openingCash + cashReceived - cashWithdrawal };
+      return getTillBreakdown(st?.id, businessDate());
     })();
     state.ui.generatedJournals ||= {};
     state.ui.collapsedJournals ||= {};
@@ -6097,6 +6094,28 @@ function normalizeStaffLedgerEntryType(row) {
     };
   }
 
+  // SURGICAL ADDITION 2026-10-01 (client rule): Opening Cash + Cash
+  // Received - Cash Withdrawal = Till. Transfers INTO the teller's account
+  // only ever land in Opening Cash; Cash Received/Withdrawal are the
+  // teller's own customer work for the day. At close of business the teller
+  // transfers the Till to Treasury and ALL the boxes reset to zero — so once
+  // the teller has sent money out today and that leaves the Till at zero,
+  // every box shows zero (otherwise Opening would read negative next to
+  // the day's Received/Withdrawal). Single source for both the first render
+  // and the live refresh of the Till box.
+  function getTillBreakdown(staffId, dateStr) {
+    const openingCash = getStaffOperationalBalance(staffId, dateStr);
+    const cashReceived = approvedCreditTotalForDateByMode(staffId, dateStr, 'cash');
+    const cashWithdrawal = approvedDebitTotalForDateByMode(staffId, dateStr, 'cash');
+    const till = openingCash + cashReceived - cashWithdrawal;
+    const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId);
+    const handedOverToday = !!opAccount && (state.approvals || []).some(r =>
+      r.status === 'approved' && r.type === 'inter_staff_credit' &&
+      r.payload?.sourceAccountId === opAccount.id && r.payload?.date === dateStr);
+    if (handedOverToday && Math.abs(till) < 0.01) return { openingCash: 0, cashReceived: 0, cashWithdrawal: 0, till: 0 };
+    return { openingCash, cashReceived, cashWithdrawal, till };
+  }
+
   function getStaffOperationalBalance(staffId, excludeDateStr) {
     return getStaffOperationalBreakdown(staffId, excludeDateStr).variance;
   }
@@ -6409,10 +6428,7 @@ function normalizeStaffLedgerEntryType(row) {
       // Cash Withdrawal = Till): Opening Cash must be the start-of-day
       // balance, exactly as in the initial render — the full balance
       // already includes today's postings, so they were counted twice.
-      const openingCashLive = getStaffOperationalBalance(staff.id, businessDate());
-      const cashReceivedLive = approvedCreditTotalForDateByMode(staff.id, businessDate(), 'cash');
-      const cashWithdrawalLive = approvedDebitTotalForDateByMode(staff.id, businessDate(), 'cash');
-      const tillLive = openingCashLive + cashReceivedLive - cashWithdrawalLive;
+      const { openingCash: openingCashLive, cashReceived: cashReceivedLive, cashWithdrawal: cashWithdrawalLive, till: tillLive } = getTillBreakdown(staff.id, businessDate());
       if (byId('postingOpeningCash')) byId('postingOpeningCash').textContent = money(openingCashLive);
       if (byId('postingCashReceived')) byId('postingCashReceived').textContent = money(cashReceivedLive);
       if (byId('postingCashWithdrawal')) byId('postingCashWithdrawal').textContent = money(cashWithdrawalLive);
