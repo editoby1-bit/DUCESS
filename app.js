@@ -160,8 +160,16 @@
     cash_officer: 'Treasury',
     approving_officer: 'Approving Officer',
     admin_officer: 'Administrative Officer',
-    report_officer: 'Report Officer'
+    report_officer: 'Report Officer',
+    // ROLE/STAFF SEPARATION 2026-10-11: a staff member who has been added
+    // but not yet given a role. Display-only — never offered as a role to
+    // pick (see ASSIGNABLE_ROLE_KEYS) and carries no permissions at all.
+    unassigned: 'Unassigned'
   };
+  const UNASSIGNED_ROLE = 'unassigned';
+  const ASSIGNABLE_ROLE_KEYS = Object.keys(ROLE_LABELS).filter(k => k !== UNASSIGNED_ROLE);
+  // Roles that operate cash (own an operational account / close a day).
+  const CASH_HANDLING_ROLES = ['teller', 'cash_officer', 'admin_officer'];
 
   const MODULES = {
     customer_service: {
@@ -391,6 +399,7 @@
     state.operations.entries ||= [];
     state.cod ||= [];
     state.tempGrants ||= [];
+    state.roleAssignments ||= [];
     state.staffAccounts ||= {};
     state.businessExtras ||= [];
     state.dayClosures ||= [];
@@ -651,6 +660,53 @@
   }
   function canCloseBusinessDay(staff=currentStaff()){ return !!staff && (isAdminStaff(staff) || ['approving_officer'].includes(staff.role)); }
 
+  // ===== ROLE / STAFF SEPARATION (2026-10-11, client request) =====
+  // A staff member is a person (id, login, operational account, ledger,
+  // balances, COD, debts — all keyed by staff id and NEVER by role).
+  // A role is an assignment ON that person: staff.role is their CURRENT role
+  // ('unassigned' until one is given) and state.roleAssignments is the full
+  // history (who held which role, from when to when, who assigned it).
+  // Permissions follow the current role; every historical record stays tied
+  // to the staff member who performed it, and getStaffRoleAt() answers
+  // "what role did they hold when they did it".
+  function staffRoleCode(s) {
+    const r = String(s?.role || s?.role_code || s?.roleCode || '').trim();
+    return r || UNASSIGNED_ROLE;
+  }
+  function hasAssignedRole(s) { return !!s && staffRoleCode(s) !== UNASSIGNED_ROLE; }
+  function roleLabelOf(code) { return ROLE_LABELS[code] || (code ? String(code) : 'Unassigned'); }
+  function getStaffRoleHistory(staffId) {
+    return (state.roleAssignments || [])
+      .filter(a => a.staffId === staffId)
+      .sort((a, b) => String(a.assignedAt || '').localeCompare(String(b.assignedAt || '')));
+  }
+  // Role the staff member held at a given moment. No history rows (legacy
+  // staff, or migration not run) → their current role; before the first row
+  // → the first role they were ever given.
+  function getStaffRoleAt(staffId, atIso) {
+    const staff = (state.staff || []).find(x => x.id === staffId);
+    const hist = getStaffRoleHistory(staffId);
+    if (!hist.length) return staff ? staffRoleCode(staff) : UNASSIGNED_ROLE;
+    const t = new Date(atIso || Date.now()).getTime();
+    if (Number.isNaN(t)) return staff ? staffRoleCode(staff) : UNASSIGNED_ROLE;
+    for (let i = hist.length - 1; i >= 0; i--) {
+      if (new Date(hist[i].assignedAt).getTime() <= t) return hist[i].roleCode || UNASSIGNED_ROLE;
+    }
+    return hist[0].roleCode || UNASSIGNED_ROLE;
+  }
+  function staffEverHeldRole(staffId, roles) {
+    const staff = (state.staff || []).find(x => x.id === staffId);
+    if (staff && roles.includes(staffRoleCode(staff))) return true;
+    return getStaffRoleHistory(staffId).some(a => roles.includes(a.roleCode));
+  }
+  async function syncRoleAssignmentsFromGateway() {
+    if (!isSupabaseApprovalMode() || !gateway.staff?.listRoleAssignments) return;
+    try {
+      const res = await gateway.staff.listRoleAssignments();
+      if (res?.ok && Array.isArray(res.data)) { state.roleAssignments = res.data; save(); }
+    } catch (err) { console.warn('[DUCESS] role assignment sync failed:', err); }
+  }
+
   function ensureStaffAccount(staffId, sourceState=state) {
     sourceState.staffAccounts ||= {};
     const st=(sourceState.staff||[]).find(x=>x.id===staffId);
@@ -674,7 +730,10 @@
   }
 
   function auditEntry(actor, action, details) {
-    return { id: uid('aud'), at: new Date().toISOString(), actorId: currentStaff()?.id || 'system', actor, action, details };
+    // actorRole = the role the actor held at the moment of the action
+    // (role/staff separation) — survives later reassignment.
+    const cs = currentStaff();
+    return { id: uid('aud'), at: new Date().toISOString(), actorId: cs?.id || 'system', actor, actorRole: cs ? staffRoleCode(cs) : '', action, details };
   }
 
   function pushAudit(action, details) {
@@ -798,6 +857,10 @@
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
+    // ROLE/STAFF SEPARATION 2026-10-11: access is role-dependent. A staff
+    // member with no role assigned has no access to anything (not even the
+    // formerly-universal tools) until an admin assigns one.
+    if (!hasAssignedRole(staff)) return false;
     // SURGICAL FIX 2026-09-07 (client request): my_statement used to be
     // universal — now it's only for roles who actually handle cash
     // (Teller, Treasury, Collector, Admin — see DEFAULT_PERMS below).
@@ -1182,7 +1245,7 @@
         existing.set(item.id, Object.assign({}, existing.get(item.id) || {}, {
           id: item.id,
           name: item.fullName || item.name || item.staffId || '',
-          role: item.roleCode || item.role || 'customer_service',
+          role: item.roleCode || item.role || UNASSIGNED_ROLE,
           active: item.isActive !== false,
           staffId: item.staffId || item.staff_code || '',
           branchId: item.branchId || null,
@@ -1196,6 +1259,7 @@
       syncAllStaffWallets();
       save();
     }
+    await syncRoleAssignmentsFromGateway();
     return result;
   }
 
@@ -1622,6 +1686,9 @@ if (approvalRecord.type === 'float_topup') {
     if (approver) {
       payload = { ...payload, assignedApproverId: approver.id, assignedApproverName: approver.name };
     }
+    // Role/staff separation: record the role the requester held when they
+    // submitted this (the request stays tied to the staff member regardless).
+    payload = { ...payload, submittedByRole: staffRoleCode(currentStaff()) };
     if (!isSupabaseApprovalMode()) return defaultResultOk(createRequest(type, payload, meta));
     const staff = currentStaff();
     let result;
@@ -2421,7 +2488,7 @@ function hideProcessing() {
         <div class="module-icon">${m.icon}</div>
         <div class="module-title">${m.title}</div>
       </div>`;
-    }).join('');
+    }).join('') + (currentStaff() && !hasAssignedRole(currentStaff()) ? `<div class="note" style="grid-column:1/-1;margin-top:12px">No role has been assigned to your staff profile yet, so no sections are available. Ask an Administrative Officer to assign you a role.</div>` : '');
     qq('.module-card').forEach(card => {
       card.onclick = () => {
         const key = card.dataset.module;
@@ -3534,7 +3601,7 @@ function hideProcessing() {
       return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.staffName || '')}</td><td>${money(formAmount)}</td><td>${money(creditCash + creditTransfer)}</td><td>${money(debitCash + debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${escapeHtml(c.resolutionNote || c.note || '—')}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
-    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit')).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
+    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit') || (state.cod||[]).some(c=>c.staffId===s.id && c.date===selected)).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
@@ -4046,7 +4113,7 @@ function nextPaint() {
       // see whether that real account actually exists for a given staff
       // member without checking Supabase directly. Shown here now.
       const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === s.id);
-      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code> <button class="secondary tiny-btn" data-staff-edit-code="${s.id}" title="Staff ID is manager-assigned — must stay unique">Edit ID</button></td><td><code style="font-size:0.85em">${escapeHtml(String(acc.accountNumber || '—'))}</code></td><td>${opAccount ? `<code style="font-size:0.85em">${escapeHtml(String(opAccount.accountNumber || opAccount.account_number || ''))}</code>` : `<span style="color:var(--text-muted)">— none —</span>`}</td><td>${ROLE_LABELS[staffRole] || staffRole}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(staffName)}</td><td><code style="font-size:0.85em">${escapeHtml(String(staffCode))}</code> <button class="secondary tiny-btn" data-staff-edit-code="${s.id}" title="Staff ID is manager-assigned — must stay unique">Edit ID</button></td><td><code style="font-size:0.85em">${escapeHtml(String(acc.accountNumber || '—'))}</code></td><td>${opAccount ? `<code style="font-size:0.85em">${escapeHtml(String(opAccount.accountNumber || opAccount.account_number || ''))}</code>` : `<span style="color:var(--text-muted)">— none —</span>`}</td><td>${hasAssignedRole(s) ? escapeHtml(roleLabelOf(staffRoleCode(s))) : '<span style="color:var(--text-muted);font-style:italic">Unassigned</span>'}</td><td><span style="padding:2px 8px;border-radius:10px;font-size:0.8em;background:${isActive?'#d1fae5':'#fee2e2'};color:${isActive?'#065f46':'#991b1b'}">${isActive ? 'Active' : 'Inactive'}</span></td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button>${isAdminStaff() ? `<button class="secondary" data-staff-assign-role="${s.id}">${hasAssignedRole(s) ? 'Reassign' : 'Assign Role'}</button>` : ''}<button class="secondary" data-staff-role-history="${s.id}">Role History</button>${isAdminStaff() ? `<button class="secondary" data-staff-reset-password="${s.id}">Reset Password</button>` : ''}<button class="secondary" data-staff-toggle="${s.id}">${isActive ? 'Deactivate' : 'Reactivate'}</button></td></tr>`;
     }).join('');
     return `
       <div class="table-card">
@@ -5032,8 +5099,15 @@ function normalizeStaffLedgerEntryType(row) {
     // noise). SURGICAL REMOVAL 2026-09-14 (client-confirmed design): the
     // "Collector" role is retired entirely — dropped from this roster.
     const staffSources = (state.staff || [])
-      .filter(s => s.role === 'teller' || s.role === 'admin_officer')
-      .map(s => ({ id: s.id, name: s.name || '', role: ROLE_LABELS[s.role] || s.role, ref: s.staffCode || s.staff_code || s.id || '—' }));
+      // Role/staff separation: a staff member who has since been reassigned
+      // still appears (totals are tied to the person who handed the cash over).
+      .filter(s => staffEverHeldRole(s.id, ['teller', 'admin_officer']))
+      .map(s => {
+        const cur = staffRoleCode(s);
+        const heldBefore = ['teller', 'admin_officer'].filter(r => r !== cur && staffEverHeldRole(s.id, [r]));
+        const label = roleLabelOf(cur) + (heldBefore.length && !['teller', 'admin_officer'].includes(cur) ? ` (formerly ${heldBefore.map(roleLabelOf).join(' / ')})` : '');
+        return { id: s.id, name: s.name || '', role: label, ref: s.staffCode || s.staff_code || s.id || '—' };
+      });
     const customerSourceIds = new Set();
     (state.approvals || []).forEach(r => {
       if (r.status === 'approved' && r.type === 'cash_receipt' && r.payload?.receivedFromType === 'customer' && r.payload?.receivedFromId) {
@@ -7387,8 +7461,11 @@ function normalizeStaffLedgerEntryType(row) {
     // the "Collector" role/source-type is retired entirely — Teller,
     // Admin (pick a specific staff member from that role), or Customer
     // (looked up by account number) now cover every case.
-    const tellerStaff = (state.staff || []).filter(s => s.role === 'teller');
-    const adminStaff = (state.staff || []).filter(s => s.role === 'admin_officer');
+    // Role/staff separation: someone reassigned away from Teller/Admin can
+    // still hand over cash they were accountable for, so the pickers include
+    // anyone who has held the role (still tied to the same staff id).
+    const tellerStaff = (state.staff || []).filter(s => staffEverHeldRole(s.id, ['teller']));
+    const adminStaff = (state.staff || []).filter(s => staffEverHeldRole(s.id, ['admin_officer']));
     let selectedStaffId = '';
     let selectedCustomer = null; // {id, name, accountNumber}
     openModal('Cash Receipt', `
@@ -7442,7 +7519,8 @@ function normalizeStaffLedgerEntryType(row) {
             if (!staffMember) return showToast('Selected staff not found');
             receivedFromId = staffMember.id;
             receivedFromName = staffMember.name || '';
-            receivedFromRole = staffMember.role;
+            // Recorded against the role they were acting in (the picked source type).
+            receivedFromRole = sourceType === 'teller' ? 'teller' : 'admin_officer';
           }
           const paymentMode = q('input[name="cashReceiptMode"]:checked')?.value || 'cash';
           const note = byId('cashReceiptNote')?.value?.trim() || '';
@@ -7747,7 +7825,15 @@ function normalizeStaffLedgerEntryType(row) {
       const actorStaff = getAuditActorStaff(a);
       return escapeHtml(actorStaff?.name || a.actor || a.actorName || a.actor_name || 'System');
     };
-    const rowForAudit = (a) => `<tr><td style="white-space:nowrap">${fmtDateTime(a.at || a.timestamp || a.createdAt)}</td><td>${actorName(a)}</td><td><span class="audit-action-badge">${escapeHtml(formatActionType(a))}</span></td><td style="font-size:12px">${formatAuditDetail(a)}</td></tr>`;
+    // Role the actor held WHEN they acted (stamped on new entries; resolved
+    // from role history for older/server entries).
+    const actorRoleAt = (a) => {
+      const actorStaff = getAuditActorStaff(a);
+      const stamped = a.actorRole || a.actor_role || a.metadata?.actor_role || '';
+      if (stamped) return stamped;
+      return actorStaff ? getStaffRoleAt(actorStaff.id, a.at || a.timestamp || a.createdAt) : '';
+    };
+    const rowForAudit = (a) => `<tr><td style="white-space:nowrap">${fmtDateTime(a.at || a.timestamp || a.createdAt)}</td><td>${actorName(a)}${actorRoleAt(a) ? `<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(roleLabelOf(actorRoleAt(a)))}</div>` : ''}</td><td><span class="audit-action-badge">${escapeHtml(formatActionType(a))}</span></td><td style="font-size:12px">${formatAuditDetail(a)}</td></tr>`;
     const scopeNote = adminView ? '<div class="note">Admin Global Audit View: showing all staff actions. Use role/staff filters to narrow the trail.</div>' : '<div class="note">Showing only your own audit trail.</div>';
     openModal('Audit Trail', `${scopeNote}${filterHtml}<div class="table-wrap"><table class="table"><thead><tr><th>Date &amp; Time</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead><tbody id="auditTrailRows"></tbody></table></div>`, [{label:'Close', onClick: closeModal}]);
     const renderAuditRows = () => {
@@ -7760,7 +7846,7 @@ function normalizeStaffLedgerEntryType(row) {
         const actorStaff = getAuditActorStaff(a);
         const action = String(a.action || a.actionType || a.action_type || '').trim();
         const isoDate = String(a.at || a.timestamp || a.createdAt || '').slice(0,10);
-        if (adminView && roleFilter && actorStaff?.role !== roleFilter) return false;
+        if (adminView && roleFilter && actorRoleAt(a) !== roleFilter) return false;
         if (adminView && staffFilter && actorStaff?.id !== staffFilter) return false;
         if (actionFilter && action !== actionFilter) return false;
         if (dateFrom && isoDate < dateFrom) return false;
@@ -8766,6 +8852,155 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     ]);
   }
 
+  // ===== Role assignment / reassignment (role/staff separation) =====
+  // Hard blockers keep the accountability trail intact: nothing a staff
+  // member started under one role is left dangling when they move to another.
+  // Warnings are informational — balances/debts stay on the person.
+  function getRoleChangeIssues(st, newRole) {
+    const blockers = [];
+    const warnings = [];
+    const infos = [];
+    const curRole = staffRoleCode(st);
+    const me = currentStaff();
+    const name = st.name || st.full_name || 'This staff member';
+    const leaving = hasAssignedRole(st) && curRole !== newRole;
+    const ids = new Set([st.id, getStaffBackendId(st)].filter(Boolean));
+    if (leaving) {
+      const pending = (state.approvals || []).filter(a => a.status === 'pending' && (ids.has(a.requestedByStaffId) || ids.has(a.requestedBy) || ids.has(a.payload?.staffId)));
+      if (pending.length) blockers.push(`${pending.length} pending approval request(s) raised by ${name} must be approved or rejected first — they were submitted as ${roleLabelOf(curRole)}.`);
+      if (curRole === 'approving_officer') {
+        const routed = (state.approvals || []).filter(a => a.status === 'pending' && ids.has(a.payload?.assignedApproverId));
+        if (routed.length) blockers.push(`${routed.length} pending request(s) are routed to ${name} for approval — decide them (or have an Administrative Officer do so) first.`);
+      }
+      if (CASH_HANDLING_ROLES.includes(curRole) && (state.cod || []).some(c => c.staffId === st.id && c.status === 'pending')) {
+        blockers.push(`${name} has an unresolved Close-of-Day submission — resolve it first.`);
+      }
+      if (curRole === 'admin_officer' && newRole !== 'admin_officer') {
+        if (me && me.id === st.id) blockers.push('You cannot remove your own Administrative Officer role — ask another administrator to do it.');
+        const otherAdmins = (state.staff || []).filter(x => x.id !== st.id && staffRoleCode(x) === 'admin_officer' && x.active !== false && x.is_active !== false);
+        if (!otherAdmins.length) blockers.push('This is the only active Administrative Officer — assign another administrator before changing this role.');
+      }
+      if (CASH_HANDLING_ROLES.includes(curRole)) {
+        const bal = Number(getStaffOperationalBalance(st.id) || 0);
+        if (Math.abs(bal) > 0.009) warnings.push(`Operational balance of ₦${money(bal)} stays on ${name}'s own account and remains reported against them. Settle it first if it should not carry over.`);
+      }
+      const debt = Number(ensureStaffAccount(st.id).debtBalance || 0);
+      if (debt > 0) warnings.push(`Outstanding debt of ₦${money(debt)} stays tied to ${name}.`);
+    }
+    if (CASH_HANDLING_ROLES.includes(newRole)) {
+      const hasOp = (state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === st.id);
+      infos.push(hasOp ? `${name}'s existing operational account will be re-used (same account number and balance).` : `An operational account will be opened automatically for ${name}.`);
+    }
+    if (newRole === UNASSIGNED_ROLE) warnings.push(`${name} will lose all access until another role is assigned. History and balances are kept.`);
+    return { blockers, warnings, infos };
+  }
+
+  function applyLocalRoleChange(st, newRole, note, actor) {
+    const now = new Date().toISOString();
+    state.roleAssignments ||= [];
+    state.roleAssignments.forEach(a => { if (a.staffId === st.id && !a.endedAt) { a.endedAt = now; a.endedByStaffId = actor?.id || null; } });
+    state.roleAssignments.push({ id: uid('ra'), staffId: st.id, roleCode: newRole, assignedAt: now, endedAt: null, assignedByStaffId: actor?.id || null, assignedByName: actor?.name || '', note: note || '' });
+    st.role = newRole;
+    st.role_code = newRole;
+  }
+
+  function openAssignRoleModal(staffId) {
+    const st = (state.staff || []).find(x => x.id === staffId);
+    if (!st) return showToast('Staff not found');
+    if (!isAdminStaff()) return showToast('Only an Administrative Officer can assign roles');
+    const curRole = staffRoleCode(st);
+    const assigned = hasAssignedRole(st);
+    const name = st.name || st.full_name || '';
+    const options = ASSIGNABLE_ROLE_KEYS.map(k => `<option value="${k}" ${k === curRole ? 'disabled' : ''}>${escapeHtml(ROLE_LABELS[k])}${k === curRole ? ' (current)' : ''}</option>`).join('')
+      + (assigned ? `<option value="${UNASSIGNED_ROLE}">— Remove role (no access) —</option>` : '');
+    openModal(assigned ? 'Reassign Role' : 'Assign Role', `
+      <p style="margin:0 0 10px"><strong>${escapeHtml(name)}</strong> <code style="font-size:0.85em">${escapeHtml(String(st.staffCode || st.staff_code || ''))}</code><br>
+      <span style="font-size:0.85em;color:var(--text-muted)">Current role: ${escapeHtml(roleLabelOf(curRole))}</span></p>
+      <div class="form-grid one" style="gap:10px">
+        <div class="field"><label>New Role <span style="color:red">*</span></label>
+          <select id="assignRoleSelect" class="entry-input"><option value="">— Select role —</option>${options}</select></div>
+        <div class="field"><label>Reason${assigned ? ' <span style="color:red">*</span>' : ' (optional)'}</label><input id="assignRoleNote" class="entry-input" placeholder="e.g. Moved from Teller to Treasury"></div>
+      </div>
+      <div id="assignRoleIssues" style="margin-top:10px;font-size:0.85em"></div>
+      <p style="margin:10px 0 0;font-size:0.8em;color:var(--text-muted)">Access follows the role. Everything ${escapeHtml(name)} has already done stays recorded against ${escapeHtml(name)} under the role held at the time.</p>
+    `, [
+      { label: 'Cancel', className: 'secondary', onClick: closeModal },
+      { label: assigned ? 'Reassign' : 'Assign Role', onClick: async () => {
+        const newRole = byId('assignRoleSelect')?.value || '';
+        const note = byId('assignRoleNote')?.value?.trim() || '';
+        if (!newRole) return showToast('Select a role');
+        if (newRole === curRole) return showToast(`${name} already holds this role`);
+        const issues = getRoleChangeIssues(st, newRole);
+        if (issues.blockers.length) return showToast(issues.blockers[0]);
+        if (assigned && !note) return showToast('Enter a reason for the reassignment');
+        const actor = currentStaff();
+        const submitBtn = document.querySelector('.modal-actions button:last-child');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+        try {
+          let result = null;
+          if (isSupabaseApprovalMode() && gateway.staff?.assignStaffRole) {
+            result = await gateway.staff.assignStaffRole({
+              staffId: st.id, roleCode: newRole, note,
+              assignedByStaffId: actor?.id || null, assignedByName: actor?.name || null,
+            });
+            if (!result?.ok) {
+              showToast(`Error: ${result?.error?.message || 'Could not assign role'}`);
+              if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = assigned ? 'Reassign' : 'Assign Role'; }
+              return;
+            }
+          }
+          const fromLabel = roleLabelOf(curRole);
+          applyLocalRoleChange(st, newRole, note, actor);
+          save();
+          if (isSupabaseApprovalMode()) await syncStaffFromGateway(); // pull server truth (staff + history)
+          const action = newRole === UNASSIGNED_ROLE ? 'staff_role_removed' : (assigned ? 'staff_role_changed' : 'staff_role_assigned');
+          pushAudit(action, `${name} (${st.staffCode || st.staff_code || ''}): ${fromLabel} → ${roleLabelOf(newRole)}${note ? `. Reason: ${note}` : ''}`);
+          const op = result?.data?.operationalAccount;
+          if (op) {
+            await syncCustomersListFromGateway();
+            pushAudit(result.data.operationalAccountReused ? 'operational_account_reused' : 'operational_account_opened', `Operational account ${op.account_number || op.accountNumber || ''} ${result.data.operationalAccountReused ? 're-used for' : 'auto-opened for'} ${name}`);
+          } else if (result?.data?.operationalAccountError) {
+            showToast(`Role assigned, but operational account setup failed: ${result.data.operationalAccountError}. Open it manually.`);
+          }
+          closeModal();
+          render();
+          showToast(`✓ ${name} is now ${roleLabelOf(newRole)}`);
+        } catch (err) {
+          showToast('Unexpected error assigning role');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = assigned ? 'Reassign' : 'Assign Role'; }
+        }
+      } }
+    ]);
+    const sel = byId('assignRoleSelect');
+    const box = byId('assignRoleIssues');
+    const paint = () => {
+      const v = sel?.value || '';
+      if (!box) return;
+      if (!v) { box.innerHTML = ''; return; }
+      const iss = getRoleChangeIssues(st, v);
+      box.innerHTML = [
+        ...iss.blockers.map(t => `<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:6px">⛔ ${escapeHtml(t)}</div>`),
+        ...iss.warnings.map(t => `<div style="background:#fff8f0;border:1px solid #fbbf24;border-radius:6px;padding:8px;margin-bottom:6px">⚠ ${escapeHtml(t)}</div>`),
+        ...iss.infos.map(t => `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px;margin-bottom:6px">ℹ ${escapeHtml(t)}</div>`)
+      ].join('');
+    };
+    if (sel) sel.onchange = paint;
+  }
+
+  async function openRoleHistoryModal(staffId) {
+    const st = (state.staff || []).find(x => x.id === staffId);
+    if (!st) return;
+    if (isSupabaseApprovalMode()) await syncRoleAssignmentsFromGateway();
+    const hist = getStaffRoleHistory(st.id);
+    const rows = hist.length
+      ? hist.slice().reverse().map(a => `<tr><td>${escapeHtml(roleLabelOf(a.roleCode))}${a.endedAt ? '' : ' <span style="font-size:0.8em;color:#065f46">(current)</span>'}</td><td>${fmtDateTime(a.assignedAt)}</td><td>${a.endedAt ? fmtDateTime(a.endedAt) : '—'}</td><td>${escapeHtml(a.assignedByName || '—')}</td><td style="font-size:12px">${escapeHtml(a.note || '—')}</td></tr>`).join('')
+      : `<tr><td>${escapeHtml(roleLabelOf(staffRoleCode(st)))} <span style="font-size:0.8em;color:#065f46">(current)</span></td><td colspan="4" style="font-size:12px;color:var(--text-muted)">No role changes recorded — this is the role held since before role history was tracked.</td></tr>`;
+    openModal(`Role History — ${st.name || st.full_name || ''}`, `
+      <div class="table-wrap"><table class="table"><thead><tr><th>Role</th><th>From</th><th>To</th><th>Assigned By</th><th>Reason</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p style="margin:10px 0 0;font-size:0.8em;color:var(--text-muted)">Transactions, approvals and audit entries by this staff member are tied to them; the role shown against each is the one they held at that time.</p>
+    `, [{ label: 'Close', onClick: closeModal }]);
+  }
+
   function bindStaffDirectory() {
     // REDESIGN 2026-08-14: staff_directory now shows Staff Salary Balance —
     // fetch fresh data on demand, same pattern used elsewhere for on-demand
@@ -8838,18 +9073,20 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       <div class="form-grid two" style="gap:12px">
         <div class="field"><label>Full Name <span style="color:red">*</span></label><input id="newStaffName" class="entry-input"></div>
         <div class="field"><label>Staff ID / Login ID <span style="color:red">*</span></label><input id="newStaffCode" class="entry-input" style="text-transform:uppercase" maxlength="10"></div>
-        <div class="field"><label>Role <span style="color:red">*</span></label><select id="newStaffRole" class="entry-input">${Object.keys(ROLE_LABELS).map(k=>`<option value="${k}">${ROLE_LABELS[k]}</option>`).join('')}</select></div>
         <div class="field"><label>Temporary Password <span style="color:red">*</span></label>${passwordInputRow('<input id="newStaffPassword" class="entry-input" type="password">', 'newStaffPassword')}</div>
         <div class="field" style="grid-column:1/-1"><label>Branch (optional)</label><input id="newStaffBranch" class="entry-input"></div>
       </div>
-      <p style="margin:10px 0 0;font-size:0.82em;color:var(--text-muted)">Staff will log in using their Staff ID and this password. Keep it short and memorable. They can change their password after first login.</p>
+      <p style="margin:10px 0 0;font-size:0.82em;color:var(--text-muted)"><strong>Adding staff does not give any access.</strong> Once created, assign a role (Staff Directory → Assign Role) — their access depends entirely on the role they are given, and roles can be reassigned later.</p>
+      <p style="margin:6px 0 0;font-size:0.82em;color:var(--text-muted)">Staff will log in using their Staff ID and this password. Keep it short and memorable. They can change their password after first login.</p>
     `,[
       {label:'Cancel', className:'secondary', onClick: closeModal},
       {label:'Create Staff Account', onClick: async () => {
         const name = byId('newStaffName')?.value?.trim();
         const codeRaw = byId('newStaffCode')?.value?.trim();
         const staffCode = codeRaw ? codeRaw.toUpperCase() : '';
-        const role = byId('newStaffRole')?.value;
+        // Role/staff separation: staff are created with NO role; a role is
+        // assigned afterwards (openAssignRoleModal).
+        const role = UNASSIGNED_ROLE;
         const password = byId('newStaffPassword')?.value;
         const branch = byId('newStaffBranch')?.value?.trim() || null;
 
@@ -8898,7 +9135,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           // pushAudit(), this one was missed. The gateway also attempts a
           // server-side audit insert, but it's fire-and-forget and its result
           // is never checked, so this local entry is the reliable record.
-          pushAudit('staff_created', `${name} (${staffCode}) added as ${ROLE_LABELS[role] || role}`);
+          pushAudit('staff_created', `${name} (${staffCode}) added — no role assigned yet`);
           // SURGICAL PATCH 2026-08-14: tellers now get their operational
           // account auto-provisioned by the gateway at creation time (no more
           // separate Account Opening + approval step — see gateway.staff.createStaff).
@@ -8910,12 +9147,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           if (newStaffRecord.operationalAccount?.account_number) {
             await syncCustomersListFromGateway();
             pushAudit('operational_account_opened', `Operational account ${newStaffRecord.operationalAccount.account_number} auto-opened for ${name}`);
-          } else if ((role === 'teller' || role === 'cash_officer') && newStaffRecord.operationalAccountError) {
-            showToast(`Staff created, but operational account setup failed: ${newStaffRecord.operationalAccountError}. Open it manually.`);
           }
           closeModal();
           render();
-          showToast(`✓ Staff "${name}" (${staffCode}) created successfully${newStaffRecord.operationalAccount?.account_number ? ` — operational account ${newStaffRecord.operationalAccount.account_number} opened` : ''}`);
+          showToast(`✓ Staff "${name}" (${staffCode}) created — now assign a role`);
+          // Straight on to step two: give the new staff member a role.
+          if (isAdminStaff()) openAssignRoleModal(newStaffRecord.id);
         } catch (err) {
           showToast('Unexpected error creating staff');
           if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Staff Account'; }
@@ -8942,6 +9179,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       }, 200);
     }
     qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
+    qq('[data-staff-assign-role]').forEach(btn => btn.onclick = () => openAssignRoleModal(btn.dataset.staffAssignRole));
+    qq('[data-staff-role-history]').forEach(btn => btn.onclick = () => openRoleHistoryModal(btn.dataset.staffRoleHistory));
 
     qq('[data-staff-toggle]').forEach(btn => btn.onclick = async () => {
       const st = state.staff.find(s => s.id === btn.dataset.staffToggle);
