@@ -46,6 +46,29 @@ const ROLE_DEFAULT_TOOLS = {
     };
   }
 
+  // ROLE/STAFF SEPARATION 2026-10-11: roles that carry an operational
+  // (cash) account, and the account-name convention for each. Shared by
+  // createStaff (legacy role-at-creation path) and assignStaffRole.
+  const CASH_ROLES = ['teller', 'cash_officer', 'admin_officer'];
+  function operationalDisplayName(roleCode, fullName) {
+    const firstName = String(fullName || '').trim().split(/\s+/)[0] || fullName;
+    return roleCode === 'cash_officer' ? `TREASURY ${firstName}` : roleCode === 'admin_officer' ? `ADMIN ${firstName}` : `TELLER ${fullName}`;
+  }
+  function normalizeRoleAssignment(raw) {
+    if (!raw) return null;
+    return {
+      id: raw.id,
+      staffId: raw.staffId || raw.staff_id || '',
+      roleCode: raw.roleCode || raw.role_code || raw.role || 'unassigned',
+      assignedAt: raw.assignedAt || raw.assigned_at || '',
+      endedAt: raw.endedAt || raw.ended_at || null,
+      assignedByStaffId: raw.assignedByStaffId || raw.assigned_by_staff_id || null,
+      assignedByName: raw.assignedByName || raw.assigned_by_name || '',
+      endedByStaffId: raw.endedByStaffId || raw.ended_by_staff_id || null,
+      note: raw.note || '',
+    };
+  }
+
   function buildDefaultPermissions(roleCode) {
     return (ROLE_DEFAULT_TOOLS[roleCode] || []).map((toolCode) => ({
       toolCode,
@@ -60,7 +83,10 @@ const ROLE_DEFAULT_TOOLS = {
       id: rawStaff.id,
       staffId: rawStaff.staffId || rawStaff.staff_code || rawStaff.code || '',
       fullName: rawStaff.fullName || rawStaff.full_name || rawStaff.name || '',
-      roleCode: rawStaff.roleCode || rawStaff.role_code || rawStaff.role || 'customer_service',
+      // ROLE/STAFF SEPARATION 2026-10-11: a staff row with no role is
+      // 'unassigned' (no access) — it no longer silently defaults to
+      // customer_service. Role is granted separately via assignStaffRole.
+      roleCode: rawStaff.roleCode || rawStaff.role_code || rawStaff.role || 'unassigned',
       isActive: typeof rawStaff.isActive === 'boolean' ? rawStaff.isActive : (typeof rawStaff.is_active === 'boolean' ? rawStaff.is_active : rawStaff.active !== false),
       branchId: rawStaff.branchId ?? rawStaff.branch_id ?? null,
       uuid: rawStaff.uuid || rawStaff.id || '',
@@ -450,8 +476,8 @@ async function submitDebtRepayment(_payload) {
         staff_code: payload.staffCode || payload.staffId || id,
         name: payload.name || payload.fullName || '',
         fullName: payload.name || payload.fullName || '',
-        role: payload.role || payload.roleCode || 'customer_service',
-        role_code: payload.role || payload.roleCode || 'customer_service',
+        role: payload.role || payload.roleCode || 'unassigned',
+        role_code: payload.role || payload.roleCode || 'unassigned',
         branchId: payload.branchId || null,
         branch_id: payload.branchId || null,
         authEmail: payload.authEmail || '',
@@ -477,6 +503,31 @@ async function submitDebtRepayment(_payload) {
       staff.updatedAt = new Date().toISOString();
       writeLocalState(state);
       return defaultResult.ok(normalizeStaffSummary(staff));
+    }
+
+    // ROLE/STAFF SEPARATION 2026-10-11 — local/offline adapter. Closes the
+    // staff member's open assignment (if any), opens a new one and updates
+    // the staff row's current role. Same history shape as the Supabase table.
+    async function assignStaffRole(payload = {}) {
+      const state = getLocalState();
+      const staffId = payload.staffId || payload.id;
+      const roleCode = String(payload.roleCode || payload.role || 'unassigned');
+      const staff = (state.staff || []).find((item) => item.id === staffId || item.staffId === staffId || item.staff_code === staffId);
+      if (!staff) return defaultResult.err('STAFF_NOT_FOUND', 'Staff not found.');
+      const now = new Date().toISOString();
+      state.roleAssignments ||= [];
+      state.roleAssignments.forEach((a) => { if (a.staffId === staff.id && !a.endedAt) { a.endedAt = now; a.endedByStaffId = payload.assignedByStaffId || null; } });
+      state.roleAssignments.push({ id: `ra_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`, staffId: staff.id, roleCode, assignedAt: now, endedAt: null, assignedByStaffId: payload.assignedByStaffId || null, assignedByName: payload.assignedByName || '', note: payload.note || '' });
+      staff.role = roleCode;
+      staff.role_code = roleCode;
+      staff.updatedAt = now;
+      writeLocalState(state);
+      return defaultResult.ok(normalizeStaffSummary(staff));
+    }
+
+    async function listRoleAssignments() {
+      const state = getLocalState();
+      return defaultResult.ok((state.roleAssignments || []).map(normalizeRoleAssignment).filter(Boolean));
     }
 
     async function updateStaffCode(payload = {}) {
@@ -746,6 +797,8 @@ async function submitDebtRepayment(_payload) {
         createStaff,
         updateStaffStatus,
         updateStaffCode,
+        assignStaffRole,
+        listRoleAssignments,
         listStaffLedger,
       },
       permissions: {
@@ -2410,12 +2463,102 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
 
+    // ROLE/STAFF SEPARATION 2026-10-11: operational-account provisioning,
+    // extracted from createStaff so assignStaffRole can reuse it. A staff
+    // member has AT MOST ONE staff_operational account for life — it is tied
+    // to the person (linked_staff_id), not the role. If one already exists
+    // (they held a cash role before) it is reused and re-activated, never
+    // duplicated, so every balance and ledger line stays on the same account.
+    async function provisionStaffOperationalAccount(staffUuid, fullName, roleCode) {
+      try {
+        const existing = await client.from(customersTable).select(customersSelect)
+          .eq('linked_staff_id', staffUuid).eq('account_type', 'staff_operational').limit(1).maybeSingle();
+        if (existing?.data) {
+          const patch = { display_name: operationalDisplayName(roleCode, fullName), status: 'active', is_active: true };
+          const upd = await client.from(customersTable).update(patch).eq('id', existing.data.id).select(customersSelect).maybeSingle();
+          if (upd.error) return { account: existing.data, error: null, reused: true, renameError: upd.error.message };
+          return { account: upd.data || existing.data, error: null, reused: true };
+        }
+        const { data: seqData, error: seqError } = await client.rpc('generate_staff_operational_account_number');
+        if (seqError || !seqData) return { account: null, error: seqError?.message || 'Failed to generate operational account number.' };
+        const acctInsert = await client.from(customersTable).insert({
+          account_number: seqData,
+          full_name: fullName,
+          display_name: operationalDisplayName(roleCode, fullName),
+          phone: '',
+          status: 'active',
+          account_type: 'staff_operational',
+          linked_staff_id: staffUuid,
+          system_assigned: true,
+          created_at: new Date().toISOString(),
+          is_active: true,
+        }).select(customersSelect).maybeSingle();
+        if (acctInsert.error) return { account: null, error: acctInsert.error.message };
+        return { account: acctInsert.data, error: null };
+      } catch (err) {
+        return { account: null, error: err?.message || 'Unexpected error provisioning staff operational account.' };
+      }
+    }
+
+    // Grants (or changes, or removes with roleCode 'unassigned') a staff
+    // member's role. Goes through the ducess_assign_staff_role RPC so closing
+    // the old assignment, opening the new one, updating staff.role_code and
+    // the audit row happen atomically and admin-only. Deliberately NO raw
+    // table fallback (same reasoning as updateStaffCode): changing role_code
+    // without history would break the accountability trail.
+    async function assignStaffRole(payload = {}) {
+      if (!canUseSupabase()) return local.staff.assignStaffRole(payload);
+      const roleCode = String(payload.roleCode || payload.role || 'unassigned');
+      const rpcName = config?.supabase?.assignStaffRoleRpc || 'ducess_assign_staff_role';
+      let staffUuid;
+      try { staffUuid = await resolveStaffUuid(client, payload.staffId); } catch (_e) { staffUuid = payload.staffId; }
+      try {
+        const { error: rpcError } = await client.rpc(rpcName, {
+          p_staff_id: staffUuid,
+          p_role_code: roleCode,
+          p_note: payload.note || '',
+          p_assigned_by_staff_id: payload.assignedByStaffId || null,
+          p_assigned_by_name: payload.assignedByName || null,
+        });
+        if (rpcError) return defaultResult.err('ROLE_ASSIGN_FAILED', rpcError.message || `The "${rpcName}" function isn't set up in Supabase yet — run supabase-staff-role-assignments.sql first.`, rpcError);
+      } catch (err) {
+        return defaultResult.err('ROLE_ASSIGN_FAILED', `The "${rpcName}" function isn't set up in Supabase yet — run supabase-staff-role-assignments.sql first.`, err);
+      }
+      const { data: staffRow, error: staffErr } = await client.from(staffTable).select(staffProfileSelect).eq('id', staffUuid).single();
+      if (staffErr || !staffRow) return defaultResult.err('ROLE_ASSIGN_REFRESH_FAILED', 'Role was assigned but the staff record could not be re-read — refresh the page.', staffErr);
+      const summary = normalizeStaffSummary(staffRow);
+      if (CASH_ROLES.includes(roleCode)) {
+        const prov = await provisionStaffOperationalAccount(staffRow.id, summary.fullName, roleCode);
+        if (prov.account) summary.operationalAccount = prov.account;
+        if (prov.reused) summary.operationalAccountReused = true;
+        if (prov.error) summary.operationalAccountError = prov.error;
+      }
+      return defaultResult.ok(summary);
+    }
+
+    async function listRoleAssignments() {
+      if (!canUseSupabase()) return local.staff.listRoleAssignments();
+      try {
+        const { data, error: listError } = await client.from('staff_role_assignments')
+          .select('id, staff_id, role_code, assigned_at, ended_at, assigned_by_staff_id, assigned_by_name, ended_by_staff_id, note')
+          .order('assigned_at', { ascending: true }).limit(5000);
+        // Table not migrated yet → treat as "no history" so the app still
+        // loads; role-at-time then falls back to each staff's current role.
+        if (listError) return defaultResult.ok([]);
+        return defaultResult.ok((data || []).map(normalizeRoleAssignment).filter(Boolean));
+      } catch (_e) {
+        return defaultResult.ok([]);
+      }
+    }
+
     async function createStaff(payload = {}) {
       if (!canUseSupabase()) return local.staff.createStaff(payload);
 
       const staffCode = (payload.staffCode || payload.staffId || '').toUpperCase();
       const fullName = payload.name || payload.fullName || '';
-      const roleCode = payload.role || payload.roleCode || 'customer_service';
+      // ROLE/STAFF SEPARATION 2026-10-11: staff are created WITHOUT a role
+      // ('unassigned') — a role is granted afterwards via assignStaffRole.
+      const roleCode = payload.role || payload.roleCode || 'unassigned';
       const branchId = payload.branchId || null;
       const temporaryPassword = payload.temporaryPassword || null;
       const syntheticEmail = `${staffCode}${config?.supabase?.syntheticEmailSuffix || '@ducess.local'}`;
@@ -2501,32 +2644,17 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // Treasury's first-name naming.
       let operationalAccount = null;
       let operationalAccountError = null;
-      if (roleCode === 'teller' || roleCode === 'cash_officer' || roleCode === 'admin_officer') {
+      if (CASH_ROLES.includes(roleCode)) {
+        const prov = await provisionStaffOperationalAccount(data.id, fullName, roleCode);
+        operationalAccount = prov.account;
+        operationalAccountError = prov.error;
+      }
+      // Legacy path only (a role passed at creation): open the first
+      // history row so the role is attributable from day one.
+      if (roleCode && roleCode !== 'unassigned') {
         try {
-          const { data: seqData, error: seqError } = await client.rpc('generate_staff_operational_account_number');
-          if (seqError || !seqData) {
-            operationalAccountError = seqError?.message || 'Failed to generate operational account number.';
-          } else {
-            const firstName = String(fullName || '').trim().split(/\s+/)[0] || fullName;
-            const displayName = roleCode === 'cash_officer' ? `TREASURY ${firstName}` : roleCode === 'admin_officer' ? `ADMIN ${firstName}` : `TELLER ${fullName}`;
-            const acctInsert = await client.from(customersTable).insert({
-              account_number: seqData,
-              full_name: fullName,
-              display_name: displayName,
-              phone: '',
-              status: 'active',
-              account_type: 'staff_operational',
-              linked_staff_id: data.id,
-              system_assigned: true,
-              created_at: new Date().toISOString(),
-              is_active: true,
-            }).select(customersSelect).maybeSingle();
-            if (acctInsert.error) operationalAccountError = acctInsert.error.message;
-            else operationalAccount = acctInsert.data;
-          }
-        } catch (err) {
-          operationalAccountError = err?.message || 'Unexpected error provisioning staff operational account.';
-        }
+          await client.from('staff_role_assignments').insert({ staff_id: data.id, role_code: roleCode, assigned_by_staff_id: payload.createdByStaffId || null, assigned_by_name: payload.createdByName || null, note: 'Assigned at creation' });
+        } catch (_e) {}
       }
 
       // Step 3: Log audit
@@ -3247,6 +3375,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         createStaff,
         updateStaffStatus,
         updateStaffCode,
+        assignStaffRole,
+        listRoleAssignments,
         listStaffLedger,
         backfillTreasuryOperationalAccounts,
       },
