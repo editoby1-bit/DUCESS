@@ -1266,6 +1266,15 @@ function subscribeRealtime() {
     if (existing.data) return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, customer: existing.data, decisionNote: decisionNote || '', alreadyPosted: true });
   }
 
+  // Operational accounts are permanently tied to ONE staff member (2026-10-11):
+  // refuse a second one for the same person — whichever role they hold now.
+  if (acctType === 'staff_operational') {
+    if (!payload.linkedStaffId) return defaultResult.err('STAFF_LINK_REQUIRED', 'An operational account must be linked to a staff member.');
+    const existingOp = await client.from(customersTable).select('id, account_number').eq('account_type', 'staff_operational').eq('linked_staff_id', payload.linkedStaffId).limit(1).maybeSingle();
+    if (existingOp.error) return defaultResult.err('STAFF_LINK_CHECK_FAILED', 'Could not verify existing operational account for this staff member.', existingOp.error);
+    if (existingOp.data) return defaultResult.err('STAFF_ALREADY_LINKED', `This staff member already has operational account ${existingOp.data.account_number}. It stays permanently linked to them.`, existingOp.data);
+  }
+
   const customerRow = {
     account_number: generatedAccountNumber,
     old_account_number: payload.oldAccountNumber || payload.old_account_number || '',
