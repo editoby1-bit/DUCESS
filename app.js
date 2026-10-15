@@ -2718,18 +2718,17 @@ function hideProcessing() {
     const isStaffSalary = acctType === 'staff_salary';
     const needsStaffLink = isStaffOp; // salary no longer linked to staff
     const isSystemAssigned = acctType !== 'customer';
+    // Teller / Treasury Account (customer-service-opened, 2026-10-11): both
+    // are the 'staff_operational' account type; opKind says which one.
+    const opKind = openingDraft.opKind === 'treasury' ? 'treasury' : 'teller';
     const staffOptions = (state.staff || [])
       .filter(s => s.is_active !== false)
-      // SURGICAL FIX 2026-09-07 (client request): Admin Officer now also
-      // gets an operational account (auto-provisioned on creation — see
-      // gateway.staff.createStaff), so this manual screen is a repair path
-      // for all three roles now, not just Teller/Treasury.
-      .filter(s => !isStaffOp || s.role === 'teller' || s.role === 'cash_officer' || s.role === 'admin_officer')
+      .filter(s => !isStaffOp || isEligibleForOperationalAccount(s, opKind))
       .map(s =>
-      `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${ROLE_LABELS[s.role] || s.role})</option>`
+      `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${roleLabelOf(staffRoleCode(s))})</option>`
     ).join('');
     const systemNote = {
-      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Tellers, Treasury and Admin only — the account name is auto-set to TELLER <FULL NAME>, TREASURY <FIRST NAME>, or ADMIN <FIRST NAME>.',
+      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Teller and Treasury accounts only — permanently linked to the chosen staff member. The account name is auto-set to TELLER <FULL NAME> or TREASURY <FIRST NAME>.',
       staff_salary:      '"S" + number (S1, S2, S3, ...) — assigned automatically when you submit.',
       expense:           '"E" + number (E1, E2, ...) — assigned automatically when you submit',
       income:            '"I" + number (I1, I2, ...) — assigned automatically when you submit'
@@ -2743,6 +2742,8 @@ function hideProcessing() {
             <div class="cs2-input-wrap cs2-wide">
               <select id="openAccountType" class="entry-input cs2-input">
                 <option value="customer"          ${acctType==='customer'          ?'selected':''}>Customer Account</option>
+                <option value="teller_account"    ${isStaffOp && opKind==='teller'   ?'selected':''}>Teller Account</option>
+                <option value="treasury_account"  ${isStaffOp && opKind==='treasury' ?'selected':''}>Treasury Account</option>
                 <option value="staff_salary"      ${acctType==='staff_salary'      ?'selected':''}>Staff Salary Account</option>
                 <option value="expense"           ${acctType==='expense'           ?'selected':''}>Expense Account</option>
                 <option value="income"            ${acctType==='income'            ?'selected':''}>Income Account</option>
@@ -2763,11 +2764,12 @@ function hideProcessing() {
             <div class="cs2-label">Link to Staff Member</div>
             <div class="cs2-input-wrap cs2-wide">
               <select id="openLinkedStaff" class="entry-input cs2-input">
-                <option value="">— Select Staff Member —</option>
+                <option value="">— Select ${opKind === 'treasury' ? 'Treasury' : 'Teller'} Staff Member —</option>
                 ${staffOptions}
               </select>
             </div>
-          </div>` : ''}
+          </div>
+          <div class="cs2-note-box">Only staff currently assigned the ${opKind === 'treasury' ? 'Treasury' : 'Teller'} role, and who do not yet have an operational account, are listed. <strong>The link is permanent</strong> — the account stays with that staff member even if their role is later changed.</div>` : ''}
           ${(isCustomer || isStaffSalary) ? `
           ${isCustomer ? `
           <div class="cs2-row">
@@ -5245,7 +5247,14 @@ function normalizeStaffLedgerEntryType(row) {
     // Re-render when account type changes
     const typeSelect = byId('openAccountType');
     if (typeSelect) typeSelect.onchange = () => {
-      openingDraft.accountType = typeSelect.value;
+      const v = typeSelect.value;
+      if (v === 'teller_account' || v === 'treasury_account') {
+        openingDraft.accountType = 'staff_operational';
+        openingDraft.opKind = v === 'treasury_account' ? 'treasury' : 'teller';
+      } else {
+        openingDraft.accountType = v;
+        openingDraft.opKind = '';
+      }
       openingDraft.name = '';
       openingDraft.linkedStaffId = '';
       openingDraft.accountNumber = '';
@@ -5284,10 +5293,8 @@ function normalizeStaffLedgerEntryType(row) {
         // "TELLER <FULL NAME>" — client asked specifically for first name
         // only on those two.
         const firstName = () => String(linkedStaff?.name || '').trim().split(/\s+/)[0] || linkedStaff?.name || '';
-        if (linkedStaff?.role === 'cash_officer') {
-          openingDraft.name = `TREASURY ${firstName().toUpperCase()}`;
-        } else if (linkedStaff?.role === 'admin_officer') {
-          openingDraft.name = `ADMIN ${firstName().toUpperCase()}`;
+        if (openingDraft.opKind === 'treasury') {
+          openingDraft.name = linkedStaff ? `TREASURY ${firstName().toUpperCase()}` : '';
         } else {
           openingDraft.name = linkedStaff ? `TELLER ${String(linkedStaff.name || '').toUpperCase()}` : '';
         }
@@ -5363,8 +5370,12 @@ function normalizeStaffLedgerEntryType(row) {
         const linkedStaffId = (byId('openLinkedStaff')?.value || '').trim();
         if (!linkedStaffId) return showToast('Select a staff member to link this account to');
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffId);
+        const kind = openingDraft.opKind === 'treasury' ? 'treasury' : 'teller';
+        if (!linkedStaff || !isEligibleForOperationalAccount(linkedStaff, kind)) {
+          return showToast(`${linkedStaff?.name || 'This staff member'} is not eligible — they must currently hold the ${kind === 'treasury' ? 'Treasury' : 'Teller'} role and have no operational account yet`);
+        }
         payload = {
-          accountType: 'staff_operational', name,
+          accountType: 'staff_operational', opKind: kind, name,
           linkedStaffId, linkedStaffName: linkedStaff?.name || '',
           systemAssigned: true, generatedAccountNumber: ''
         };
@@ -5398,7 +5409,9 @@ function normalizeStaffLedgerEntryType(row) {
       // only generated AFTER the user clicks Confirm below. They've already
       // seen the (non-consuming) preview inline on the form before this
       // point, so the confirm prompt itself can stay plain.
-      const confirmMessage = `Submit ${acctType.replace('_',' ')} account opening request?`;
+      const confirmMessage = acctType === 'staff_operational'
+        ? `Open a ${payload.opKind === 'treasury' ? 'Treasury' : 'Teller'} account for ${payload.linkedStaffName}? The account will be permanently linked to this staff member.`
+        : `Submit ${acctType.replace('_',' ')} account opening request?`;
 
       confirmAction(confirmMessage, async () => {
         showProcessing(payload.systemAssigned ? 'Assigning account number...' : 'Sending request...'); await nextPaint();
@@ -8893,6 +8906,19 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     }
     if (newRole === UNASSIGNED_ROLE) warnings.push(`${name} will lose all access until another role is assigned. History and balances are kept.`);
     return { blockers, warnings, infos };
+  }
+
+  // A staff member can hold at most ONE operational account, for life: it is
+  // permanently tied to the person (linked_staff_id), so role changes never
+  // move, close or duplicate it. Eligible = active, currently in the matching
+  // role, no account yet and no account-opening request already pending.
+  function isEligibleForOperationalAccount(staff, kind) {
+    if (!staff || staff.active === false || staff.is_active === false) return false;
+    const need = kind === 'treasury' ? 'cash_officer' : 'teller';
+    if (staffRoleCode(staff) !== need) return false;
+    if ((state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === staff.id)) return false;
+    const pendingOpen = (state.approvals || []).some(a => a.status === 'pending' && a.type === 'account_opening' && a.payload?.accountType === 'staff_operational' && a.payload?.linkedStaffId === staff.id);
+    return !pendingOpen;
   }
 
   function applyLocalRoleChange(st, newRole, note, actor) {
