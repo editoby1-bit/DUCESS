@@ -2562,9 +2562,12 @@ function hideProcessing() {
           ${toolBtn('my_statement')}
         </div>`;
       }
-      return module.tools.map(t => `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>`).join('');
+      // SURGICAL CHANGE 2026-10-16 (client: uniform design across the
+      // platform): every other module's sidebar uses the same sheet column
+      // as Tellering/Treasury — each tool is a dark header bar.
+      return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">${module.tools.map(t => `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>`).join('')}</div>`;
     };
-    const tabs = `<div class="workspace-switcher"><div class="tool-tabs vertical-tool-tabs ${(state.ui.module==='tellering'||state.ui.module==='cash_officer')?'tellering-tool-tabs':''}">${renderToolButtons()}</div><div class="workspace-tool-body">${state.ui.tool ? renderTool(state.ui.tool) : `<div class="tool-empty-state"><div class="tool-empty-title">${module.title}</div><div class="tool-empty-note">Select a heading to open that work area.</div></div>`}</div></div>`;
+    const tabs = `<div class="workspace-switcher"><div class="tool-tabs vertical-tool-tabs tellering-tool-tabs">${renderToolButtons()}</div><div class="workspace-tool-body spec-color-scheme sheet-uniform">${state.ui.tool ? renderTool(state.ui.tool) : `<div class="tool-empty-state"><div class="tool-empty-title">${module.title}</div><div class="tool-empty-note">Select a heading to open that work area.</div></div>`}</div></div>`;
     byId('workspace').innerHTML = tabs;
     qq('[data-posting-group]').forEach(btn => btn.onclick = () => {
       const key = btn.dataset.postingGroup;

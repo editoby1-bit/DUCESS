@@ -13171,3 +13171,79 @@ input.date-mirror-native {
   width:100% !important;max-width:none !important;min-width:0 !important;margin:0 !important;text-align:left !important;
   background:#FBEFD0 !important;border:1px solid #d8c896 !important;color:#2b2410 !important;
 }
+
+/* SURGICAL ADDITION 2026-10-16 (client: uniform design across the whole
+   platform). Every tool body and every popup carries .spec-color-scheme
+   (cyan labels, cream fields, dark title bars, red actions — the Direct
+   Posting / Non Cash / Journal look) plus .sheet-uniform, which adds the
+   sheet treatment for the parts those screens never had: cards, tables,
+   stat tiles, in-page tabs and the popup frame. */
+.sheet-uniform .table-card,
+.sheet-uniform .form-card,
+.sheet-uniform .record-card{
+  border:2px solid #111 !important;border-radius:0 !important;box-shadow:none !important;background:#fff !important;
+}
+.sheet-uniform .table-card > h3:first-child,
+.sheet-uniform .form-card > h3:first-child,
+.sheet-uniform .record-card > h3:first-child,
+.sheet-uniform .table-card > .action-row:first-child,
+.sheet-uniform .form-card > .action-row:first-child{
+  background:#3a3a3a !important;color:#fff !important;margin:-18px -18px 12px !important;padding:7px 14px !important;
+  font-size:12px !important;font-weight:800 !important;text-transform:uppercase;letter-spacing:.04em;border-radius:0 !important;
+}
+.sheet-uniform .table-card > .action-row:first-child h3{color:#fff !important;margin:0 !important;font-size:12px !important;}
+.sheet-uniform .table-wrap{border:2px solid #111 !important;border-radius:0 !important;box-shadow:none !important;background:#FBEFD0 !important;}
+.sheet-uniform table.table{border-collapse:collapse !important;background:#FBEFD0 !important;}
+.sheet-uniform table.table thead th{
+  background:#19e6ee !important;color:#0a2b2b !important;font-weight:800 !important;border:1px solid #9fdfe2 !important;
+  text-transform:none !important;letter-spacing:0 !important;font-size:12px !important;
+}
+.sheet-uniform table.table tbody td{background:#FBEFD0 !important;border:1px solid #d8c896 !important;color:#2b2410;}
+.sheet-uniform table.table tbody tr:hover td{background:#f6e3b4 !important;}
+.sheet-uniform .kpi{background:#FBEFD0 !important;border:1px solid #d8c896 !important;border-radius:0 !important;box-shadow:none !important;}
+.sheet-uniform .kpi .label{background:#19e6ee;color:#0a2b2b !important;font-weight:800;padding:2px 6px;display:inline-block;}
+.sheet-uniform .note{border-radius:0 !important;border-left:3px solid #19b8c0 !important;}
+/* in-page tabs (e.g. Approvals: Customer Service / Teller / Non Cash /
+   Others) read as sheet header tabs, not red action buttons */
+.sheet-uniform .tool-tabs:not(.vertical-tool-tabs) .tool-tab{
+  background:#3a3a3a !important;color:#fff !important;border-radius:0 !important;border:0 !important;font-weight:800 !important;
+  text-transform:uppercase;font-size:11px !important;letter-spacing:.03em;
+}
+.sheet-uniform .tool-tabs:not(.vertical-tool-tabs) .tool-tab.active{background:#19e6ee !important;color:#0a2b2b !important;}
+/* keep meaning on decision buttons; secondary actions stay neutral */
+.sheet-uniform button.success:not(:disabled){background:#1c7a3a !important;color:#fff !important;}
+.sheet-uniform button.secondary:not(:disabled),.sheet-uniform .sheet-btn.secondary:not(:disabled){
+  background:#f1f2f4 !important;color:#222 !important;border:1px solid #cfd6dd !important;
+}
+.sheet-uniform button,.sheet-uniform .sheet-btn{border-radius:3px !important;}
+/* checkbox/radio labels stay plain text, not cyan field labels */
+.sheet-uniform label:has(> input[type="checkbox"]),
+.sheet-uniform label:has(> input[type="radio"]){
+  background:transparent !important;color:inherit !important;padding:0 !important;font-weight:600;
+}
+/* labels inside the generic .field layout sit as a cyan cell above the input */
+.sheet-uniform .field > label{display:block !important;border-radius:0 !important;padding:3px 8px !important;margin-bottom:2px;font-size:11px !important;text-transform:uppercase;letter-spacing:.02em;}
+/* popup frame */
+.modal.sheet-uniform{border:2px solid #111 !important;border-radius:4px !important;overflow:hidden;}
+.modal.sheet-uniform > .modal-head{background:#3a3a3a !important;border-bottom:0 !important;padding:8px 14px !important;}
+.modal.sheet-uniform > .modal-head h3{color:#fff !important;text-transform:uppercase;letter-spacing:.04em;font-size:13px !important;font-weight:800 !important;}
+.modal.sheet-uniform > .modal-head .icon-btn,
+.modal.sheet-uniform > .modal-head button{background:transparent !important;color:#fff !important;border:1px solid rgba(255,255,255,.4) !important;}
+.modal.sheet-uniform > .modal-actions{border-top:2px solid #111 !important;background:#f6f6f6;}
+/* titles wrapped in .action-inline (Staff Directory, Staff Salary Balance,
+   All Customers' Balance), or not first in their card, get the same bar */
+.sheet-uniform .table-card > .action-inline:has(> h3),
+.sheet-uniform .form-card > .action-inline:has(> h3),
+.sheet-uniform .table-card > h3:not(:first-child),
+.sheet-uniform .form-card > h3:not(:first-child){
+  background:#3a3a3a !important;color:#fff !important;margin:0 0 12px !important;padding:7px 14px !important;
+  font-size:12px !important;font-weight:800 !important;text-transform:uppercase;letter-spacing:.04em;border-radius:0 !important;
+}
+.sheet-uniform .table-card > .action-inline:first-child:has(> h3),
+.sheet-uniform .form-card > .action-inline:first-child:has(> h3){margin:-18px -18px 12px !important;}
+.sheet-uniform .action-inline > h3{color:#fff !important;font-size:12px !important;margin:0 !important;}
+/* label column wide enough to read on one line, square cells like the sheet */
+.sheet-uniform .cs2-label{min-width:140px !important;flex:0 0 140px !important;border-radius:0 !important;white-space:normal;}
+.sheet-uniform .cs2-label + *,.sheet-uniform .cs2-row .cs2-input-wrap{border-radius:0;}
+.sheet-uniform.sheet-uniform button,.sheet-uniform.sheet-uniform .sheet-btn,.sheet-uniform.sheet-uniform .cs2-btn{border-radius:3px !important;}
+.sheet-uniform .entry-input,.sheet-uniform .display-field,.sheet-uniform select{border-radius:3px !important;}
