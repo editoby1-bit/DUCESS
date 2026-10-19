@@ -6515,15 +6515,17 @@ function normalizeStaffLedgerEntryType(row) {
         return { row, formBase: journalForm, remaining, variance };
       });
       // SURGICAL FIX 2026-09-29 (client-confirmed paper design): table is
-      // S/N, Account Number, Account Name, Amount, Action (Edit / Delete),
-      // always showing at least 10 numbered lines like the client's sheet.
+      // S/N, Account Number, Account Name, Amount, Action (Edit / Delete).
+      // SURGICAL FIX 2026-10-19 (client): the 1-10 numbering on the paper
+      // design was only an example — no pre-numbered blank lines. The table
+      // starts empty; each posted entry gets the next S/N (1, 2, 3, ...) and
+      // numbers re-sequence if an entry is edited out or removed.
       // Per-row details/charges show as small meta under the name; the
       // running Balance/Variance stay in the header's Balance / Variance.
       const filledRows = withBalances.map(({ row }, displayIndex) => {
         const meta = [row.details ? escapeHtml(row.details) : '', getTotalChargeAmount(row) > 0 ? chargeInlineMeta(row) : ''].filter(Boolean).join(' • ');
         return `<tr><td class="jr-sn">${displayIndex+1}</td><td>${escapeHtml(row.accountNumber || '')}</td><td>${escapeHtml(row.customerName || '')}${meta ? `<div class="journal-inline-meta">${meta}</div>` : ''}</td><td class="jr-amt">${money(row.amount)}</td><td class="jr-actions"><button type="button" class="jr-act" data-edit-row="${row.id}">Edit</button><button type="button" class="jr-act jr-act-del" data-remove-row="${row.id}">Delete</button></td></tr>`;
       });
-      for (let i = filledRows.length; i < 10; i++) filledRows.push(`<tr class="jr-empty"><td class="jr-sn">${i+1}</td><td></td><td></td><td class="jr-amt"></td><td class="jr-actions"></td></tr>`);
       const rows = filledRows.join('');
       if (byId('journalRows')) byId('journalRows').innerHTML = rows;
       const totalPosted = journal.reduce((sum, row) => sum + Number(row.amount || 0), 0);
