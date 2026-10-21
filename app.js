@@ -855,8 +855,37 @@
       .trim();
   }
 
+  // SURGICAL ADDITION 2026-10-21 (client sheet: "Approval / Operational
+  // Balances"): the Approval sidebar is split into the client's
+  // sub-headings. Each sub-item is a view onto an EXISTING tool — the
+  // approval queue filtered to specific request types, or a balance report
+  // with a fixed period — so no approval or balance logic is duplicated.
+  const APPROVAL_SUB_TOOLS = {
+    appr_opening:    { base: 'approval_customer_service', section: 'customer_service', types: ['account_opening'], label: 'Approve Account Opening' },
+    appr_update:     { base: 'approval_customer_service', section: 'customer_service', types: ['account_maintenance'], label: 'Approve Account Update' },
+    appr_reactivate: { base: 'approval_customer_service', section: 'customer_service', types: ['account_reactivation'], label: 'Approve Reactivation' },
+    appr_block:      { base: 'approval_customer_service', section: 'customer_service', types: ['account_block'], label: 'Approve Account Block' },
+    appr_close:      { base: 'approval_customer_service', section: 'customer_service', types: ['account_closure'], label: 'Approve Account Closure' },
+    appr_direct:     { base: 'approval_tellering', section: 'tellering', types: ['customer_credit','customer_debit','cash_receipt'], label: 'Approve Direct Postings' },
+    appr_non_cash:   { base: 'approval_non_cash', section: 'non_cash', types: ['intra_bank_transfer','inter_staff_credit'], label: 'Approve Non Cash Postings' },
+    appr_journals:   { base: 'approval_tellering', section: 'tellering', types: ['customer_credit_journal','customer_debit_journal'], label: 'Approve Journals' },
+  };
+  const BALANCE_SUB_TOOLS = {
+    bal_account: { base: 'overall_balance', label: 'Account Balance' },
+    bal_daily:   { base: 'business_balance', preset: 'daily', label: 'Daily Balance' },
+    bal_weekly:  { base: 'business_balance', preset: 'weekly', label: 'Weekly Balance' },
+    bal_monthly: { base: 'business_balance', preset: 'monthly', label: 'Monthly Balance' },
+    bal_yearly:  { base: 'business_balance', preset: 'yearly', label: 'Yearly Balance' },
+  };
+  Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
+
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
+    if (APPROVAL_SUB_TOOLS[tool]) return hasPermission(APPROVAL_SUB_TOOLS[tool].base, staff);
+    // Balances now live on the Approval side (client sheet), so anyone who
+    // can work the approval queue can view them, as well as anyone who
+    // already had the underlying balance report.
+    if (BALANCE_SUB_TOOLS[tool]) return hasPermission(BALANCE_SUB_TOOLS[tool].base, staff) || hasPermission('approval_queue', staff);
     // ROLE/STAFF SEPARATION 2026-10-11: access is role-dependent. A staff
     // member with no role assigned has no access to anything (not even the
     // formerly-universal tools) until an admin assigns one.
@@ -2541,6 +2570,24 @@ function hideProcessing() {
           ${toolBtn('my_statement')}
         </div>`;
       }
+      if (state.ui.module === 'approvals') {
+        const toolBtn = (t) => hasPermission(t) || module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
+        state.ui.tellerGroupOpen ||= {};
+        const group = (key, label, tools) => {
+          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
+          return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
+          <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
+        };
+        return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
+          ${toolBtn('approval_queue')}
+          ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close'])}
+          ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals'])}
+          ${toolBtn('approval_others')}
+          ${group('appr_bal', 'Account Balances', ['bal_account','bal_daily','bal_weekly','bal_monthly','bal_yearly'])}
+          ${toolBtn('approval_history')}
+          ${toolBtn('my_approvals')}
+        </div>`;
+      }
       if (state.ui.module === 'cash_officer') {
         const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
         state.ui.tellerGroupOpen ||= {};
@@ -2615,6 +2662,8 @@ function hideProcessing() {
         if (nextTool === 'approval_tellering') state.ui.approvalsSection = 'tellering';
         if (nextTool === 'approval_non_cash') state.ui.approvalsSection = 'non_cash';
         if (nextTool === 'approval_others') state.ui.approvalsSection = 'others';
+        if (APPROVAL_SUB_TOOLS[nextTool]) state.ui.approvalsSection = APPROVAL_SUB_TOOLS[nextTool].section;
+        if (BALANCE_SUB_TOOLS[nextTool]?.preset) state.ui.businessFilter = { preset: BALANCE_SUB_TOOLS[nextTool].preset, from: '', to: '' };
       }
       if (state.ui.tool === 'check_balance') state.ui.checkBalanceLoaded = false;
       state.ui.modalToggleTool = state.ui.tool && ['my_close_day','central_close_day'].includes(state.ui.tool) ? state.ui.tool : null;
@@ -2634,6 +2683,8 @@ function hideProcessing() {
   }
 
   function renderTool(tool) {
+    if (APPROVAL_SUB_TOOLS[tool]) return renderApprovals();
+    if (BALANCE_SUB_TOOLS[tool]) return BALANCE_SUB_TOOLS[tool].base === 'overall_balance' ? renderOverallBalance() : renderBusinessBalance();
     switch(tool) {
       case 'check_balance': return renderCheckBalance();
       case 'my_statement': return renderMyStatement();
@@ -3541,8 +3592,11 @@ function hideProcessing() {
     const openDate = businessDate();
     const currentSection = state.ui.approvalsSection || 'tellering';
     const viewer = currentStaff();
+    // A sidebar sub-item (e.g. "Approve Journals") narrows the queue to its
+    // own request types; the plain section tabs keep their whole category.
+    const subTool = APPROVAL_SUB_TOOLS[state.ui.tool];
     const allRows = state.approvals.filter(a => {
-      if (!categories[currentSection].includes(a.type)) return false;
+      if (!(subTool ? subTool.types.includes(a.type) : categories[currentSection].includes(a.type))) return false;
       if (a.status !== 'pending') return false; // decided items live in Approval History now
       const reqDate = approvalBusinessDate(a.type, a.payload || {});
       // Approval Queue belongs to the CURRENT OPEN business date only.
@@ -3610,7 +3664,7 @@ function hideProcessing() {
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div><div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Approval Queue</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}${subTool ? '' : `<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div>`}<div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>${subTool ? escapeHtml(subTool.label) : 'Approval Queue'}</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
   }
 
   function renderApprovalHistory() {
@@ -5036,6 +5090,8 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function bindToolHandlers() {
+    if (APPROVAL_SUB_TOOLS[state.ui.tool]) { bindApprovals(); return; }
+    if (BALANCE_SUB_TOOLS[state.ui.tool]) { if (BALANCE_SUB_TOOLS[state.ui.tool].base === 'business_balance') bindBalanceFilters('business'); return; }
     switch (state.ui.tool) {
       case 'check_balance': bindCheckBalance(); break;
       case 'my_statement': bindMyStatement(); break;
@@ -8357,7 +8413,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
 
   function renderBalanceFilters(kind) {
     const filter = state.ui[`${kind}Filter`] || { preset:'daily', from:'', to:'' };
-    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly'],['all','All']];
     const types = kind==='business' ? [['all','All'],['credit','Credit'],['debit','Debit']] : [['all','All'],['income','Income'],['expense','Expense']]; const activeType = state.ui[`${kind}Type`] || 'all'; return `<div class="form-card balance-filters-card"><div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-filter-kind="${kind}" data-filter-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="${kind}From" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="${kind}To" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="${kind}CustomApply">Apply Custom</button><button class="secondary" id="${kind}ExportCsv">Export CSV</button><button class="secondary" id="${kind}PrintSummary">Print Summary</button></div><div class="action-inline balance-filters-row" style="margin-top:10px">${types.map(([k,l])=>`<button class="filter-chip ${activeType===k?'active':'secondary'}" data-type-kind="${kind}" data-type-filter="${k}">${l}</button>`).join('')}</div></div>`;
   }
 
@@ -8448,6 +8504,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         return d >= start && d <= end;
       }
       if (activeFilter.preset === 'monthly') return d.getFullYear() === referenceDate.getFullYear() && d.getMonth() === referenceDate.getMonth();
+      if (activeFilter.preset === 'yearly') return d.getFullYear() === referenceDate.getFullYear();
       if (activeFilter.preset === 'custom') {
         if (activeFilter.from && iso < activeFilter.from) return false;
         if (activeFilter.to && iso > activeFilter.to) return false;
