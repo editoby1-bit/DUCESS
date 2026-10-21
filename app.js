@@ -628,9 +628,9 @@
   function tellerIdForAccount(c){ return c?.accountType === 'staff_operational' ? staffFirstName(staffById(c.linkedStaffId)) : '—'; }
   // SURGICAL ADDITION 2026-09-28 (client correction): Account Status is a
   // small colour-coded box, not a full-size display field.
-  function accountStatusOf(c){ return c ? ((isCustomerFrozen(c) || c.active === false) ? 'Frozen' : 'Active') : '—'; }
-  function accountStatusChip(c, id){ const v = accountStatusOf(c); return `<span class="acct-status-chip ${v === 'Frozen' ? 'is-frozen' : (v === 'Active' ? 'is-active' : '')}"${id ? ` id="${id}"` : ''}>${v}</span>`; }
-  function setAccountStatusChip(el, c){ if (!el) return; const v = accountStatusOf(c); el.textContent = v; el.classList.add('acct-status-chip'); el.classList.toggle('is-active', v === 'Active'); el.classList.toggle('is-frozen', v === 'Frozen'); }
+  function accountStatusOf(c){ return c ? customerStatusLabel(c) : '—'; }
+  function accountStatusChip(c, id){ const v = accountStatusOf(c); return `<span class="acct-status-chip ${(v === 'Frozen' || v === 'Closed') ? 'is-frozen' : (v === 'Active' ? 'is-active' : '')}"${id ? ` id="${id}"` : ''}>${v}</span>`; }
+  function setAccountStatusChip(el, c){ if (!el) return; const v = accountStatusOf(c); el.textContent = v; el.classList.add('acct-status-chip'); el.classList.toggle('is-active', v === 'Active'); el.classList.toggle('is-frozen', v === 'Frozen' || v === 'Closed'); }
   function customerName(id){ return state.customers.find(c=>c.id===id)?.name || ''; }
   function getStaffWalletCustomer(staffId){ const acc=ensureStaffAccount(staffId); return state.customers.find(c=>c.id===acc.linkedCustomerId) || null; }
   function ensureStaffWalletCustomer(staffId, sourceState=state){
@@ -1554,6 +1554,11 @@
       balance: Number(customer.balance ?? customer.bookBalance ?? 0),
       photo: customer.photo || '',
       active: typeof customer.active === 'boolean' ? customer.active : String(customer.status || 'active').toLowerCase() === 'active',
+      // 2026-10-21: Account Block sets status 'frozen'; Account Closure sets
+      // 'closed' (customer removed from service, records kept).
+      frozen: String(customer.accountStatus || '').toLowerCase() === 'frozen',
+      closed: String(customer.accountStatus || '').toLowerCase() === 'closed',
+      accountStatus: String(customer.accountStatus || '').toLowerCase(),
       createdAt: customer.createdAt || customer.created_at || new Date().toISOString(),
       transactions: Array.isArray(customer.transactions) ? customer.transactions : [],
       // SURGICAL FIX 2026-09-08 (root cause found via client screenshot):
@@ -1599,6 +1604,10 @@
 
   if (approvalRecord.type === 'account_opening') {
     return syncCustomersListFromGateway();
+  }
+
+  if (['account_maintenance','account_reactivation','account_block','account_closure'].includes(approvalRecord.type)) {
+    return syncCustomerFromGateway({ customerId: enrichedPayload.customerId, accountNumber: enrichedPayload.accountNumber });
   }
 
   if (approvalRecord.type === 'customer_credit' || approvalRecord.type === 'customer_debit') {
@@ -2006,7 +2015,17 @@ if (approvalRecord.type === 'float_topup') {
       }
       case 'account_reactivation': {
         const c = state.customers.find(x => x.id === req.payload.customerId);
-        if (c) { c.active = true; c.frozen = false; }
+        if (c) { c.active = true; c.frozen = false; c.accountStatus = 'active'; }
+        break;
+      }
+      case 'account_block': {
+        const c = state.customers.find(x => x.id === req.payload.customerId);
+        if (c) { c.frozen = true; c.accountStatus = 'frozen'; }
+        break;
+      }
+      case 'account_closure': {
+        const c = state.customers.find(x => x.id === req.payload.customerId);
+        if (c) { c.closed = true; c.active = false; c.accountStatus = 'closed'; }
         break;
       }
       case 'intra_bank_transfer': {
@@ -2930,6 +2949,7 @@ function hideProcessing() {
           <div class="cs2-button-row">
             <button id="${prefix}Edit" class="sheet-btn cs2-btn cs2-btn-ghost">Edit</button>
             <button id="${prefix}Submit" class="sheet-btn cs2-btn ${isReactivation ? 'cs2-btn-solid' : 'cs2-btn-ghost'}">${btnLabel}</button>
+            ${isReactivation ? '' : `<button id="maintenanceBlock" class="sheet-btn cs2-btn cs2-btn-ghost" title="Freeze this account (needs approval)">Block Account</button><button id="maintenanceClose" class="sheet-btn cs2-btn cs2-btn-ghost" title="Close this account — customer removed, records kept (needs approval)">Close Account</button>`}
           </div>
         </div>
       </div>`;
@@ -3606,7 +3626,7 @@ function hideProcessing() {
     }
     state.ui.selectedApprovalIds ||= [];
     cleanupApprovalReviewLocks();
-    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation'], tellering: ['cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'], non_cash: ['intra_bank_transfer'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
+    const categories = { customer_service: ['account_opening','account_maintenance','account_reactivation','account_block','account_closure'], tellering: ['cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'], non_cash: ['intra_bank_transfer'], others: ['float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'] };
     reconcileBusinessDateFromClosures();
     const openDate = businessDate();
     const currentSection = state.ui.approvalsSection || 'tellering';
@@ -3778,7 +3798,7 @@ function hideProcessing() {
 
   function prettyApprovalType(type) {
     return {
-      account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation',
+      account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation', account_block:'Account Block', account_closure:'Account Closure',
       customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', cash_receipt:'Cash Receipt', inter_staff_credit:'Staff Account Credit', intra_bank_transfer:'Non Cash Transaction', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
       create_operational_account:'Operational Account', close_of_day:'Close of Day', temp_grant:'Temporary Grant', wallet_fund:'Wallet Funding', debt_repayment:'Debt Repayment'
     }[type] || type;
@@ -3794,6 +3814,8 @@ function hideProcessing() {
     if (a.type === 'account_opening') return `${escapeHtml(p.name || '')} • Phone ${escapeHtml(p.phone || '—')} • NIN ${escapeHtml(p.nin || '—')} • BVN ${escapeHtml(p.bvn || '—')}`;
     if (a.type === 'account_maintenance') return `${escapeHtml(p.accountNumber || '')} • update`;
     if (a.type === 'account_reactivation') return `${escapeHtml(p.accountNumber || '')} • reactivate`;
+    if (a.type === 'account_block') return `${escapeHtml(p.accountNumber || '')} • block (freeze)`;
+    if (a.type === 'account_closure') return `${escapeHtml(p.accountNumber || '')} • close account`;
     if (a.type === 'operational_entry') return `${escapeHtml(p.accountName || '')} • ${money(p.amount)}`;
     if (a.type === 'create_operational_account') return `${escapeHtml(p.category || '')} • ${escapeHtml(p.name || '')}`;
     if (a.type === 'close_of_day') return `${escapeHtml(p.staffName || '')} • ${p.date} • Form ${money(p.formAmount ?? p.openingBalance ?? 0)} • Remaining ${money(p.remainingBalance ?? p.runningFloat ?? 0)}`;
@@ -3915,6 +3937,15 @@ function hideProcessing() {
       <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Amount</th><th>${req.type === 'customer_credit_journal' ? 'Received By' : 'Paid By'}</th><th>Details</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="6" class="muted">No journal entries</td></tr>'}</tbody></table></div>
       ${noteBlock}
     </div>`;
+  } else if (req.type === 'account_block' || req.type === 'account_closure') {
+    html = `<div class="stack"><div class="form-grid two modal-cs-grid">
+      ${field('Customer Name', customer?.name || p.accountName, 'field-wide')}
+      ${field('Account Number', p.accountNumber, 'field-account')}
+      ${field('Current Status', customerStatusLabel(customer), 'field-status')}
+      ${field('Balance', money(customer?.balance || 0), 'field-account')}
+      ${field('Requested Action', req.type === 'account_block' ? 'Block (freeze) Account' : 'Close Account — customer removed, records kept', 'field-submit')}
+      ${p.reason ? field('Reason', p.reason, 'field-wide') : ''}
+    </div>${photoBlock}</div>`;
   } else if (req.type === 'account_reactivation') {
     html = `<div class="stack"><div class="form-grid two modal-cs-grid">
       ${field('Customer Name', customer?.name, 'field-wide')}
@@ -4149,7 +4180,7 @@ function nextPaint() {
       grandCredit += credits; grandDebit += debits; grandBalance += Number(c.balance || 0);
       const frozen = isCustomerFrozen(c);
       const inactive = c.active === false;
-      const statusLabel = inactive ? 'Removed' : frozen ? 'Frozen' : 'Active';
+      const statusLabel = c.closed ? 'Closed' : inactive ? 'Removed' : frozen ? 'Frozen' : 'Active';
       const statusColor = inactive ? '#fee2e2' : frozen ? '#fef9c3' : '#d1fae5';
       const statusText = inactive ? '#991b1b' : frozen ? '#854d0e' : '#065f46';
       return `<tr style="${inactive ? 'opacity:0.5' : ''}"><td>${i+1}</td><td>${escapeHtml(c.name)}</td><td>${c.accountNumber || '—'}</td><td>${money(debits)}</td><td>${money(credits)}</td><td>${money(Number(c.balance || 0))}</td><td>${fmtDate(c.createdAt)}</td><td><span style="padding:1px 6px;border-radius:8px;font-size:0.8em;background:${statusColor};color:${statusText}">${statusLabel}</span></td><td>${!inactive ? `<button class="secondary" style="font-size:10px;padding:3px 8px" data-remove-customer="${c.id}">Remove</button>` : '<span style="font-size:10px;color:var(--muted)">Removed</span>'}</td></tr>`;
@@ -4865,7 +4896,7 @@ function staffLedgerEvents(staffId) {
     customer_credit: 'Customer Credit', customer_debit: 'Customer Debit',
     customer_credit_journal: 'Credit Journal', customer_debit_journal: 'Debit Journal',
     intra_bank_transfer: 'Non Cash', account_opening: 'Account Opening',
-    account_maintenance: 'Account Maintenance', cash_receipt: 'Cash Receipt',
+    account_maintenance: 'Account Maintenance', account_block: 'Account Block', account_closure: 'Account Closure', cash_receipt: 'Cash Receipt',
     inter_staff_credit: 'Fund Account', operational_entry: 'Income/Expense Posting',
     float_declaration: 'Float Declaration'
   };
@@ -6268,6 +6299,7 @@ function normalizeStaffLedgerEntryType(row) {
     };
     const fillCustomer = (c) => {
       if (!c) return;
+      if (prefix==='reactivation' && c.closed) return showToast('This account is closed — closed accounts cannot be reactivated');
       if (prefix==='reactivation' && !(isCustomerFrozen(c) || c.active === false)) return showToast('Account is not frozen');
       state.ui.selectedCustomerId = c.id;
       draft.accountNumber = c.accountNumber || '';
@@ -6362,8 +6394,36 @@ function normalizeStaffLedgerEntryType(row) {
   render();
 };
 
+    // SURGICAL ADDITION 2026-10-21 (client): Account Block freezes the
+    // account; Account Closure removes the customer from service but keeps
+    // every record. Both go through approval like any other maintenance.
+    const statusRequest = async (type) => {
+      const c = getSelectedCustomer() || getCustomerByAccountNo(byId(`${prefix}Acc`)?.value || '');
+      if (!c) return showToast('Search for an account first');
+      if (c.closed) return showToast('This account is already closed');
+      if (type === 'account_block' && isCustomerFrozen(c)) return showToast('This account is already frozen');
+      if (type === 'account_closure' && Math.abs(Number(c.balance || 0)) > 0.009) return showToast(`Balance must be zero before closing (current balance ${money(c.balance)}) — pay out or transfer it first`);
+      const pending = (state.approvals || []).some(a => a.status === 'pending' && a.type === type && a.payload?.customerId === c.id);
+      if (pending) return showToast('A request like this is already waiting for approval');
+      const what = type === 'account_block' ? 'Block (freeze)' : 'Close';
+      confirmAction(`${what} account ${c.accountNumber} — ${c.name}? This goes to approval.`, async () => {
+        const result = await submitApprovalThroughGateway(type, { customerId: c.id, accountNumber: c.accountNumber, accountName: c.name });
+        if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit request');
+        showToast(type === 'account_block' ? 'Block request sent for approval' : 'Closure request sent for approval');
+        Object.keys(draft).forEach(k => delete draft[k]);
+        save();
+        render();
+      });
+    };
+    if (byId('maintenanceBlock')) byId('maintenanceBlock').onclick = () => statusRequest('account_block');
+    if (byId('maintenanceClose')) byId('maintenanceClose').onclick = () => statusRequest('account_closure');
+
+    // SURGICAL FIX 2026-10-21: fillCustomer() re-renders, and every render
+    // re-runs this bind — so restoring the selected customer here looped
+    // render -> bind -> fill -> render until the browser's stack overflowed.
+    // Only fill when the form isn't already showing that customer.
     const selected = getSelectedCustomer();
-    if (selected) {
+    if (selected && draft.accountNumber !== (selected.accountNumber || '')) {
       const matchesTool = (accInput?.value || '').trim() ? (selected.accountNumber === (accInput?.value || '').trim()) : true;
       if (matchesTool) fillCustomer(selected);
     }
@@ -6803,7 +6863,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (isCustomerFrozen(c) || c.active === false) {
         freezeInactiveCustomer(c);
         if (!opts.quiet) save();
-        if (!opts.quiet) showToast('Account is frozen');
+        if (!opts.quiet) showToast(c.closed ? 'Account is closed' : 'Account is frozen');
         return null;
       }
       state.ui.selectedCustomerId = c.id;
@@ -6840,7 +6900,7 @@ function normalizeStaffLedgerEntryType(row) {
       const value = (byId('journalAcc')?.value || state.ui.journalAccDraft || '').trim();
       const c = getCustomerByAccountNo(value);
       if (!c) { if (!opts.quiet) showToast('Customer not found'); return null; }
-      if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); if (!opts.quiet) showToast('Account is frozen'); return null; }
+      if (isCustomerFrozen(c) || c.active === false) { freezeInactiveCustomer(c); save(); if (!opts.quiet) showToast(c.closed ? 'Account is closed' : 'Account is frozen'); return null; }
       state.ui.selectedJournalCustomerId = c.id;
       state.ui.journalAccDraft = value;
       if (byId('journalAcc') && String(byId('journalAcc').value || '').trim() !== value) byId('journalAcc').value = value;
@@ -7121,7 +7181,7 @@ function normalizeStaffLedgerEntryType(row) {
         updateJournalAccountMeta(resolvedCustomer);
       }
       if (!journalAccValue || !resolvedCustomer) return showToast('Enter a valid account number');
-      if (isCustomerFrozen(resolvedCustomer) || resolvedCustomer.active === false) { freezeInactiveCustomer(resolvedCustomer); save(); return showToast('Frozen account cannot accept transactions'); }
+      if (isCustomerFrozen(resolvedCustomer) || resolvedCustomer.active === false) { freezeInactiveCustomer(resolvedCustomer); save(); return showToast(resolvedCustomer.closed ? 'Closed account cannot accept transactions' : 'Frozen account cannot accept transactions'); }
       const amount = parseAmountInput('journalAmount');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       const mode = selectedMode();
@@ -7220,7 +7280,7 @@ function normalizeStaffLedgerEntryType(row) {
       const accountNumberInput = String(byId('txAcc')?.value || '').trim();
       const customer = getCustomerByAccountNo(accountNumberInput);
       if (!accountNumberInput || !customer) return showToast('Search for customer first');
-      if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast('Frozen account cannot accept transactions'); }
+      if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast(customer.closed ? 'Closed account cannot accept transactions' : 'Frozen account cannot accept transactions'); }
       const amount = Number(byId('txAmount').value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (kind === 'debit' && amount > tillNow + 0.01) return showToast(`Debit exceeds your Till (${money(tillNow)})`);
@@ -8082,12 +8142,36 @@ function normalizeStaffLedgerEntryType(row) {
   function customerName(id) { return state.customers.find(c=>c.id===id)?.name || ''; }
   function getSelectedCustomer() { return state.customers.find(c => c.id === state.ui.selectedCustomerId) || null; }
   function balanceHtml(n){ return `<span class="${Number(n)<0 ? 'balance-negative' : ''}">${money(n)}</span>`; }
-  function isCustomerFrozen(c){ if(!c) return false; if(c.frozen) return true; const last=(c.transactions||[]).slice().sort((a,b)=>new Date(b.date)-new Date(a.date))[0]; if(!last) return false; const days=(Date.now()-new Date(last.date).getTime())/86400000; return days>=90; }
-  function customerStatusLabel(c){ if(!c) return '—'; return (!c.active || isCustomerFrozen(c)) ? 'Frozen' : 'Active'; }
+  // SURGICAL CHANGE 2026-10-21 (client): an account is Frozen (blocked)
+  // when an approved Account Block says so, or automatically after 90 days
+  // (3 months) with no activity. Activity = the latest transaction or the
+  // latest approved Reactivation (so a reactivation actually sticks until
+  // the next 3 months of inactivity). Only customer accounts auto-freeze —
+  // staff/income/expense system accounts never do.
+  function lastCustomerActivityTime(c) {
+    let latest = 0;
+    (c.transactions || []).forEach(tx => { const t = new Date(tx.date || tx.createdAt || tx.created_at || 0).getTime(); if (t > latest) latest = t; });
+    (state.approvals || []).forEach(a => {
+      if (a.type === 'account_reactivation' && a.status === 'approved' && a.payload?.customerId === c.id) {
+        const t = new Date(a.approvedAt || a.requestedAt || 0).getTime(); if (t > latest) latest = t;
+      }
+    });
+    if (!latest) latest = new Date(c.createdAt || 0).getTime() || 0;
+    return latest;
+  }
+  function isCustomerFrozen(c){
+    if (!c || c.closed) return false;
+    if (c.frozen) return true;
+    if (String(c.accountType || 'customer') !== 'customer') return false;
+    const last = lastCustomerActivityTime(c);
+    if (!last) return false;
+    return (Date.now() - last) / 86400000 >= 90;
+  }
+  function customerStatusLabel(c){ if(!c) return '—'; if (c.closed) return 'Closed'; return (!c.active || isCustomerFrozen(c)) ? 'Frozen' : 'Active'; }
   function freezeInactiveCustomer(c){ if(!c) return; if(c.active === false) c.frozen = true; }
 
   function openCustomerSearchModal(list) {
-    const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
+    const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick="${c.id}">${escapeHtml(c.name || '')}</button>${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
     openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const pickCustomer = (id) => { state.ui.selectedCustomerId = id; save(); closeModal(); applySelectedCustomerToActiveTool(); };
     const bindPicks = () => {

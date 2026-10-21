@@ -165,6 +165,9 @@ const ROLE_DEFAULT_TOOLS = {
           ? rawCustomer.is_active
           : !['inactive', 'dormant', 'closed', 'frozen'].includes(String(rawCustomer.status || '').toLowerCase())),
       createdAt: rawCustomer.createdAt || rawCustomer.created_at || new Date().toISOString(),
+      // 2026-10-21: keep the raw status so the app can tell a blocked
+      // ('frozen') account from a closed one — 'active' alone can't.
+      accountStatus: String(rawCustomer.accountStatus || rawCustomer.status || (rawCustomer.closed ? 'closed' : (rawCustomer.frozen ? 'frozen' : ''))).toLowerCase(),
       transactions,
       staffId: rawCustomer.staffId || rawCustomer.staff_id || rawCustomer.linkedStaffId || rawCustomer.linked_staff_id || null,
       accountType: rawCustomer.accountType || rawCustomer.account_type || 'customer',
@@ -181,6 +184,7 @@ const ROLE_DEFAULT_TOOLS = {
       fullName: normalized.name,
       phone: normalized.phone || null,
       status: normalized.active ? 'active' : 'inactive',
+      accountStatus: normalized.accountStatus,
       linkedStaffId: normalized.staffId || null,
       oldAccountNumber: normalized.oldAccountNumber,
       address: normalized.address,
@@ -1448,6 +1452,39 @@ if (inserted.error) {
         });
         if (!ledgerResult.ok) return ledgerResult;
         return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: ledgerResult.data, decisionNote: decisionNote || '' });
+      }
+
+      // SURGICAL FIX/ADDITION 2026-10-21: customer-status requests. Approving
+      // Account Maintenance or Reactivation previously only marked the
+      // request approved — the customer row itself was never changed in
+      // Supabase. Block (freeze) and Closure (remove from service, records
+      // kept) are new and work the same way.
+      const customerStatusTypes = ['account_maintenance', 'account_reactivation', 'account_block', 'account_closure'];
+      if (customerStatusTypes.includes(type)) {
+        const customerId = payload.customerId || requestRow.entity_id || '';
+        if (!customerId) return defaultResult.err('CUSTOMER_REQUIRED', 'This request has no customer attached.');
+        let patch;
+        if (type === 'account_maintenance') {
+          const m = payload.patch || payload.updates || {};
+          patch = {};
+          if (m.name) { patch.full_name = m.name; patch.display_name = m.name; }
+          if (m.address !== undefined) patch.address = m.address || '';
+          if (m.phone) patch.phone = m.phone;
+          if (m.nin) patch.nin = m.nin;
+          if (m.bvn) patch.bvn = m.bvn;
+          if (m.oldAccountNumber !== undefined) patch.old_account_number = m.oldAccountNumber || '';
+        } else if (type === 'account_reactivation') {
+          patch = { status: 'active', is_active: true };
+        } else if (type === 'account_block') {
+          patch = { status: 'frozen', is_active: true };
+        } else {
+          patch = { status: 'closed', is_active: false };
+        }
+        if (!Object.keys(patch).length) return defaultResult.ok({ posted: false, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '' });
+        const upd = await client.from(customersTable).update(patch).eq('id', customerId).select(customersSelect).maybeSingle();
+        if (upd.error) return defaultResult.err('CUSTOMER_UPDATE_FAILED', 'Could not update the customer for this approval.', upd.error);
+        if (!upd.data) return defaultResult.err('CUSTOMER_NOT_FOUND', 'The customer for this approval was not found.');
+        return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, customer: upd.data, decisionNote: decisionNote || '' });
       }
 
       const postable = ['customer_credit', 'customer_debit', 'customer_credit_journal', 'customer_debit_journal', 'float_topup', 'float_declaration', 'debt_repayment'];
