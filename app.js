@@ -231,7 +231,11 @@
       // "Credit Staff Account" reachable for the first time.
       // SURGICAL ADDITION 2026-09-07: my_statement added so Admin can see
       // their own totals now that Admin has an operational account too.
-      tools: ['central_close_day','cash_receipt','staff_credit','my_statement','operational_posting','operational_accounts','staff_roster','staff_directory','customer_directory','teller_balances','transaction_summary','overall_balance','permissions']
+      // SURGICAL CHANGE 2026-10-21 (client): Staff Salary, All Customers',
+      // Teller and Overall Balance moved to Approval -> Daily/Weekly/
+      // Monthly/Yearly Balances. Income & Expense Balance stays here too
+      // because it also carries the Create Account / Post into Account forms.
+      tools: ['central_close_day','cash_receipt','staff_credit','my_statement','operational_posting','operational_accounts','staff_roster','transaction_summary','permissions']
     },
     balances: {
       title: 'Balances',
@@ -870,13 +874,23 @@
     appr_non_cash:   { base: 'approval_non_cash', section: 'non_cash', types: ['intra_bank_transfer','inter_staff_credit'], label: 'Approve Non Cash Postings' },
     appr_journals:   { base: 'approval_tellering', section: 'tellering', types: ['customer_credit_journal','customer_debit_journal'], label: 'Approve Journals' },
   };
-  const BALANCE_SUB_TOOLS = {
-    bal_account: { base: 'overall_balance', label: 'Account Balance' },
-    bal_daily:   { base: 'business_balance', preset: 'daily', label: 'Daily Balance' },
-    bal_weekly:  { base: 'business_balance', preset: 'weekly', label: 'Weekly Balance' },
-    bal_monthly: { base: 'business_balance', preset: 'monthly', label: 'Monthly Balance' },
-    bal_yearly:  { base: 'business_balance', preset: 'yearly', label: 'Yearly Balance' },
-  };
+  // SURGICAL CHANGE 2026-10-21 (client): the Administration balance
+  // reports move to Approvals, grouped by period — Daily / Weekly /
+  // Monthly / Yearly, each listing the same five balance reports. Tool key
+  // is balp_<period>_<report>; the report opens on that period, with the
+  // usual date buttons + From/To pickers to change it.
+  const BALANCE_PERIODS = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']];
+  const BALANCE_REPORTS = [
+    ['overall',   'overall_balance',      'Overall Balance'],
+    ['customers', 'customer_directory',   "All Customers' Balance"],
+    ['salary',    'staff_directory',      'Staff Salary Balance'],
+    ['tellers',   'teller_balances',      'Teller Balances'],
+    ['incexp',    'operational_accounts', 'Income & Expense Balance'],
+  ];
+  const BALANCE_SUB_TOOLS = {};
+  BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
+    BALANCE_SUB_TOOLS[`balp_${pk}_${rk}`] = { base, preset: pk, report: rk, short: rl, label: `${pl} ${rl}` };
+  }));
   Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
 
   function hasPermission(tool, staff=currentStaff()) {
@@ -2583,7 +2597,12 @@ function hideProcessing() {
           ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close'])}
           ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals'])}
           ${toolBtn('approval_others')}
-          ${group('appr_bal', 'Account Balances', ['bal_account','bal_daily','bal_weekly','bal_monthly','bal_yearly'])}
+          ${BALANCE_PERIODS.map(([pk, pl]) => {
+            const keys = BALANCE_REPORTS.map(([rk]) => `balp_${pk}_${rk}`);
+            const isOpen = !!state.ui.tellerGroupOpen[`balp_${pk}`] || keys.includes(state.ui.tool);
+            return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="balp_${pk}">${pl} Balances <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
+          <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${keys.map(k => `<button class="tool-tab ${state.ui.tool===k?'active':''}" data-tool="${k}" ${hasPermission(k)?'':'disabled'}>${escapeHtml(BALANCE_SUB_TOOLS[k].short)}</button>`).join('')}</div>`;
+          }).join('')}
           ${toolBtn('approval_history')}
           ${toolBtn('my_approvals')}
         </div>`;
@@ -2663,7 +2682,7 @@ function hideProcessing() {
         if (nextTool === 'approval_non_cash') state.ui.approvalsSection = 'non_cash';
         if (nextTool === 'approval_others') state.ui.approvalsSection = 'others';
         if (APPROVAL_SUB_TOOLS[nextTool]) state.ui.approvalsSection = APPROVAL_SUB_TOOLS[nextTool].section;
-        if (BALANCE_SUB_TOOLS[nextTool]?.preset) state.ui.businessFilter = { preset: BALANCE_SUB_TOOLS[nextTool].preset, from: '', to: '' };
+        if (BALANCE_SUB_TOOLS[nextTool]) state.ui.balancePeriodFilter = { preset: BALANCE_SUB_TOOLS[nextTool].preset, from: '', to: '' };
       }
       if (state.ui.tool === 'check_balance') state.ui.checkBalanceLoaded = false;
       state.ui.modalToggleTool = state.ui.tool && ['my_close_day','central_close_day'].includes(state.ui.tool) ? state.ui.tool : null;
@@ -2684,7 +2703,7 @@ function hideProcessing() {
 
   function renderTool(tool) {
     if (APPROVAL_SUB_TOOLS[tool]) return renderApprovals();
-    if (BALANCE_SUB_TOOLS[tool]) return BALANCE_SUB_TOOLS[tool].base === 'overall_balance' ? renderOverallBalance() : renderBusinessBalance();
+    if (BALANCE_SUB_TOOLS[tool]) return renderPeriodBalance(BALANCE_SUB_TOOLS[tool]);
     switch(tool) {
       case 'check_balance': return renderCheckBalance();
       case 'my_statement': return renderMyStatement();
@@ -4217,6 +4236,125 @@ function nextPaint() {
       </div>`;
   }
 
+  // ===== PERIOD BALANCES (Approval -> Daily/Weekly/Monthly/Yearly) =====
+  // Period boundaries use the open business date as "today", exactly like
+  // the existing balance filters (filterByDate): weekly = last 7 days,
+  // monthly/yearly = the business date's month/year, custom = From..To.
+  function balancePeriodRange(f) {
+    const ref = dateOnly(businessDate()) || '';
+    const preset = f?.preset || 'daily';
+    if (preset === 'all') return { start: '', end: '', preset };
+    if (preset === 'custom') return { start: f.from || '', end: f.to || '', preset };
+    if (preset === 'daily') return { start: ref, end: ref, preset };
+    const d = new Date(`${ref}T12:00:00`);
+    const iso = (x) => `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+    if (preset === 'weekly') { const st = new Date(d); st.setDate(d.getDate() - 6); return { start: iso(st), end: ref, preset }; }
+    if (preset === 'monthly') return { start: `${ref.slice(0,7)}-01`, end: iso(new Date(d.getFullYear(), d.getMonth()+1, 0)), preset };
+    return { start: `${ref.slice(0,4)}-01-01`, end: `${ref.slice(0,4)}-12-31`, preset };
+  }
+  const inPeriod = (iso, r) => !!iso && (!r.start || iso >= r.start) && (!r.end || iso <= r.end);
+  const afterPeriod = (iso, r) => !!iso && !!r.end && iso > r.end;
+  const beforePeriod = (iso, r) => !!iso && !!r.start && iso < r.start;
+
+  // Debit/credit inside the period, plus opening/closing balances worked
+  // back from the account's CURRENT balance (so they always agree with it).
+  function periodFigures(currentBalance, items, r) {
+    let debit = 0, credit = 0, netAfter = 0, netFrom = 0;
+    items.forEach(({ iso, amount, isCredit }) => {
+      const signed = isCredit ? amount : -amount;
+      if (inPeriod(iso, r)) { if (isCredit) credit += amount; else debit += amount; }
+      if (afterPeriod(iso, r)) netAfter += signed;
+      if (!r.start || !beforePeriod(iso, r)) netFrom += signed;
+    });
+    const closing = Number(currentBalance || 0) - netAfter;
+    const opening = Number(currentBalance || 0) - netFrom;
+    return { opening, debit, credit, closing };
+  }
+  const txItems = (c) => (c?.transactions || []).filter(tx => tx.type === 'credit' || tx.type === 'debit').map(tx => ({ iso: filterRowDate(tx), amount: Number(tx.amount || 0), isCredit: tx.type === 'credit' }));
+  const opItems = (accountId) => (state.operations.entries || []).filter(e => e.accountId === accountId).map(e => ({ iso: filterRowDate(e), amount: Number(e.amount || 0), isCredit: e.kind === 'income' }));
+
+  function renderPeriodBar() {
+    const f = state.ui.balancePeriodFilter || { preset: 'daily', from: '', to: '' };
+    const r = balancePeriodRange(f);
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly'],['all','All']];
+    const label = r.preset === 'all' ? 'All dates' : `${r.start ? fmtDate(r.start) : '…'} – ${r.end ? fmtDate(r.end) : '…'}`;
+    return `<div class="form-card balance-filters-card"><div class="action-inline balance-filters-row">${presets.map(([k,l]) => `<button class="filter-chip ${f.preset===k?'active':'secondary'}" data-period-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="balPeriodFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label><label class="inline-field"><span>To</span><input id="balPeriodTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label><button id="balPeriodApply" class="secondary">Apply Custom</button></div><div class="note" style="margin-top:6px">Period: <strong>${label}</strong></div></div>`;
+  }
+
+  function periodAccountsTable(title, accounts, r, opts = {}) {
+    let tO = 0, tD = 0, tC = 0, tB = 0;
+    const rows = accounts.map((a, i) => {
+      const fig = opts.figures ? opts.figures(a) : periodFigures(a.balance, txItems(a), r);
+      tO += fig.opening; tD += fig.debit; tC += fig.credit; tB += fig.closing;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(a.name || '—')}</td><td>${escapeHtml(String(a.accountNumber || '—'))}</td><td>${money(fig.opening)}</td><td>${money(fig.debit)}</td><td>${money(fig.credit)}</td><td class="${fig.closing<0?'balance-negative':''}">${money(fig.closing)}</td></tr>`;
+    }).join('');
+    const total = accounts.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(tO)}</strong></td><td><strong>${money(tD)}</strong></td><td><strong>${money(tC)}</strong></td><td><strong>${money(tB)}</strong></td></tr>` : '';
+    return `<div class="table-card"><h3>${escapeHtml(title)}</h3>${opts.extra || ''}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Opening Balance</th><th>Total Debit</th><th>Total Credit</th><th>Closing Balance</th></tr></thead><tbody>${rows || `<tr><td colspan="7">${opts.empty || 'No accounts found'}</td></tr>`}${total}</tbody></table></div></div>`;
+  }
+
+  // Teller figures are rebuilt from approved requests up to a date, using the
+  // same operational-balance rules as the Till box.
+  function withApprovalsUpTo(iso, fn) {
+    if (!iso) return fn();
+    const saved = state.approvals;
+    try {
+      state.approvals = (saved || []).filter(a => approvalBusinessDate(a.type, a.payload || {}) <= iso);
+      return fn();
+    } finally { state.approvals = saved; }
+  }
+  const dayBefore = (iso) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+
+  function renderPeriodBalance(def) {
+    const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: def.preset });
+    const head = renderPeriodBar();
+    if (def.report === 'overall') {
+      const sumGroup = (accts, itemsOf, balOf) => accts.reduce((acc, a) => { const f = periodFigures(balOf(a), itemsOf(a), r); acc.opening += f.opening; acc.debit += f.debit; acc.credit += f.credit; acc.closing += f.closing; return acc; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+      const cats = [
+        ["All Customers' Balance", sumGroup((state.customers || []).filter(c => String(c.accountType || 'customer') !== 'staff_wallet'), txItems, c => c.balance)],
+        ['All Staff Balance', sumGroup((state.staff || []).map(st => { const acc = ensureStaffAccount(st.id); return { acc, wallet: (state.customers || []).find(c => c.id === acc.linkedCustomerId) }; }), x => txItems(x.wallet), x => x.acc.balance)],
+        ['Income Balance', sumGroup(state.operations.incomeAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
+        ['Expense Balance', sumGroup(state.operations.expenseAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
+      ];
+      const g = cats.reduce((t, [, f]) => ({ opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { opening: 0, debit: 0, credit: 0, closing: 0 });
+      const rows = cats.map(([n, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(n)}</td><td>${money(f.opening)}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`).join('');
+      return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">The company's entire truth — every balance category rolled up into one business total, for the selected period.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Opening Balance</th><th>Total Debit</th><th>Total Credit</th><th>Closing Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(g.opening)}</strong></td><td><strong>${money(g.debit)}</strong></td><td><strong>${money(g.credit)}</strong></td><td><strong>${money(g.closing)}</strong></td></tr></tbody></table></div></div></div>`;
+    }
+    if (def.report === 'customers' || def.report === 'salary') {
+      const search = String(state.ui.periodBalanceSearch || '').trim().toLowerCase();
+      const accounts = (state.customers || [])
+        .filter(c => def.report === 'salary' ? c.accountType === 'staff_salary' : String(c.accountType || 'customer') !== 'staff_wallet')
+        .filter(c => !search || [c.name, c.accountNumber, c.phone].some(v => String(v || '').toLowerCase().includes(search)))
+        .sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
+      const extra = `<div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div>`;
+      return `<div class="stack">${head}${periodAccountsTable(def.label, accounts, r, { extra, empty: def.report === 'salary' ? 'No staff salary accounts found' : 'No matching customers' })}</div>`;
+    }
+    if (def.report === 'tellers') {
+      const rows = (state.staff || []).map(st => {
+        const opAcc = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st.id);
+        const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(st.id)) : 0;
+        const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(st.id));
+        const mine = (state.approvals || []).filter(a => a.status === 'approved' && a.payload?.staffId === st.id && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
+        const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
+        const credits = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
+        const debits = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
+        return `<tr><td>${escapeHtml(st.name || '')}</td><td>${ROLE_LABELS[st.role] || st.role || ''}</td><td>${escapeHtml(opAcc?.accountNumber || '—')}</td><td>${money(opening)}</td><td>${money(credits)}</td><td>${money(debits)}</td><td class="${closing<0?'balance-negative':''}">${money(closing)}</td><td><button class="secondary" data-staff-ledger="${st.id}">Ledger</button></td></tr>`;
+      }).join('');
+      return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Op. Account</th><th>Opening Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Closing Balance</th><th>Ledger</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No staff</td></tr>'}</tbody></table></div></div></div>`;
+    }
+    // Income & Expense
+    const opFig = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
+    const sortAcc = (list) => [...(list || [])].sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
+    return `<div class="stack">${head}${periodAccountsTable('All Income Balance', sortAcc(state.operations.incomeAccounts), r, { figures: opFig, empty: 'No income accounts' })}${periodAccountsTable('All Expense Balance', sortAcc(state.operations.expenseAccounts), r, { figures: opFig, empty: 'No expense accounts' })}</div>`;
+  }
+
+  function bindPeriodBalance() {
+    qq('[data-period-preset]').forEach(btn => btn.onclick = () => { state.ui.balancePeriodFilter = { preset: btn.dataset.periodPreset, from: '', to: '' }; save(); renderWorkspace(); });
+    if (byId('balPeriodApply')) byId('balPeriodApply').onclick = () => { state.ui.balancePeriodFilter = { preset: 'custom', from: byId('balPeriodFrom')?.value || '', to: byId('balPeriodTo')?.value || '' }; save(); renderWorkspace(); };
+    const search = byId('periodBalanceSearch');
+    if (search) search.oninput = debounce(() => { state.ui.periodBalanceSearch = search.value; save(); renderWorkspace(); requestAnimationFrame(() => { const el = byId('periodBalanceSearch'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }); }, 300);
+    qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
+  }
+
   function renderOverallBalance() {
     // Overall Balance is a rollup of the OTHER balance categories — not another
     // per-account or staff-balance listing. Each row here is a category total.
@@ -5091,7 +5229,7 @@ function normalizeStaffLedgerEntryType(row) {
 
   function bindToolHandlers() {
     if (APPROVAL_SUB_TOOLS[state.ui.tool]) { bindApprovals(); return; }
-    if (BALANCE_SUB_TOOLS[state.ui.tool]) { if (BALANCE_SUB_TOOLS[state.ui.tool].base === 'business_balance') bindBalanceFilters('business'); return; }
+    if (BALANCE_SUB_TOOLS[state.ui.tool]) { bindPeriodBalance(); return; }
     switch (state.ui.tool) {
       case 'check_balance': bindCheckBalance(); break;
       case 'my_statement': bindMyStatement(); break;
