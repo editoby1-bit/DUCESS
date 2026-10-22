@@ -2370,7 +2370,9 @@ if (approvalRecord.type === 'float_topup') {
     const map = {
       name: customer?.name || '',
       phone: customer?.phone || '',
-      balance: customer ? balanceHtml(customer.balance) : '—',
+      // A teller's T-account balance is the operational balance (Till), not
+      // the customer-style balance field (2026-10-22).
+      balance: customer ? balanceHtml(customer.accountType === 'staff_operational' ? getStaffOperationalBalance(customer.linkedStaffId) : customer.balance) : '—',
       address: customer?.address || '',
       nin: customer?.nin || '',
       bvn: customer?.bvn || ''
@@ -2973,7 +2975,32 @@ function hideProcessing() {
     const generated = state.ui.accountStatementGenerated && customer;
 
     let statementHtml = '';
-    if (generated) {
+    const isTellerAccount = customer?.accountType === 'staff_operational' && customer.linkedStaffId;
+    if (generated && isTellerAccount) {
+      // 2026-10-22: a teller's T-account statement is the teller's own
+      // operations, from the teller account's side (see staffLedgerEvents).
+      const events = staffLedgerEvents(customer.linkedStaffId).slice().sort((a, b) => a.seq - b.seq).filter(ev => {
+        const d = String(ev.date || '').slice(0,10);
+        if (filter.from && d < filter.from) return false;
+        if (filter.to && d > filter.to) return false;
+        return true;
+      });
+      const rows = events.map((ev, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td>${tellerStatementCells(ev)}<td>—</td><td>${escapeHtml(ev.staffName || '—')}</td><td>—</td></tr>`).join('');
+      statementHtml = `
+        <div class="record-card statement-record-minimal" id="statementPrintArea">
+          <div class="lookup-card statement-lookup-minimal"><div class="stack"><div class="info-grid">
+            <div class="info-item"><div class="k">A/C Name</div><div class="v">${escapeHtml(customer.name || '')}</div></div>
+            <div class="info-item"><div class="k">Account Number</div><div class="v">${customer.accountNumber || '—'}</div></div>
+            <div class="info-item"><div class="k">Teller</div><div class="v">${escapeHtml(staffById(customer.linkedStaffId)?.name || '—')}</div></div>
+            <div class="info-item"><div class="k">Available Balance</div><div class="v">${money(getStaffOperationalBalance(customer.linkedStaffId))}</div></div>
+          </div></div></div>
+          <div class="table-wrap" style="margin-top:16px"><table class="table">
+            <thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}</tbody>
+          </table></div>
+        </div>
+        <div class="action-row compact-action-row" style="margin-top:10px"><button class="secondary tiny-btn" id="stmtPrintBtn">Print Statement</button></div>`;
+    } else if (generated) {
       const rows = (customer.transactions || []).filter(tx => {
         const d = tx.date.slice(0,10);
         if (filter.from && d < filter.from) return false;
@@ -4718,6 +4745,15 @@ function nextPaint() {
     printHtml(html, true);
   }
 
+  // Debit / Credit columns for the teller statement (see staffLedgerEvents).
+  function tellerStatementCells(row) {
+    const amt = money(row.amount);
+    return `<td>${row.side === 'debit' ? amt : ''}</td><td>${row.side === 'credit' ? amt : ''}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td>`;
+  }
+  function staffOperationalAccountNumber(staffId) {
+    return (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId)?.accountNumber || '';
+  }
+
 function staffLedgerEvents(staffId) {
     const staff = staffById(staffId) || {};
     const acc = ensureStaffAccount(staffId);
@@ -4767,7 +4803,14 @@ function staffLedgerEvents(staffId) {
         // acting staff's own My Statement actually diverge from anyone
         // else's based on what THEY did, instead of staying silent on
         // every Non Cash action they perform.
-        if (payload.staffId === staffId) {
+        // SURGICAL FIX 2026-10-22 (client): money the teller sends OUT of
+        // their own operational account (e.g. the Till handed to Treasury)
+        // was only a zero-amount note here, so the statement balance never
+        // dropped. It now reduces the balance exactly as the Till does.
+        if (opAccount && payload.sourceAccountId === opAccount.id) {
+          const amount = Number(payload.amount || 0);
+          addEvent({ key: `${req.id || 'inter-credit'}-out`, date, type: 'Transfer Out', amount, delta: -amount, details: `To ${payload.targetAccountName || payload.targetAccountNumber || 'staff account'}`, runningType: 'form' });
+        } else if (payload.staffId === staffId) {
           const amount = Number(payload.amount || 0);
           addEvent({ key: `${req.id || 'inter-credit'}-issued`, date, type: 'Non Cash (Issued)', amount, delta: 0, details: `Funded ${payload.targetAccountName || 'staff account'} from ${payload.sourceAccountName || 'your account'}`, runningType: 'other' });
         }
@@ -4791,11 +4834,11 @@ function staffLedgerEvents(staffId) {
       // correctly add to the running balance instead of subtracting.
       if (req.type === 'customer_credit' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Credit', amount, delta: amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
+        addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Customer Credit', amount, delta: amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
       }
       if (req.type === 'customer_debit' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Debit', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
+        addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Customer Debit', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
       }
       if (req.type === 'customer_credit_journal' && payload.staffId === staffId) {
         const formAmount = Number(payload.formAmount || 0);
@@ -4810,11 +4853,19 @@ function staffLedgerEvents(staffId) {
       const date = cod.date || String(cod.submittedAt || cod.resolvedAt || '').slice(0,10) || businessDate();
       addEvent({ key: cod.id || `cod-${date}`, date, type: `COD ${String(cod.status || 'Submitted').toUpperCase()}`, amount: Number(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0), delta: 0, details: `Op. Balance ${money(getStaffOperationalBalance(staffId))} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? 0)} • Variance ${money(cod.variance || 0)}`, runningType: 'cod' });
     });
+    // SURGICAL CHANGE 2026-10-22 (client): the teller's statement is kept
+    // from the TELLER ACCOUNT'S side — the mirror of the customer's entry.
+    // Cash coming in (a customer credit the teller posts, or funding into
+    // the T-account) is a DEBIT to the teller account; cash going out (a
+    // customer debit, or a transfer out) is a CREDIT. Balance = debits -
+    // credits, the same figure as the Till / operational balance.
     let running = 0;
     return events.sort((a,b)=> new Date(`${a.date}T12:00:00Z`) - new Date(`${b.date}T12:00:00Z`)).map(event => {
-      if (['form','credit','debit'].includes(event.runningType)) running += Number(event.delta || 0);
-      return { ...event, runningBalance: running, staffName: staff.name || staffId };
-    }).sort((a,b)=> new Date(`${b.date}T12:00:00Z`) - new Date(`${a.date}T12:00:00Z`));
+      const affects = ['form','credit','debit'].includes(event.runningType) && Number(event.delta || 0) !== 0;
+      if (affects) running += Number(event.delta || 0);
+      const side = affects ? (Number(event.delta) > 0 ? 'debit' : 'credit') : '';
+      return { ...event, side, runningBalance: running, staffName: staff.name || staffId };
+    }).map((event, seq) => ({ ...event, seq })).reverse(); // newest first; seq keeps same-day order
   }
 
   // SURGICAL ADDITION 2026-09-04 (client request): "every staff will have
@@ -4832,7 +4883,7 @@ function staffLedgerEvents(staffId) {
     const events = filterByDate(staffLedgerEvents(st.id), filter);
     const rows = events.map((row, i) => {
       const displayDate = String(row.businessDate || row.date || businessDate()).slice(0,10);
-      return `<tr><td>${i+1}</td><td>${fmtDate(`${displayDate}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type || '')}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(row.details || '—')}</td></tr>`;
+      return `<tr><td>${i+1}</td><td>${fmtDate(`${displayDate}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type || '')}</td>${tellerStatementCells(row)}<td>${escapeHtml(row.details || '—')}</td></tr>`;
     }).join('');
     return `
       <div class="stack">
@@ -4841,7 +4892,7 @@ function staffLedgerEvents(staffId) {
           <div class="kpi-row wrap">
             <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(st.name || '')}</div></div>
             <div class="kpi"><div class="label">Office</div><div class="number">${ROLE_LABELS[st.role] || st.role}</div></div>
-            <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(acc.accountNumber || '—')}</div></div>
+            <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(staffOperationalAccountNumber(st.id) || acc.accountNumber || '—')}</div></div>
             <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(getStaffOperationalBalance(st.id))}</div></div>
           </div>
           <div class="action-inline balance-filters-row" style="margin-top:10px">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-my-statement-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="myStatementFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="myStatementTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="myStatementCustomApply">Apply Custom</button>
@@ -4854,7 +4905,7 @@ function staffLedgerEvents(staffId) {
                Journal Register — this is just a "what did I upload most
                recently" shortcut. -->
           <button id="openFieldNoteBtn" class="secondary">Field Note (Form)</button></div>
-          <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No entries in range</td></tr>'}</tbody></table></div>
+          <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No entries in range</td></tr>'}</tbody></table></div>
         </div>
       </div>`;
   }
@@ -4977,7 +5028,7 @@ function staffLedgerEvents(staffId) {
     function buildRows(events) {
       return events.map((row, i) => {
         const displayDate = staffLedgerDisplayDate(row);
-        return `<tr><td>${i+1}</td><td>${fmtDate(`${displayDate}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td class="${Number(row.runningBalance || 0) < 0 ? 'balance-negative' : ''}">${money(row.runningBalance)}</td><td>${escapeHtml(cleanStaffLedgerDetails(row.details || row.note || '—'))}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${fmtDate(`${displayDate}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td>${tellerStatementCells(row)}<td>${escapeHtml(cleanStaffLedgerDetails(row.details || row.note || '—'))}</td></tr>`;
       }).join('');
     }
 
@@ -4988,14 +5039,14 @@ function staffLedgerEvents(staffId) {
         <div class="kpi-row wrap staff-ledger-kpis">
           <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(staffName)}</div></div>
           <div class="kpi"><div class="label">Office</div><div class="number">${escapeHtml(staffRole)}</div></div>
-          <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(acc.accountNumber || '—')}</div></div>
+          <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(staffOperationalAccountNumber(staffId) || acc.accountNumber || '—')}</div></div>
           <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(getStaffOperationalBalance(staffId))}</div></div>
           <div class="kpi"><div class="label">Debt</div><div class="number ${Number(acc.debtBalance||0)>0 ? 'balance-negative' : ''}">${money(acc.debtBalance||0)}</div></div>
         </div>
         ${cod ? `<div class="note">Latest COD: <strong>${fmtDate(`${cod.date || cod.submittedAt}T12:00:00.000Z`)}</strong> • ${escapeHtml(cod.status || 'submitted')} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0)}</div>` : '<div class="note">No COD record yet for this staff.</div>'}
         ${loading ? '<div class="note" style="color:var(--text-muted)">Loading ledger from server…</div>' : ''}
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-staff-ledger-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="staffLedgerFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="staffLedgerTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="staffLedgerCustomApply">Apply Custom</button><button class="secondary" id="staffLedgerPrintBtn">Print</button></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No ledger entries in range</td></tr>'}</tbody></table></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No ledger entries in range</td></tr>'}</tbody></table></div>
       </div>`;
     }
 
@@ -5016,18 +5067,22 @@ function staffLedgerEvents(staffId) {
       };
       if (byId('staffLedgerPrintBtn')) byId('staffLedgerPrintBtn').onclick = () => {
         const filtered = filterByDate(allEvents, state.ui.staffLedgerFilters[staffId]);
-        const printRows = filtered.map((row, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${staffLedgerDisplayDate(row)}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${money(row.amount)}</td><td>${money(row.runningBalance)}</td><td>${escapeHtml(cleanStaffLedgerDetails(row.details || row.note || '—'))}</td></tr>`).join('');
-        printHtml(`<div class="record-card"><h3>Statement — ${escapeHtml(staffName)} (${escapeHtml(acc.accountNumber || '—')})</h3><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Amount</th><th>Running Balance</th><th>Details</th></tr></thead><tbody>${printRows || '<tr><td colspan="6">No entries in range</td></tr>'}</tbody></table></div>`, true);
+        const printRows = filtered.map((row, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${staffLedgerDisplayDate(row)}T12:00:00.000Z`)}</td><td>${escapeHtml(row.type)}</td><td>${row.side === 'debit' ? money(row.amount) : ''}</td><td>${row.side === 'credit' ? money(row.amount) : ''}</td><td>${money(row.runningBalance)}</td><td>${escapeHtml(cleanStaffLedgerDetails(row.details || row.note || '—'))}</td></tr>`).join('');
+        printHtml(`<div class="record-card"><h3>Statement — ${escapeHtml(staffName)} (${escapeHtml(acc.accountNumber || '—')})</h3><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Details</th></tr></thead><tbody>${printRows || '<tr><td colspan="6">No entries in range</td></tr>'}</tbody></table></div>`, true);
       };
     }
 
     // Show immediately with local data
     const localEvents = staffLedgerEvents(staffId);
-    openModal(`Staff Ledger — ${escapeHtml(staffName)}`, buildModal(buildRows(filterByDate(localEvents, filter)), isSupabaseApprovalMode()), [{ label:'Close', className:'secondary', onClick: closeModal }]);
+    openModal(`Staff Ledger — ${escapeHtml(staffName)}`, buildModal(buildRows(filterByDate(localEvents, filter)), false), [{ label:'Close', className:'secondary', onClick: closeModal }]);
     bindModalControls(localEvents);
 
-    // Fetch from Supabase and upgrade
-    if (isSupabaseApprovalMode() && gateway.staff?.listStaffLedger) {
+    // SURGICAL CHANGE 2026-10-22: no longer swapped for the Supabase
+    // staff_cash_ledger rows — that table only holds funding entries, not
+    // the teller's customer credits/debits, so the swap hid them. The local
+    // events above are built from every approved request (the same source
+    // as the Till and operational balance), so they're complete.
+    if (false && isSupabaseApprovalMode() && gateway.staff?.listStaffLedger) {
       try {
         const supabaseStaffId = staff.uuid || staff.auth_user_id || staffId;
         const result = await gateway.staff.listStaffLedger(supabaseStaffId);
