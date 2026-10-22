@@ -374,6 +374,7 @@
   const state = bootstrapState();
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
+  ['staffProfiles','staffProfilesLoaded','staffProfilesSource','ictSource','ictLogs','admSelectedStaffId','admProfileDraft'].forEach(k => { delete state.ui[k]; });
   if (state.ui.module && !MODULES[state.ui.module]) state.ui.module = null;
   if (state.ui.module && state.ui.tool && !hasPermission(state.ui.tool)) state.ui.tool = null;
   ensureState();
@@ -493,12 +494,33 @@
     }
   }
 
+  // SURGICAL FIX 2026-10-22 (memory management): browser storage holds
+  // ~5 MB. The whole working copy (customers + transactions + approvals) is
+  // saved here, and an over-quota save used to THROW — breaking whatever
+  // action was running. Now a failed save retries with a slim copy that
+  // leaves out data the server re-sends on every load (live mode only:
+  // approvals, transactions, audit). Local/offline mode can't drop data, so
+  // it warns once instead.
+  let storageWarned = false;
   function save() {
-    if (gateway?.appState?.saveState) {
-      gateway.appState.saveState(state);
-      return;
+    const write = (obj) => {
+      if (gateway?.appState?.saveState) gateway.appState.saveState(obj);
+      else localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+    };
+    // Admin caches (profiles with photos, ICT logs) are reloaded each
+    // session, so they stay out of browser storage.
+    const { staffProfiles, ictLogs, ...persistUi } = state.ui || {};
+    const persist = { ...state, ui: persistUi };
+    try { write(persist); return; }
+    catch (err) {
+      if (isSupabaseApprovalMode()) {
+        try {
+          write({ ...persist, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __slimSaved: new Date().toISOString() });
+          return;
+        } catch (err2) { /* fall through to warning */ }
+      }
+      if (!storageWarned) { storageWarned = true; console.warn('[DUCESS] Browser storage is full — state not saved.', err); try { showToast('Browser storage is full — clear site data or contact admin'); } catch (_) {} }
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
   function currentStaff() {
@@ -4471,9 +4493,13 @@ function nextPaint() {
 
   // Profiles: Supabase table when available, otherwise kept in this browser.
   function localStaffProfiles() { state.localStaffProfiles ||= {}; return state.localStaffProfiles; }
+  // Loaded-this-session flags live in memory only. They used to be saved
+  // with the app state, so a "table missing" result stuck even after the
+  // SQL script was run (2026-10-22 fix).
+  const adminSessionLoaded = { profiles: false, ict: {} };
   async function loadStaffProfiles(force = false) {
-    if (state.ui.staffProfilesLoaded && !force) return;
-    state.ui.staffProfilesLoaded = true;
+    if (adminSessionLoaded.profiles && !force) return;
+    adminSessionLoaded.profiles = true;
     const res = await gateway.adminx?.listStaffProfiles?.();
     if (res?.ok) { state.ui.staffProfiles = Object.fromEntries((res.data || []).map(p => [p.staff_id, p])); state.ui.staffProfilesSource = 'db'; }
     else { state.ui.staffProfiles = { ...localStaffProfiles() }; state.ui.staffProfilesSource = res?.error?.code === 'TABLE_MISSING' ? 'missing' : 'local'; }
@@ -4483,7 +4509,8 @@ function nextPaint() {
 
   function renderStaffManagement() {
     const staffList = [...(state.staff || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-    const selId = state.ui.admSelectedStaffId && staffList.some(s => s.id === state.ui.admSelectedStaffId) ? state.ui.admSelectedStaffId : (staffList[0]?.id || '');
+    // Staff Information shows only after Open is clicked on a staff row.
+    const selId = state.ui.admSelectedStaffId && staffList.some(s => s.id === state.ui.admSelectedStaffId) ? state.ui.admSelectedStaffId : '';
     const sel = staffList.find(s => s.id === selId);
     const prof = { ...(profileOf(selId) || {}), ...(state.ui.admProfileDraft?.staffId === selId ? state.ui.admProfileDraft.data : {}) };
     const rows = staffList.map((s, i) => `<tr class="${s.id === selId ? 'adm-selected' : ''}"><td>${i+1}</td><td>${escapeHtml(s.name || '—')}</td><td>${escapeHtml(ROLE_LABELS[s.role] || s.role || '—')}</td><td>${escapeHtml(profileOf(s.id)?.job_title || '—')}</td><td><code>${escapeHtml(String(s.staffId || s.staffCode || '—'))}</code></td><td>${s.active === false ? 'Blocked' : 'Active'}</td><td><button class="secondary tiny-btn" data-adm-staff="${s.id}">Open</button></td></tr>`).join('');
@@ -4506,18 +4533,18 @@ function nextPaint() {
         ${sourceNote}
         <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>App Role</th><th>Job Title</th><th>Staff ID</th><th>Status</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7">No staff</td></tr>'}</tbody></table></div>
       </div>
-      <div class="form-card cs2-card">
-        <div class="cs2-title">Staff Information</div>
-        ${sel ? `<div class="cs2-stack">
+      ${sel ? `<div class="form-card cs2-card">
+        <div class="cs2-title">Staff Information — ${escapeHtml(sel.name || '')}</div>
+        <div class="cs2-stack">
           <div class="cs2-row"><div class="cs2-label">App Role</div><div class="display-field cs2-wide">${escapeHtml(ROLE_LABELS[sel.role] || sel.role || '—')}</div></div>
           <div class="cs2-row"><div class="cs2-label">Full Name</div><div class="display-field cs2-wide">${escapeHtml(sel.name || '—')}</div></div>
           <div class="cs2-row"><div class="cs2-label">Login ID</div><div class="display-field cs2-wide">${escapeHtml(String(sel.staffId || sel.staffCode || '—'))}</div></div>
           <div class="cs2-row"><div class="cs2-label">Operational A/C No</div><div class="display-field cs2-wide">${escapeHtml(opAcc || '—')}</div></div>
           <div class="cs2-row"><div class="cs2-label">Photo</div><div class="cs2-input-wrap cs2-wide" style="display:flex;gap:8px;align-items:center">${prof.photo ? `<img src="${prof.photo}" alt="Staff photo" style="width:64px;height:64px;object-fit:cover;border:1px solid #d8c896">` : '<span class="muted">No photo</span>'}<label class="sheet-btn secondary file-trigger-btn" for="admPhotoInput">Upload Photo</label><input id="admPhotoInput" type="file" accept="image/*" class="visually-hidden-file-input"></div></div>
           ${STAFF_PROFILE_FIELDS.map(fieldHtml).join('')}
-          <div class="cs2-button-row"><button id="admProfileSave" class="sheet-btn cs2-btn cs2-btn-solid">Save Staff Information</button></div>
-        </div>` : '<div class="note">Add a staff member first.</div>'}
-      </div>
+          <div class="cs2-button-row"><button id="admProfileSave" class="sheet-btn cs2-btn cs2-btn-solid">Save Staff Information</button><button id="admProfileClose" class="sheet-btn cs2-btn cs2-btn-ghost secondary">Close</button></div>
+        </div>
+      </div>` : ''}
     </div>`;
   }
 
@@ -4617,7 +4644,8 @@ function nextPaint() {
 
   async function loadIctLogs(cat, force = false) {
     state.ui.ictLogs ||= {};
-    if (state.ui.ictLogs[cat] && !force) return;
+    if (adminSessionLoaded.ict[cat] && !force) return;
+    adminSessionLoaded.ict[cat] = true;
     const res = await gateway.adminx?.listIctLogs?.(cat);
     if (res?.ok) { state.ui.ictLogs[cat] = res.data || []; state.ui.ictSource = 'db'; }
     else { state.localIctLogs ||= {}; state.ui.ictLogs[cat] = state.localIctLogs[cat] || []; state.ui.ictSource = res?.error?.code === 'TABLE_MISSING' ? 'missing' : 'local'; }
@@ -4639,15 +4667,17 @@ function nextPaint() {
     if (['adm_balance','aud_cs','aud_tellers','aud_types','aud_customers'].includes(tool)) bindPeriodBalance();
     if (tool === 'ict_access') { bindStaffDirectory(); return; }
     if (tool === 'adm_staff') {
-      if (!state.ui.staffProfilesLoaded) { loadStaffProfiles(); }
+      if (!adminSessionLoaded.profiles) { loadStaffProfiles(); }
       bindStaffDirectory();
       qq('[data-adm-staff]').forEach(btn => btn.onclick = async () => {
         state.ui.admSelectedStaffId = btn.dataset.admStaff; state.ui.admProfileDraft = null; save(); renderWorkspace();
+        requestAnimationFrame(() => q('.adm-staff-layout .cs2-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
         const res = await gateway.adminx?.getStaffProfile?.(btn.dataset.admStaff);
         if (res?.ok && res.data) { state.ui.staffProfiles ||= {}; state.ui.staffProfiles[btn.dataset.admStaff] = res.data; save(); renderWorkspace(); }
       });
       if (byId('admRolesBtn')) byId('admRolesBtn').onclick = () => openModal('Roles', `<div class="stack"><div class="note">App roles decide what a staff member can use in DUCESS. Job titles are HR labels only and give no app access on their own.</div><div class="table-wrap"><table class="table"><thead><tr><th>App Role</th><th>What it can use</th></tr></thead><tbody>${ASSIGNABLE_ROLE_KEYS.map(k => `<tr><td>${escapeHtml(ROLE_LABELS[k])}</td><td>${(DEFAULT_PERMS[k] || []).length} tools</td></tr>`).join('')}</tbody></table></div><div class="table-wrap"><table class="table"><thead><tr><th>Job Titles</th></tr></thead><tbody>${JOB_TITLES.map(t => `<tr><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div><div class="note">Change app roles and what each can access in Operations → Permissions Matrix.</div></div>`, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
-      const selId = state.ui.admSelectedStaffId || ([...(state.staff || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))[0]?.id);
+      const selId = state.ui.admSelectedStaffId || '';
+      if (byId('admProfileClose')) byId('admProfileClose').onclick = () => { state.ui.admSelectedStaffId = ''; state.ui.admProfileDraft = null; save(); renderWorkspace(); };
       const draftData = () => { state.ui.admProfileDraft ||= { staffId: selId, data: {} }; if (state.ui.admProfileDraft.staffId !== selId) state.ui.admProfileDraft = { staffId: selId, data: {} }; return state.ui.admProfileDraft.data; };
       qq('[data-prof]').forEach(el => { const upd = () => { draftData()[el.dataset.prof] = el.value; save(); }; el.oninput = upd; el.onchange = upd; });
       const photo = byId('admPhotoInput');
@@ -4674,7 +4704,7 @@ function nextPaint() {
     }
     if (tool.startsWith('ict_')) {
       const cat = ictCategory(tool);
-      if (!(state.ui.ictLogs || {})[cat]) loadIctLogs(cat);
+      if (!adminSessionLoaded.ict[cat]) loadIctLogs(cat);
       if (byId('ictBackupBtn')) byId('ictBackupBtn').onclick = async () => {
         const stripApproval = (a) => { const p = { ...(a.payload || {}) }; ['photo','photoRef','fieldNote'].forEach(k => { if (p[k]) p[k] = '[omitted]'; }); return { ...a, payload: p }; };
         const snapshot = { app: 'DUCESS', exportedAt: new Date().toISOString(), businessDate: businessDate(), exportedBy: currentStaff()?.name || '',
