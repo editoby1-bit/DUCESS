@@ -371,6 +371,11 @@
   let realtimeRefreshQueued = false;
   let realtimePollingTimer = null;
   let pendingWatchTimer = null;
+  // Fix B 2026-10-22 (storage): see bulkStore below.
+  let bulkIdbOk = false;
+  let bulkWriteTimer = null;
+  let bulkStoreInstance = null;
+  let bulkReady = Promise.resolve();
   const state = bootstrapState();
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
@@ -380,7 +385,8 @@
   ensureState();
   resetJournalUiState();
   if (isSupabaseApprovalMode()) {
-    syncAllSharedStateFromGateway();
+    bulkReady = restoreBulkState();
+    bulkReady.finally(() => { syncAllSharedStateFromGateway(); });
     setupRealtimeSubscriptions();
   }
 
@@ -484,6 +490,91 @@
     recalcAllTellerBalances();
   }
 
+  // Fix B 2026-10-22 (storage): browser storage (localStorage) holds only
+  // ~5 MB — at hundreds of postings a day the saved copy of approvals and
+  // transactions would outgrow it within weeks, after which every load
+  // would re-download the whole history. In live (Supabase) mode the bulky
+  // part — approvals, audit, customers with their transactions, and the
+  // incremental-sync markers that describe them — now lives in IndexedDB
+  // (hundreds of MB), written together so data and markers always match.
+  // localStorage keeps the small rest. Offline/local mode is unchanged. If
+  // IndexedDB is unavailable, everything stays in localStorage as before.
+  // A function declaration (not a const) so startup code above it can call it.
+  function bulkStore() { return (bulkStoreInstance ||= makeBulkStore()); }
+  function makeBulkStore() {
+    const DB_NAME = 'ducess_cache', STORE = 'kv', KEY = `${STORAGE_KEY}__bulk`;
+    let dbPromise = null;
+    function open() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((resolve, reject) => {
+        try {
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+          req.onblocked = () => reject(new Error('IndexedDB blocked'));
+        } catch (err) { reject(err); }
+      });
+      return dbPromise;
+    }
+    async function run(mode, fn) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, mode);
+        const req = fn(tx.objectStore(STORE));
+        tx.oncomplete = () => resolve(req.result);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+    return {
+      open,
+      get: () => run('readonly', st => st.get(KEY)),
+      put: (value) => run('readwrite', st => st.put(value, KEY)),
+    };
+  }
+
+  async function restoreBulkState() {
+    if (typeof indexedDB === 'undefined') return;
+    try {
+      await bulkStore().open();
+      if (state.__bulkInIdb) {
+        const snap = await bulkStore().get();
+        if (snap) {
+          state.approvals = snap.approvals || [];
+          state.audit = snap.audit || [];
+          state.customers = snap.customers || state.customers || [];
+          state.__sync = snap.__sync || {};
+          syncStaffBusinessEffectsFromApprovedRequests();
+          syncOperationalEffectsFromApprovedRequests();
+          recalcAllCustomerBalances();
+          recalcAllTellerBalances();
+        } else {
+          state.__sync = {};
+        }
+      }
+      bulkIdbOk = true;
+      save();
+      flushBulkWrite();
+    } catch (err) {
+      console.warn('[DUCESS] IndexedDB unavailable — keeping data in browser storage.', err);
+    }
+  }
+
+  function scheduleBulkWrite() {
+    clearTimeout(bulkWriteTimer);
+    bulkWriteTimer = setTimeout(flushBulkWrite, 1500);
+  }
+  function flushBulkWrite() {
+    clearTimeout(bulkWriteTimer);
+    bulkWriteTimer = null;
+    if (!bulkIdbOk) return;
+    bulkStore().put({ savedAt: new Date().toISOString(), approvals: state.approvals || [], audit: state.audit || [], customers: state.customers || [], __sync: state.__sync || {} })
+      .catch(err => { console.warn('[DUCESS] IndexedDB save failed — back to browser storage.', err); bulkIdbOk = false; save(); });
+  }
+  window.addEventListener('pagehide', () => { if (bulkWriteTimer) flushBulkWrite(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && bulkWriteTimer) flushBulkWrite(); });
+
   function load() {
     if (gateway?.appState?.loadState) return gateway.appState.loadState();
     try {
@@ -510,8 +601,11 @@
     // Admin caches (profiles with photos, ICT logs) are reloaded each
     // session, so they stay out of browser storage.
     const { staffProfiles, ictLogs, ...persistUi } = state.ui || {};
-    const persist = { ...state, ui: persistUi };
-    try { write(persist); return; }
+    const useBulk = bulkIdbOk && isSupabaseApprovalMode();
+    const persist = useBulk
+      ? { ...state, ui: persistUi, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __sync: undefined, __bulkInIdb: true }
+      : { ...state, ui: persistUi, __bulkInIdb: undefined };
+    try { write(persist); if (useBulk) scheduleBulkWrite(); return; }
     catch (err) {
       if (isSupabaseApprovalMode()) {
         try {
@@ -1180,6 +1274,7 @@
     if (!isSupabaseApprovalMode() || !gateway.approvals?.listApprovalRequests) return defaultResultOk(state.approvals || []);
     const wholeList = !filters || !Object.keys(filters).length;
     if (wholeList) {
+      await bulkReady;
       const delta = await syncApprovalsDelta();
       if (delta) return delta;
     }
@@ -1479,6 +1574,7 @@
     if (!isSupabaseApprovalMode() || !gateway.customers?.listCustomers) return defaultResultOk(state.customers || []);
     const wholeList = !filters || !Object.keys(filters).length;
     if (wholeList) {
+      await bulkReady;
       const delta = await syncCustomersDelta();
       if (delta) return delta;
     }
