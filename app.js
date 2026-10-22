@@ -895,11 +895,28 @@
   BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
     BALANCE_SUB_TOOLS[`balp_${pk}_${rk}`] = { base, preset: pk, report: rk, short: rl, label: `${pl} ${rl}` };
   }));
-  Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
+  // SURGICAL ADDITION 2026-10-22 (client sheet "Administrative / Audit &
+  // ICT Unit"): Administration is regrouped into Administrative, Audits,
+  // ICT Unit and Operations (the existing tools).
+  const ADMIN_SUB_TOOLS = {
+    adm_staff:     { base: 'staff_roster',    label: 'Staff Management & Roles' },
+    adm_balance:   { base: 'overall_balance', label: 'Account Balance' },
+    aud_cs:        { base: 'overall_balance', label: 'Customer Service / Marketing Audit' },
+    aud_tellers:   { base: 'overall_balance', label: 'Tellering / Non-Tellering Audit' },
+    aud_types:     { base: 'overall_balance', label: 'Account Types Audit' },
+    aud_customers: { base: 'overall_balance', label: 'Customer Accounts Audit' },
+    ict_access:    { base: 'staff_roster',    label: 'Staff Access Control' },
+    ict_backup:    { base: 'staff_roster',    label: 'Data Backup' },
+    ict_security:  { base: 'staff_roster',    label: 'Data Security' },
+    ict_network:   { base: 'staff_roster',    label: 'Network Management' },
+    ict_cyber:     { base: 'staff_roster',    label: 'Cybersecurity' },
+  };
+  Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS, ...ADMIN_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
     if (APPROVAL_SUB_TOOLS[tool]) return hasPermission(APPROVAL_SUB_TOOLS[tool].base, staff);
+    if (ADMIN_SUB_TOOLS[tool]) return staff.role === 'admin_officer' || hasPermission(ADMIN_SUB_TOOLS[tool].base, staff);
     // Balances now live on the Approval side (client sheet), so anyone who
     // can work the approval queue can view them, as well as anyone who
     // already had the underlying balance report.
@@ -2609,6 +2626,21 @@ function hideProcessing() {
           ${toolBtn('my_statement')}
         </div>`;
       }
+      if (state.ui.module === 'administration') {
+        const toolBtn = (t) => `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${escapeHtml(t === 'aud_cs' ? 'Customer Service / Marketing' : t === 'aud_tellers' ? 'Tellering / Non-Tellering' : t === 'aud_types' ? 'Account Types' : t === 'aud_customers' ? 'Customer Accounts' : TOOL_LABELS[t])}</button>`;
+        state.ui.tellerGroupOpen ||= {};
+        const group = (key, label, tools) => {
+          const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
+          return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${key}">${label} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
+          <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
+        };
+        return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
+          ${group('adm_g', 'Administrative', ['adm_staff','adm_balance'])}
+          ${group('aud_g', 'Audits', ['aud_cs','aud_tellers','aud_types','aud_customers'])}
+          ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber'])}
+          ${group('ops_g', 'Operations', module.tools.filter(t => t !== 'staff_roster'))}
+        </div>`;
+      }
       if (state.ui.module === 'approvals') {
         const toolBtn = (t) => hasPermission(t) || module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
         state.ui.tellerGroupOpen ||= {};
@@ -2728,6 +2760,7 @@ function hideProcessing() {
 
   function renderTool(tool) {
     if (APPROVAL_SUB_TOOLS[tool]) return renderApprovals();
+    if (ADMIN_SUB_TOOLS[tool]) return renderAdminSub(tool);
     if (BALANCE_SUB_TOOLS[tool]) return renderPeriodBalance(BALANCE_SUB_TOOLS[tool]);
     switch(tool) {
       case 'check_balance': return renderCheckBalance();
@@ -4417,6 +4450,249 @@ function nextPaint() {
     qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
   }
 
+  // ===== ADMINISTRATION (client sheet "Administrative / Audit & ICT Unit") =====
+  const JOB_TITLES = ['Customer Service / Marketing','Tellering / Non-Tellering','Cash Office / Treasury','Approval / Operational Balances','Administrative / Audit & ICT Unit','Manager','Secretary','Security','Cleaner','Legal Office','Marketing'];
+  const STAFF_PROFILE_FIELDS = [
+    ['job_title','Job Title / Role','select'], ['phone','Phone Number','text'], ['gender','Gender','gender'],
+    ['date_of_birth','Date of Birth','date'], ['residential_address','Residential Address','text'], ['email','Email Address','text'],
+    ['qualification','Qualification','text'], ['date_of_employment','Date of Employment','date'], ['salary_account_number','Salary Account Number','text'],
+    ['bvn','BVN','text'], ['nin','NIN','text'], ['guarantor','Guarantor','text'], ['referee','Referee','text'],
+    ['next_of_kin','Next of Kin','text'], ['marital_status','Marital Status','marital'], ['initial_position','Initial Position','text'],
+  ];
+  const ICT_CHECKLISTS = {
+    ict_security: ['Staff passwords reviewed', 'Inactive or departed staff blocked', 'Admin recovery key stored safely offline', 'Role permissions reviewed', 'Audit trail checked for unusual activity'],
+    ict_network:  ['Internet working at every branch', 'Router / Wi-Fi passwords secured and changed when needed', 'Devices on the network reviewed', 'Backup internet available', 'Connection speed acceptable for posting'],
+    ict_cyber:    ['Devices and browsers up to date', 'Antivirus active on every device', 'No shared logins between staff', 'Staff reminded about phishing / fake messages', 'Browser extensions reviewed'],
+  };
+  const ictCategory = (tool) => tool === 'ict_backup' ? 'backup' : tool.replace('ict_', '');
+
+  // Profiles: Supabase table when available, otherwise kept in this browser.
+  function localStaffProfiles() { state.localStaffProfiles ||= {}; return state.localStaffProfiles; }
+  async function loadStaffProfiles(force = false) {
+    if (state.ui.staffProfilesLoaded && !force) return;
+    state.ui.staffProfilesLoaded = true;
+    const res = await gateway.adminx?.listStaffProfiles?.();
+    if (res?.ok) { state.ui.staffProfiles = Object.fromEntries((res.data || []).map(p => [p.staff_id, p])); state.ui.staffProfilesSource = 'db'; }
+    else { state.ui.staffProfiles = { ...localStaffProfiles() }; state.ui.staffProfilesSource = res?.error?.code === 'TABLE_MISSING' ? 'missing' : 'local'; }
+    save(); renderWorkspace();
+  }
+  const profileOf = (staffId) => (state.ui.staffProfiles || {})[staffId] || null;
+
+  function renderStaffManagement() {
+    const staffList = [...(state.staff || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    const selId = state.ui.admSelectedStaffId && staffList.some(s => s.id === state.ui.admSelectedStaffId) ? state.ui.admSelectedStaffId : (staffList[0]?.id || '');
+    const sel = staffList.find(s => s.id === selId);
+    const prof = { ...(profileOf(selId) || {}), ...(state.ui.admProfileDraft?.staffId === selId ? state.ui.admProfileDraft.data : {}) };
+    const rows = staffList.map((s, i) => `<tr class="${s.id === selId ? 'adm-selected' : ''}"><td>${i+1}</td><td>${escapeHtml(s.name || '—')}</td><td>${escapeHtml(ROLE_LABELS[s.role] || s.role || '—')}</td><td>${escapeHtml(profileOf(s.id)?.job_title || '—')}</td><td><code>${escapeHtml(String(s.staffId || s.staffCode || '—'))}</code></td><td>${s.active === false ? 'Blocked' : 'Active'}</td><td><button class="secondary tiny-btn" data-adm-staff="${s.id}">Open</button></td></tr>`).join('');
+    const opAcc = sel ? staffOperationalAccountNumber(sel.id) : '';
+    const fieldHtml = ([key, label, kind]) => {
+      const v = escapeHtml(String(prof[key] || ''));
+      let input;
+      if (kind === 'select') input = `<select class="entry-input" data-prof="${key}"><option value="">— Select —</option>${JOB_TITLES.map(t => `<option ${prof[key] === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select>`;
+      else if (kind === 'gender') input = `<select class="entry-input" data-prof="${key}"><option value="">—</option>${['Male','Female'].map(t => `<option ${prof[key] === t ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+      else if (kind === 'marital') input = `<select class="entry-input" data-prof="${key}"><option value="">—</option>${['Single','Married','Divorced','Widowed'].map(t => `<option ${prof[key] === t ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+      else input = `<input class="entry-input" data-prof="${key}" type="${kind === 'date' ? 'date' : 'text'}" ${kind === 'date' ? 'lang="en-GB"' : ''} value="${v}">`;
+      return `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="cs2-input-wrap cs2-wide">${input}</div></div>`;
+    };
+    const sourceNote = state.ui.staffProfilesSource === 'missing'
+      ? `<div class="note" style="border-left-color:#c00000 !important">Staff profiles table not set up yet — run the staff_profiles SQL script in Supabase. Until then details are kept in this browser only.</div>`
+      : (state.ui.staffProfilesSource === 'local' ? `<div class="note">Details are kept in this browser (offline mode).</div>` : '');
+    return `<div class="adm-staff-layout">
+      <div class="table-card">
+        <div class="action-row"><h3>Staff Management and Roles</h3><div class="inline-actions"><button id="addStaffBtn" class="tiny-btn">Add Staff</button><button id="admRolesBtn" class="secondary tiny-btn">Roles</button></div></div>
+        ${sourceNote}
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>App Role</th><th>Job Title</th><th>Staff ID</th><th>Status</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7">No staff</td></tr>'}</tbody></table></div>
+      </div>
+      <div class="form-card cs2-card">
+        <div class="cs2-title">Staff Information</div>
+        ${sel ? `<div class="cs2-stack">
+          <div class="cs2-row"><div class="cs2-label">App Role</div><div class="display-field cs2-wide">${escapeHtml(ROLE_LABELS[sel.role] || sel.role || '—')}</div></div>
+          <div class="cs2-row"><div class="cs2-label">Full Name</div><div class="display-field cs2-wide">${escapeHtml(sel.name || '—')}</div></div>
+          <div class="cs2-row"><div class="cs2-label">Login ID</div><div class="display-field cs2-wide">${escapeHtml(String(sel.staffId || sel.staffCode || '—'))}</div></div>
+          <div class="cs2-row"><div class="cs2-label">Operational A/C No</div><div class="display-field cs2-wide">${escapeHtml(opAcc || '—')}</div></div>
+          <div class="cs2-row"><div class="cs2-label">Photo</div><div class="cs2-input-wrap cs2-wide" style="display:flex;gap:8px;align-items:center">${prof.photo ? `<img src="${prof.photo}" alt="Staff photo" style="width:64px;height:64px;object-fit:cover;border:1px solid #d8c896">` : '<span class="muted">No photo</span>'}<label class="sheet-btn secondary file-trigger-btn" for="admPhotoInput">Upload Photo</label><input id="admPhotoInput" type="file" accept="image/*" class="visually-hidden-file-input"></div></div>
+          ${STAFF_PROFILE_FIELDS.map(fieldHtml).join('')}
+          <div class="cs2-button-row"><button id="admProfileSave" class="sheet-btn cs2-btn cs2-btn-solid">Save Staff Information</button></div>
+        </div>` : '<div class="note">Add a staff member first.</div>'}
+      </div>
+    </div>`;
+  }
+
+  function auditCountsByType(r) {
+    const staffRole = (id) => (state.staff || []).find(s => s.id === id)?.role || '';
+    const groups = [
+      ['Customer Account', (state.customers || []).filter(c => String(c.accountType || 'customer') === 'customer'), 'aud_customers'],
+      ['Staff Account', (state.customers || []).filter(c => c.accountType === 'staff_salary'), 'aud_types'],
+      ['Income Account', state.operations.incomeAccounts || [], 'operational_accounts'],
+      ['Expenses Account', state.operations.expenseAccounts || [], 'operational_accounts'],
+      ['Teller Account', (state.customers || []).filter(c => c.accountType === 'staff_operational' && staffRole(c.linkedStaffId) !== 'cash_officer'), 'aud_tellers'],
+      ['Treasury Account', (state.customers || []).filter(c => c.accountType === 'staff_operational' && staffRole(c.linkedStaffId) === 'cash_officer'), 'aud_tellers'],
+    ];
+    return groups.map(([label, list, review]) => {
+      const iso = (a) => dateOnly(a.createdAt || a.created_at || '') || '';
+      const before = list.filter(a => r.start && iso(a) && iso(a) < r.start).length;
+      const fresh = list.filter(a => inPeriod(iso(a), r)).length;
+      const total = list.filter(a => !r.end || !iso(a) || iso(a) <= r.end).length;
+      return { label, before: r.start ? before : 0, fresh: r.start ? fresh : total, total, review };
+    });
+  }
+
+  function tellerPeriodRow(st, r) {
+    const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(st.id)) : 0;
+    const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(st.id));
+    const mine = (state.approvals || []).filter(a => a.status === 'approved' && a.payload?.staffId === st.id && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
+    const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
+    const received = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
+    const withdrawn = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
+    // Client rule: Opening Cash + Cash Received - Cash Withdrawal = Balance,
+    // with every transfer into the teller's account counted in Opening Cash
+    // (the same as the Till box) — so Opening Cash is worked back from the
+    // closing balance rather than taken as the previous day's figure.
+    return { openingRaw: closing - received + withdrawn, carried: opening, received, withdrawn, closing };
+  }
+
+  function renderAdminSub(tool) {
+    const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: 'daily' });
+    const bar = renderPeriodBar();
+    if (tool === 'adm_staff') return renderStaffManagement();
+    if (tool === 'adm_balance') return renderPeriodBalance({ report: 'overall', label: 'Account Balance', preset: 'daily' });
+    if (tool === 'aud_cs') {
+      const rows = auditCountsByType(r);
+      const t = rows.reduce((a, x) => ({ before: a.before + x.before, fresh: a.fresh + x.fresh, total: a.total + x.total }), { before: 0, fresh: 0, total: 0 });
+      return `<div class="stack">${bar}<div class="table-card"><h3>Customer Service / Marketing</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Type of Account</th><th>No. of Accounts Before</th><th>New Accounts</th><th>Total</th><th>Action</th></tr></thead><tbody>${rows.map((x, i) => `<tr><td>${i+1}</td><td>${x.label}</td><td>${x.before}</td><td>${x.fresh}</td><td>${x.total}</td><td><button class="secondary tiny-btn" data-adm-review="${x.review}">Review</button></td></tr>`).join('')}<tr class="total-row"><td colspan="2"><strong>Total</strong></td><td><strong>${t.before}</strong></td><td><strong>${t.fresh}</strong></td><td><strong>${t.total}</strong></td><td></td></tr></tbody></table></div></div></div>`;
+    }
+    if (tool === 'aud_tellers') {
+      let T = { opening: 0, received: 0, withdrawn: 0, closing: 0 };
+      const rows = (state.staff || []).filter(st => staffOperationalAccountNumber(st.id)).map((st, i) => {
+        const x = tellerPeriodRow(st, r);
+        T.opening += x.openingRaw; T.received += x.received; T.withdrawn += x.withdrawn; T.closing += x.closing;
+        return `<tr><td>${i+1}</td><td>${escapeHtml(st.name || '')} <span class="muted">(${escapeHtml(staffOperationalAccountNumber(st.id))})</span></td><td>${money(x.openingRaw)}</td><td>${money(x.received)}</td><td>${money(x.withdrawn)}</td><td class="${x.closing<0?'balance-negative':''}">${money(x.closing)}</td><td><button class="secondary tiny-btn" data-staff-ledger="${st.id}">Review</button></td></tr>`;
+      }).join('');
+      return `<div class="stack">${bar}<div class="table-card"><h3>Tellering / Non-Tellering</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Teller</th><th>Opening Cash</th><th>Cash Received</th><th>Cash Withdrawal</th><th>Balance</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No staff with an operational account</td></tr>'}${rows ? `<tr class="total-row"><td colspan="2"><strong>Total</strong></td><td><strong>${money(T.opening)}</strong></td><td><strong>${money(T.received)}</strong></td><td><strong>${money(T.withdrawn)}</strong></td><td><strong>${money(T.closing)}</strong></td><td></td></tr>` : ''}</tbody></table></div></div></div>`;
+    }
+    if (tool === 'aud_types') {
+      const staffRole = (id) => (state.staff || []).find(s => s.id === id)?.role || '';
+      const acctSum = (list) => list.reduce((a, c) => { const f = periodFigures(c.balance, txItems(c), r); return { dr: a.dr + f.debit, cr: a.cr + f.credit, bal: a.bal + f.closing }; }, { dr: 0, cr: 0, bal: 0 });
+      const opSum = (list) => list.reduce((a, acc) => { const f = periodFigures(operationalAccountTotals(acc).balance, opItems(acc.id), r); return { dr: a.dr + f.debit, cr: a.cr + f.credit, bal: a.bal + f.closing }; }, { dr: 0, cr: 0, bal: 0 });
+      const tellerSum = (list) => list.reduce((a, c) => {
+        const ev = staffLedgerEvents(c.linkedStaffId).filter(e => inPeriod(String(e.date || '').slice(0,10), r));
+        return { dr: a.dr + ev.filter(e => e.side === 'debit').reduce((t, e) => t + Number(e.amount || 0), 0), cr: a.cr + ev.filter(e => e.side === 'credit').reduce((t, e) => t + Number(e.amount || 0), 0), bal: a.bal + withApprovalsUpTo(r.end, () => getStaffOperationalBalance(c.linkedStaffId)) };
+      }, { dr: 0, cr: 0, bal: 0 });
+      const ops = (state.customers || []).filter(c => c.accountType === 'staff_operational' && c.linkedStaffId);
+      const rows = [
+        ['Customer Account', acctSum((state.customers || []).filter(c => String(c.accountType || 'customer') === 'customer')), 'aud_customers'],
+        ['Staff Account', acctSum((state.customers || []).filter(c => c.accountType === 'staff_salary')), 'aud_types'],
+        ['Income Account', opSum(state.operations.incomeAccounts || []), 'operational_accounts'],
+        ['Expenses Account', opSum(state.operations.expenseAccounts || []), 'operational_accounts'],
+        ['Teller Account', tellerSum(ops.filter(c => staffRole(c.linkedStaffId) !== 'cash_officer')), 'aud_tellers'],
+        ['Treasury Account', tellerSum(ops.filter(c => staffRole(c.linkedStaffId) === 'cash_officer')), 'aud_tellers'],
+      ];
+      const T = rows.reduce((a, [, x]) => ({ dr: a.dr + x.dr, cr: a.cr + x.cr, bal: a.bal + x.bal }), { dr: 0, cr: 0, bal: 0 });
+      return `<div class="stack">${bar}<div class="table-card"><h3>Account Types</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Type of Account</th><th>Total DR</th><th>Total CR</th><th>Total Balance</th><th>Action</th></tr></thead><tbody>${rows.map(([l, x, rv], i) => `<tr><td>${i+1}</td><td>${l}</td><td>${money(x.dr)}</td><td>${money(x.cr)}</td><td>${money(x.bal)}</td><td><button class="secondary tiny-btn" data-adm-review="${rv}">Review</button></td></tr>`).join('')}<tr class="total-row"><td colspan="2"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td><td></td></tr></tbody></table></div></div></div>`;
+    }
+    if (tool === 'aud_customers') {
+      const search = String(state.ui.periodBalanceSearch || '').trim().toLowerCase();
+      const list = (state.customers || []).filter(c => String(c.accountType || 'customer') === 'customer')
+        .filter(c => !search || [c.name, c.accountNumber, c.phone].some(v => String(v || '').toLowerCase().includes(search)))
+        .sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
+      let T = { dr: 0, cr: 0, bal: 0 };
+      const rows = list.map((c, i) => { const f = periodFigures(c.balance, txItems(c), r); T.dr += f.debit; T.cr += f.credit; T.bal += f.closing; return `<tr><td>${i+1}</td><td>${escapeHtml(c.name || '—')}${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(String(c.accountNumber || '—'))}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`; }).join('');
+      return `<div class="stack">${bar}<div class="table-card"><h3>Customer Account</h3><div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>A/C Name</th><th>A/C No</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No customer accounts</td></tr>'}${rows ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td></tr>` : ''}</tbody></table></div></div></div>`;
+    }
+    if (tool === 'ict_access') return renderStaffRoster();
+    // ICT: backup + checklists
+    const cat = ictCategory(tool);
+    const logs = (state.ui.ictLogs || {})[cat];
+    const logRows = (logs || []).map((l, i) => `<tr><td>${i+1}</td><td>${fmtDate(l.created_at)}</td><td>${escapeHtml(l.staff_name || '—')}</td><td>${tool === 'ict_backup' ? 'Backup downloaded' : `${(l.checked_items || []).length} of ${(ICT_CHECKLISTS[tool] || []).length} checked`}</td><td>${escapeHtml(l.note || '')}</td></tr>`).join('');
+    const history = `<div class="table-card"><h3>History</h3>${state.ui.ictSource === 'missing' ? `<div class="note" style="border-left-color:#c00000 !important">ICT records table not set up yet — run the ict_logs SQL script in Supabase. Until then records are kept in this browser only.</div>` : ''}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>By</th><th>Result</th><th>Note</th></tr></thead><tbody>${logs ? (logRows || '<tr><td colspan="5">No records yet</td></tr>') : '<tr><td colspan="5">Loading…</td></tr>'}</tbody></table></div></div>`;
+    if (tool === 'ict_backup') {
+      return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">Data Backup</div><div class="note">Downloads a snapshot of the data this app holds — staff, customer accounts and balances, transactions, approval requests (photos excluded), journals, income &amp; expense accounts, close-of-day records. Store the file somewhere safe and offline. The full database itself is also backed up by Supabase.</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input" placeholder="e.g. Weekly backup, saved to office drive"></div></div><div class="cs2-button-row"><button id="ictBackupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Download Backup</button></div></div>${history}</div>`;
+    }
+    const items = ICT_CHECKLISTS[tool] || [];
+    return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">${escapeHtml(TOOL_LABELS[tool])} Check</div><div class="note">Tick what has been checked today and add a note, then Save Check. Each check is recorded with your name and the date.</div><div class="stack" style="gap:6px;margin:8px 0">${items.map((it, i) => `<label><input type="checkbox" data-ict-item="${i}"> ${escapeHtml(it)}</label>`).join('')}</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input"></div></div><div class="cs2-button-row"><button id="ictSaveBtn" class="sheet-btn cs2-btn cs2-btn-solid">Save Check</button></div></div>${history}</div>`;
+  }
+
+  async function loadIctLogs(cat, force = false) {
+    state.ui.ictLogs ||= {};
+    if (state.ui.ictLogs[cat] && !force) return;
+    const res = await gateway.adminx?.listIctLogs?.(cat);
+    if (res?.ok) { state.ui.ictLogs[cat] = res.data || []; state.ui.ictSource = 'db'; }
+    else { state.localIctLogs ||= {}; state.ui.ictLogs[cat] = state.localIctLogs[cat] || []; state.ui.ictSource = res?.error?.code === 'TABLE_MISSING' ? 'missing' : 'local'; }
+    save(); renderWorkspace();
+  }
+  async function recordIctLog(cat, checkedItems, note) {
+    const st = currentStaff();
+    const entry = { category: cat, checkedItems, note, staffId: st?.id || null, staffName: st?.name || '' };
+    const res = await gateway.adminx?.addIctLog?.(entry);
+    if (!res?.ok) {
+      state.localIctLogs ||= {};
+      (state.localIctLogs[cat] ||= []).unshift({ id: uid('ict'), category: cat, checked_items: checkedItems, note, staff_name: entry.staffName, created_at: new Date().toISOString() });
+    }
+    await loadIctLogs(cat, true);
+  }
+
+  function bindAdminSub(tool) {
+    qq('[data-adm-review]').forEach(btn => btn.onclick = () => { state.ui.tool = btn.dataset.admReview; save(); renderWorkspace(); });
+    if (['adm_balance','aud_cs','aud_tellers','aud_types','aud_customers'].includes(tool)) bindPeriodBalance();
+    if (tool === 'ict_access') { bindStaffDirectory(); return; }
+    if (tool === 'adm_staff') {
+      if (!state.ui.staffProfilesLoaded) { loadStaffProfiles(); }
+      bindStaffDirectory();
+      qq('[data-adm-staff]').forEach(btn => btn.onclick = async () => {
+        state.ui.admSelectedStaffId = btn.dataset.admStaff; state.ui.admProfileDraft = null; save(); renderWorkspace();
+        const res = await gateway.adminx?.getStaffProfile?.(btn.dataset.admStaff);
+        if (res?.ok && res.data) { state.ui.staffProfiles ||= {}; state.ui.staffProfiles[btn.dataset.admStaff] = res.data; save(); renderWorkspace(); }
+      });
+      if (byId('admRolesBtn')) byId('admRolesBtn').onclick = () => openModal('Roles', `<div class="stack"><div class="note">App roles decide what a staff member can use in DUCESS. Job titles are HR labels only and give no app access on their own.</div><div class="table-wrap"><table class="table"><thead><tr><th>App Role</th><th>What it can use</th></tr></thead><tbody>${ASSIGNABLE_ROLE_KEYS.map(k => `<tr><td>${escapeHtml(ROLE_LABELS[k])}</td><td>${(DEFAULT_PERMS[k] || []).length} tools</td></tr>`).join('')}</tbody></table></div><div class="table-wrap"><table class="table"><thead><tr><th>Job Titles</th></tr></thead><tbody>${JOB_TITLES.map(t => `<tr><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div><div class="note">Change app roles and what each can access in Operations → Permissions Matrix.</div></div>`, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+      const selId = state.ui.admSelectedStaffId || ([...(state.staff || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))[0]?.id);
+      const draftData = () => { state.ui.admProfileDraft ||= { staffId: selId, data: {} }; if (state.ui.admProfileDraft.staffId !== selId) state.ui.admProfileDraft = { staffId: selId, data: {} }; return state.ui.admProfileDraft.data; };
+      qq('[data-prof]').forEach(el => { const upd = () => { draftData()[el.dataset.prof] = el.value; save(); }; el.oninput = upd; el.onchange = upd; });
+      const photo = byId('admPhotoInput');
+      if (photo) photo.onchange = async (e) => {
+        const file = e.target.files?.[0]; if (!file) return;
+        const img = await compressImageFile(file, { maxSide: 240, quality: 0.5 });
+        draftData().photo = img.dataUrl; save(); renderWorkspace();
+      };
+      if (byId('admProfileSave')) byId('admProfileSave').onclick = async () => {
+        if (!selId) return;
+        const data = { ...(profileOf(selId) || {}), ...draftData() };
+        delete data.staff_id; delete data.updated_at;
+        showProcessing('Saving staff information...'); await nextPaint();
+        try {
+          const res = await gateway.adminx?.saveStaffProfile?.(selId, data);
+          if (!res?.ok) { localStaffProfiles()[selId] = { ...data, staff_id: selId }; }
+          state.ui.staffProfiles ||= {}; state.ui.staffProfiles[selId] = { ...data, staff_id: selId };
+          state.ui.admProfileDraft = null; save();
+          showToast(res?.ok ? 'Staff information saved' : (res?.error?.code === 'TABLE_MISSING' ? 'Saved in this browser — run the staff_profiles SQL to store it centrally' : 'Saved in this browser'));
+          renderWorkspace();
+        } finally { hideProcessing(); }
+      };
+      return;
+    }
+    if (tool.startsWith('ict_')) {
+      const cat = ictCategory(tool);
+      if (!(state.ui.ictLogs || {})[cat]) loadIctLogs(cat);
+      if (byId('ictBackupBtn')) byId('ictBackupBtn').onclick = async () => {
+        const stripApproval = (a) => { const p = { ...(a.payload || {}) }; ['photo','photoRef','fieldNote'].forEach(k => { if (p[k]) p[k] = '[omitted]'; }); return { ...a, payload: p }; };
+        const snapshot = { app: 'DUCESS', exportedAt: new Date().toISOString(), businessDate: businessDate(), exportedBy: currentStaff()?.name || '',
+          staff: state.staff, customers: (state.customers || []).map(c => ({ ...c, photo: c.photo ? '[omitted]' : '' })), approvals: (state.approvals || []).map(stripApproval),
+          operations: state.operations, journals: (state.journals || []).map(j => ({ ...j, fieldNote: j.fieldNote ? '[omitted]' : null })), cod: state.cod, staffProfiles: state.ui.staffProfiles || {} };
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
+        a.download = `ducess-backup-${businessDate()}.json`; a.click();
+        await recordIctLog('backup', [], byId('ictNote')?.value || '');
+        showToast('Backup downloaded');
+      };
+      if (byId('ictSaveBtn')) byId('ictSaveBtn').onclick = async () => {
+        const items = ICT_CHECKLISTS[tool] || [];
+        const checked = qq('[data-ict-item]').filter(el => el.checked).map(el => items[Number(el.dataset.ictItem)]);
+        if (!checked.length && !(byId('ictNote')?.value || '').trim()) return showToast('Tick at least one item or add a note');
+        await recordIctLog(cat, checked, byId('ictNote')?.value || '');
+        showToast('Check saved');
+      };
+    }
+  }
+
   function renderOverallBalance() {
     // Overall Balance is a rollup of the OTHER balance categories — not another
     // per-account or staff-balance listing. Each row here is a category total.
@@ -5324,6 +5600,7 @@ function normalizeStaffLedgerEntryType(row) {
 
   function bindToolHandlers() {
     if (APPROVAL_SUB_TOOLS[state.ui.tool]) { bindApprovals(); return; }
+    if (ADMIN_SUB_TOOLS[state.ui.tool]) { bindAdminSub(state.ui.tool); return; }
     if (BALANCE_SUB_TOOLS[state.ui.tool]) { bindPeriodBalance(); return; }
     switch (state.ui.tool) {
       case 'check_balance': bindCheckBalance(); break;

@@ -13247,3 +13247,15 @@ input.date-mirror-native {
 .sheet-uniform .cs2-label + *,.sheet-uniform .cs2-row .cs2-input-wrap{border-radius:0;}
 .sheet-uniform.sheet-uniform button,.sheet-uniform.sheet-uniform .sheet-btn,.sheet-uniform.sheet-uniform .cs2-btn{border-radius:3px !important;}
 .sheet-uniform .entry-input,.sheet-uniform .display-field,.sheet-uniform select{border-radius:3px !important;}
+
+/* SURGICAL ADDITION 2026-10-22: Administration — Staff Management & Roles
+   sits beside the Staff Information panel, like the client's sheet. */
+.adm-staff-layout{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(320px,1fr);gap:14px;align-items:start}
+.adm-staff-layout tr.adm-selected td{background:#d3e2ea !important;font-weight:700}
+@media (max-width:1100px){.adm-staff-layout{grid-template-columns:1fr}}
+.adm-staff-layout > *{min-width:0}
+.adm-staff-layout > .cs2-card{width:auto !important;max-width:none !important;margin:0 !important;min-width:0 !important}
+.adm-staff-layout > .cs2-card .cs2-row{flex-wrap:nowrap}
+.adm-staff-layout > .cs2-card .cs2-input-wrap{flex:1 1 auto;min-width:0;width:auto !important;max-width:none !important}
+.adm-staff-layout > .table-card .table-wrap{overflow-x:auto}
+@media (max-width:1500px){.adm-staff-layout{grid-template-columns:1fr}}

@@ -877,6 +877,16 @@ async function submitDebtRepayment(_payload) {
         listAuditLog: async () => ({ ok: true, data: [] }),
         insertAuditLogEntry: async () => ({ ok: true, data: null }),
       },
+      // 2026-10-22 Administration redesign: staff profiles + ICT logs live
+      // in Supabase; the local adapter has no table, so the app keeps them
+      // in browser storage instead.
+      adminx: {
+        listStaffProfiles: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+        getStaffProfile: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+        saveStaffProfile: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+        listIctLogs: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+        addIctLog: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+      },
       __meta: {
         adapter: 'local',
         phase: '3B.3',
@@ -3475,6 +3485,45 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       audit: {
         listAuditLog,
         insertAuditLogEntry,
+      },
+      // 2026-10-22 Administration redesign (client sheet "Administrative /
+      // Audit & ICT Unit"). Tables come from the staff_profiles / ict_logs
+      // SQL script. The profile list never pulls photos (egress); a single
+      // profile (with photo) loads only when that staff member is opened.
+      adminx: {
+        async listStaffProfiles() {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.from('staff_profiles').select('staff_id, job_title, phone, gender, date_of_birth, residential_address, email, qualification, date_of_employment, salary_account_number, bvn, nin, guarantor, referee, next_of_kin, marital_status, initial_position, updated_at');
+          if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'PROFILE_LIST_FAILED', 'Could not load staff profiles.', error);
+          return defaultResult.ok(data || []);
+        },
+        async getStaffProfile(staffId) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.from('staff_profiles').select('*').eq('staff_id', staffId).maybeSingle();
+          if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'PROFILE_GET_FAILED', 'Could not load the staff profile.', error);
+          return defaultResult.ok(data || null);
+        },
+        async saveStaffProfile(staffId, profile = {}) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const row = { ...profile, staff_id: staffId, updated_at: new Date().toISOString() };
+          const { data, error } = await client.from('staff_profiles').upsert(row, { onConflict: 'staff_id' }).select('staff_id, updated_at').maybeSingle();
+          if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'PROFILE_SAVE_FAILED', 'Could not save the staff profile.', error);
+          return defaultResult.ok(data);
+        },
+        async listIctLogs(category) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          let q = client.from('ict_logs').select('id, category, checked_items, note, staff_id, staff_name, created_at').order('created_at', { ascending: false }).limit(50);
+          if (category) q = q.eq('category', category);
+          const { data, error } = await q;
+          if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'ICT_LIST_FAILED', 'Could not load ICT records.', error);
+          return defaultResult.ok(data || []);
+        },
+        async addIctLog(entry = {}) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.from('ict_logs').insert({ category: entry.category, checked_items: entry.checkedItems || [], note: entry.note || '', staff_id: entry.staffId || null, staff_name: entry.staffName || '' }).select('id, category, checked_items, note, staff_id, staff_name, created_at').maybeSingle();
+          if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'ICT_SAVE_FAILED', 'Could not save the ICT record.', error);
+          return defaultResult.ok(data);
+        },
       },
       __meta: {
         adapter: 'supabase',
