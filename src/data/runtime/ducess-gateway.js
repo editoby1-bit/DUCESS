@@ -1079,7 +1079,7 @@ function subscribeRealtime() {
       return defaultResult.ok(true);
     }
 
-    async function insertStaffCashLedgerEntry(payload = {}) {
+    async function insertStaffCashLedgerEntry(payload = {}, plan = null) {
       const existingResult = await fetchExistingStaffCashEntryByRequest(payload.approvalRequestId);
       if (!existingResult.ok) return existingResult;
       if (existingResult.data) return defaultResult.ok(existingResult.data);
@@ -1095,6 +1095,7 @@ function subscribeRealtime() {
         approved_by_staff_id: payload.approvedByStaffId || null,
         created_at: new Date().toISOString(),
       };
+      if (plan) { plan.ledger = insertRow; return defaultResult.ok(insertRow); }
       const { data, error: insertError } = await client.from(staffCashLedgerTable).insert(insertRow).select(staffCashLedgerSelect).maybeSingle();
       if (insertError) return defaultResult.err('STAFF_LEDGER_INSERT_FAILED', 'Could not write staff cash ledger entry in Supabase.', insertError);
       return defaultResult.ok(data || insertRow);
@@ -1220,6 +1221,15 @@ function subscribeRealtime() {
     approval_request_id: approvalRequestId
   };
 
+  // Fix B 2026-10-22: in plan mode nothing is written here — the line is
+  // queued and committed together with the rest of the approval (see
+  // commitPostingPlan), so a request posts completely or not at all.
+  if (options.plan) {
+    const { balance_after: _planned, ...planRow } = insertRow;
+    options.plan.transactions.push({ row: planRow, accountId: accountSummary.accountId, delta, seedBalance: currentBalance });
+    return defaultResult.ok({ alreadyPosted: false, requestId: approvalRequestId, accountId: accountSummary.accountId, customerId: entry?.customerId || accountSummary.customerId || null, amount, sourceAmount, totalChargeAmount, chargeBreakdown: chargeRows, customerCreditAmount: amount, txType, balanceAfter, transactionId: null });
+  }
+
   const insertAttempt = await client
     .from(customerTransactionsTable)
     .insert(insertRow);
@@ -1252,7 +1262,7 @@ function subscribeRealtime() {
   });
 }
 
-    async function performDirectPostingForApproval(requestRow, approver, decisionNote) {
+    async function performDirectPostingForApproval(requestRow, approver, decisionNote, plan = null) {
   const type = requestRow?.request_type || requestRow?.type || '';
   const payload = requestRow?.payload || {};
 
@@ -1603,7 +1613,7 @@ if (inserted.error) {
       const resumePool = existingTxResult.data.length > 0 ? [...existingTxResult.data] : null;
       const results = [];
       for (const entry of entries) {
-        const postedResult = await postSingleCustomerTransaction(requestRow, entry, txType, approver, { skipExistingCheck: true, resumePool });
+        const postedResult = await postSingleCustomerTransaction(requestRow, entry, txType, approver, { skipExistingCheck: true, resumePool, plan });
         if (!postedResult.ok) return postedResult;
         results.push(postedResult.data);
       }
@@ -1622,7 +1632,7 @@ if (inserted.error) {
             accountNumber: payload.fundingLeg.accountNumber,
             amount: normalizeNumber(payload.formAmount),
             details: `Journal funding leg for ${payload.journalNumber || ''}`
-          }, fundingTxType, approver, { skipExistingCheck: true, resumePool });
+          }, fundingTxType, approver, { skipExistingCheck: true, resumePool, plan });
           if (!fundingResult.ok) return fundingResult;
           results.push(fundingResult.data);
         }
@@ -1654,7 +1664,7 @@ if (inserted.error) {
           floatDate: payload.date || payload.businessDate || null,
           createdByStaffId: requestRow.requested_by_staff_id || null,
           approvedByStaffId: approver?.staffId || null,
-        });
+        }, plan);
         if (!ledgerResult.ok) return ledgerResult;
         return defaultResult.ok({ posted: true, requestType: type, transactions: results, cashLedger: ledgerResult.data, decisionNote: decisionNote || '' });
       }
@@ -1884,7 +1894,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
   };
 }
 
-      const postingResult = await performDirectPostingForApproval(requestRow, approver, decisionNote);
+      const plan = { transactions: [], ledger: null };
+      const postingResult = await performDirectPostingForApproval(requestRow, approver, decisionNote, plan);
       if (!postingResult.ok) return postingResult;
 
       const postingMeta = {
@@ -1897,11 +1908,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         }
       };
 
-      const approvalResult = await markApprovalDecision(payload.requestId, 'approved', approver, decisionNote, postingMeta);
-      if (!approvalResult.ok) return approvalResult;
-
-
-      const auditResult = await insertAuditLogEntry({
+      const auditEntry = {
         actorStaffId: approver.staffId,
         actionType: 'approval_posted',
         entityType: 'approval_request',
@@ -1913,9 +1920,77 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           cashLedger: postingResult.data?.cashLedger || null,
           decisionNote,
         }
-      });
+      };
+      if (plan.transactions.length || plan.ledger) return commitPostingPlan(payload.requestId, plan, approver, decisionNote, postingMeta, auditEntry);
+
+      const approvalResult = await markApprovalDecision(payload.requestId, 'approved', approver, decisionNote, postingMeta);
+      if (!approvalResult.ok) return approvalResult;
+
+      const auditResult = await insertAuditLogEntry(auditEntry);
       if (!auditResult.ok) return auditResult;
 
+      return approvalResult;
+    }
+
+    // Fix B 2026-10-22: all-or-nothing posting. Every line, the balance
+    // updates, the staff ledger entry, the approval status and the audit
+    // entry go to the database function ducess_commit_posting in ONE call —
+    // it runs as a single transaction, locks each account balance while it
+    // updates it (so two approvers can't overwrite each other) and refuses
+    // a request that is no longer pending. Until that function is installed
+    // (sql/2026-10-22-fix-b-atomic-posting.sql) the same writes run one by
+    // one as before.
+    let commitRpcAvailable = true;
+    function isMissingRpcError(error) {
+      const code = String(error?.code || ''); const msg = String(error?.message || '').toLowerCase();
+      return code === 'PGRST202' || code === '42883' || msg.includes('could not find the function');
+    }
+    async function commitPostingPlan(requestId, plan, approver, decisionNote, postingMeta, auditEntry) {
+      const current = await getApprovalRequestById(requestId);
+      if (!current.ok) return current;
+      if (!current.data || current.data.status !== 'pending') return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
+      const mergedPayload = mergeApprovalPayload(current.data.payload, postingMeta);
+      const auditRow = {
+        actor_staff_id: auditEntry.actorStaffId || null,
+        action_type: auditEntry.actionType || 'approval_posted',
+        entity_type: auditEntry.entityType || 'approval_request',
+        entity_id: auditEntry.entityId || null,
+        metadata: clone(auditEntry.metadata || {}),
+        created_at: new Date().toISOString(),
+      };
+      if (commitRpcAvailable) {
+        const { data, error: rpcError } = await client.rpc('ducess_commit_posting', {
+          p_request_id: requestId,
+          p_transactions: plan.transactions.map(t => ({ row: t.row, delta: t.delta, seed_balance: t.seedBalance })),
+          p_ledger: plan.ledger || null,
+          p_approval: { approved_by_staff_id: approver?.staffId || '', approved_by_name: approver?.name || '', decision_note: decisionNote || '', payload: mergedPayload },
+          p_audit: auditRow,
+        });
+        if (!rpcError) return defaultResult.ok(normalizeApprovalRecord(data?.approval || data));
+        if (!isMissingRpcError(rpcError)) {
+          if (/APPROVAL_NOT_PENDING/.test(rpcError.message || '')) return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
+          return defaultResult.err('POSTING_COMMIT_FAILED', 'Posting was not saved and nothing was posted. Please try again.', rpcError);
+        }
+        commitRpcAvailable = false;
+      }
+      const running = new Map();
+      for (const t of plan.transactions) {
+        const key = String(t.accountId);
+        const balanceAfter = (running.has(key) ? running.get(key) : t.seedBalance) + t.delta;
+        const ins = await client.from(customerTransactionsTable).insert({ ...t.row, balance_after: balanceAfter });
+        if (ins.error && ins.error.message) return defaultResult.err('CUSTOMER_TX_INSERT_FAILED', ins.error.message, ins.error);
+        const bal = await upsertAccountBalance(t.accountId, balanceAfter);
+        if (!bal.ok) return bal;
+        running.set(key, balanceAfter);
+      }
+      if (plan.ledger) {
+        const { error: ledgerError } = await client.from(staffCashLedgerTable).insert(plan.ledger);
+        if (ledgerError) return defaultResult.err('STAFF_LEDGER_INSERT_FAILED', 'Could not write staff cash ledger entry in Supabase.', ledgerError);
+      }
+      const approvalResult = await markApprovalDecision(requestId, 'approved', approver, decisionNote, postingMeta);
+      if (!approvalResult.ok) return approvalResult;
+      const auditResult = await insertAuditLogEntry(auditEntry);
+      if (!auditResult.ok) return auditResult;
       return approvalResult;
     }
 
@@ -2428,10 +2503,10 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(data || null);
     }
 
-    async function buildCustomersForUi(rows) {
+    async function buildCustomersForUi(rows, opts = {}) {
       const customerRows = Array.isArray(rows) ? rows : [];
       const customerIds = customerRows.map((row) => row.id).filter(Boolean);
-      const txResult = await fetchTransactionsByCustomerIds(customerIds);
+      const txResult = opts.skipTransactions ? defaultResult.ok([]) : await fetchTransactionsByCustomerIds(customerIds);
       if (!txResult.ok) return txResult;
       const txRows = txResult.data;
       const txByCustomer = new Map();
@@ -3040,6 +3115,17 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(customerResult.data ? customerToAccountSummary(customerResult.data) : null);
     }
 
+    // Fix B 2026-10-22 (egress): account lookups for posting used to pull the
+    // customer's whole transaction history just to read a balance. The
+    // balance comes from customer_account_balances instead (see below).
+    async function getCustomerLight(selector) {
+      const rowsResult = await fetchCustomersRows(selector);
+      if (!rowsResult.ok) return rowsResult;
+      const built = await buildCustomersForUi((rowsResult.data || []).slice(0, 1), { skipTransactions: true });
+      if (!built.ok) return built;
+      return defaultResult.ok(built.data[0] || null);
+    }
+
     async function getAccountSummary(accountId) {
       if (!canUseSupabase()) return local.accounts.getAccountSummary(accountId);
       const key = String(accountId || '').trim();
@@ -3055,7 +3141,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // Migration bridge: approval payloads often pass the customer id as accountId.
       // Resolve from customers first so posting does not depend on customer_accounts.
       let customer = null;
-      const directCustomerResult = await getCustomerById(key);
+      const directCustomerResult = await getCustomerLight({ customerId: key });
       if (!directCustomerResult.ok) return directCustomerResult;
       customer = directCustomerResult.data;
 
@@ -3065,20 +3151,20 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (!accountResult.ok) return accountResult;
         accountRow = accountResult.data;
         if (accountRow?.customer_id) {
-          const customerResult = await getCustomerById(accountRow.customer_id);
+          const customerResult = await getCustomerLight({ customerId: accountRow.customer_id });
           if (!customerResult.ok) return customerResult;
           customer = customerResult.data;
         }
       }
 
       if (!customer && accountRow?.account_number) {
-        const customerResult = await getCustomerByAccountNumber(accountRow.account_number);
+        const customerResult = await getCustomerLight({ accountNumber: accountRow.account_number });
         if (!customerResult.ok) return customerResult;
         customer = customerResult.data;
       }
 
       if (!customer) {
-        const byAccountNumber = await getCustomerByAccountNumber(key);
+        const byAccountNumber = await getCustomerLight({ accountNumber: key });
         if (!byAccountNumber.ok) return byAccountNumber;
         customer = byAccountNumber.data;
       }
@@ -3090,6 +3176,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const balanceResult = await fetchBalancesByAccountIds([summary?.accountId]);
       if (summary && balanceResult.ok && balanceResult.data[0] && balanceResult.data[0].book_balance != null) {
         summary.bookBalance = Number(balanceResult.data[0].book_balance || 0);
+      } else if (summary && customer?.id) {
+        // No stored balance yet: total this customer's transactions (just
+        // type + amount) — same figure the full history used to give.
+        const { data: txs, error: sumError } = await client.from(customerTransactionsTable).select('tx_type, amount').eq('customer_id', customer.id);
+        if (sumError) return defaultResult.err('ACCOUNT_BALANCE_FETCH_FAILED', 'Could not total the account balance.', sumError);
+        summary.bookBalance = (txs || []).reduce((sum, t) => sum + (t.tx_type === 'credit' ? 1 : -1) * Number(t.amount || 0), 0);
       }
       return defaultResult.ok(summary);
     }
