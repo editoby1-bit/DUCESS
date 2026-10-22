@@ -1356,8 +1356,14 @@
         if (!win?.ok || !gapA?.ok || !gapT?.ok) { showToast('Could not load older records — check the connection and try again.'); return false; }
         // Approvals: older summaries out, new summaries + the gap's detail in.
         if (needA) {
-          const keep = (state.approvals || []).filter(a => !a?.payload?.__bf);
-          state.approvals = [...(win.data.approvals || []), ...keep, ...gapA.data].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+          // Keep detail rows the new summaries don't already stand for (a
+          // request held in detail, e.g. approved after this device loaded
+          // it, is inside the server's summary now); gap rows replace any
+          // same-id row.
+          const byId = new Map();
+          (state.approvals || []).forEach(a => { if (!a?.payload?.__bf && !isSummarisedApproval(a, target || '')) byId.set(String(a.id), a); });
+          gapA.data.forEach(a => byId.set(String(a.id), a));
+          state.approvals = [...(win.data.approvals || []), ...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
         }
         // Transactions: same per customer.
         const byCustomer = (rows) => { const m = new Map(); rows.forEach(row => { const k = String(row.customer_id); const list = m.get(k) || []; list.push(gateway.history.toLocal(row)); m.set(k, list); }); return m; };
@@ -1368,10 +1374,12 @@
           const id = String(c.id);
           const hadSummary = (c.transactions || []).some(t => t.__bf);
           if (!hadSummary && !gapTx.has(id) && !newSummary.has(id)) return;
-          const seen = new Set((c.transactions || []).map(t => String(t.id)));
+          // Detail older than the new start is inside the new summary.
+          const kept = (c.transactions || []).filter(t => !t.__bf && (!target || String(t.date || '').slice(0, 10) >= target));
+          const seen = new Set(kept.map(t => String(t.id)));
           c.transactions = [
             ...(newSummary.get(id) || []),
-            ...(c.transactions || []).filter(t => !t.__bf),
+            ...kept,
             ...(gapTx.get(id) || []).filter(t => !seen.has(String(t.id))),
           ];
         });
