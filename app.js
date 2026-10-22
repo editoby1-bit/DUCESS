@@ -309,6 +309,62 @@
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory']
   };
 
+  // Sub-tool registries (Approval / Balances / Administration) must exist
+  // before startup runs hasPermission() on a restored tool — see 2026-10-22 fix.
+  // SURGICAL ADDITION 2026-10-21 (client sheet: "Approval / Operational
+  // Balances"): the Approval sidebar is split into the client's
+  // sub-headings. Each sub-item is a view onto an EXISTING tool — the
+  // approval queue filtered to specific request types, or a balance report
+  // with a fixed period — so no approval or balance logic is duplicated.
+  const APPROVAL_SUB_TOOLS = {
+    appr_opening:    { base: 'approval_customer_service', section: 'customer_service', types: ['account_opening'], label: 'Approve Account Opening' },
+    appr_update:     { base: 'approval_customer_service', section: 'customer_service', types: ['account_maintenance'], label: 'Approve Account Update' },
+    appr_reactivate: { base: 'approval_customer_service', section: 'customer_service', types: ['account_reactivation'], label: 'Approve Reactivation' },
+    appr_block:      { base: 'approval_customer_service', section: 'customer_service', types: ['account_block'], label: 'Approve Account Block' },
+    appr_close:      { base: 'approval_customer_service', section: 'customer_service', types: ['account_closure'], label: 'Approve Account Closure' },
+    appr_direct:     { base: 'approval_tellering', section: 'tellering', types: ['customer_credit','customer_debit','cash_receipt'], label: 'Approve Direct Postings' },
+    appr_non_cash:   { base: 'approval_non_cash', section: 'non_cash', types: ['intra_bank_transfer','inter_staff_credit'], label: 'Approve Non Cash Postings' },
+    appr_journals:   { base: 'approval_tellering', section: 'tellering', types: ['customer_credit_journal','customer_debit_journal'], label: 'Approve Journals' },
+    // Client (2026-10-22): "Others" only ever held Administration's two
+    // request types, so it's now an Administration group with one item each.
+    appr_op_entry:   { base: 'approval_others', section: 'others', types: ['operational_entry'], label: 'Approve Income & Expense Posting' },
+    appr_op_account: { base: 'approval_others', section: 'others', types: ['create_operational_account'], label: 'Approve New Income/Expense Account' },
+  };
+  // SURGICAL CHANGE 2026-10-21 (client): the Administration balance
+  // reports move to Approvals, grouped by period — Daily / Weekly /
+  // Monthly / Yearly, each listing the same five balance reports. Tool key
+  // is balp_<period>_<report>; the report opens on that period, with the
+  // usual date buttons + From/To pickers to change it.
+  const BALANCE_PERIODS = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']];
+  const BALANCE_REPORTS = [
+    ['overall',   'overall_balance',      'Overall Balance'],
+    ['customers', 'customer_directory',   "All Customers' Balance"],
+    ['salary',    'staff_directory',      'Staff Salary Balance'],
+    ['tellers',   'teller_balances',      'Teller Balances'],
+    ['incexp',    'operational_accounts', 'Income & Expense Balance'],
+  ];
+  const BALANCE_SUB_TOOLS = {};
+  BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
+    BALANCE_SUB_TOOLS[`balp_${pk}_${rk}`] = { base, preset: pk, report: rk, short: rl, label: `${pl} ${rl}` };
+  }));
+  // SURGICAL ADDITION 2026-10-22 (client sheet "Administrative / Audit &
+  // ICT Unit"): Administration is regrouped into Administrative, Audits,
+  // ICT Unit and Operations (the existing tools).
+  const ADMIN_SUB_TOOLS = {
+    adm_staff:     { base: 'staff_roster',    label: 'Staff Management & Roles' },
+    adm_balance:   { base: 'overall_balance', label: 'Account Balance' },
+    aud_cs:        { base: 'overall_balance', label: 'Customer Service / Marketing Audit' },
+    aud_tellers:   { base: 'overall_balance', label: 'Tellering / Non-Tellering Audit' },
+    aud_types:     { base: 'overall_balance', label: 'Account Types Audit' },
+    aud_customers: { base: 'overall_balance', label: 'Customer Accounts Audit' },
+    ict_access:    { base: 'staff_roster',    label: 'Staff Access Control' },
+    ict_backup:    { base: 'staff_roster',    label: 'Data Backup' },
+    ict_security:  { base: 'staff_roster',    label: 'Data Security' },
+    ict_network:   { base: 'staff_roster',    label: 'Network Management' },
+    ict_cyber:     { base: 'staff_roster',    label: 'Cybersecurity' },
+  };
+  Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS, ...ADMIN_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
+
   let realtimeBound = false;
   let realtimeUnsub = null;
   let realtimeRefreshInFlight = false;
@@ -859,59 +915,6 @@
       .trim();
   }
 
-  // SURGICAL ADDITION 2026-10-21 (client sheet: "Approval / Operational
-  // Balances"): the Approval sidebar is split into the client's
-  // sub-headings. Each sub-item is a view onto an EXISTING tool — the
-  // approval queue filtered to specific request types, or a balance report
-  // with a fixed period — so no approval or balance logic is duplicated.
-  const APPROVAL_SUB_TOOLS = {
-    appr_opening:    { base: 'approval_customer_service', section: 'customer_service', types: ['account_opening'], label: 'Approve Account Opening' },
-    appr_update:     { base: 'approval_customer_service', section: 'customer_service', types: ['account_maintenance'], label: 'Approve Account Update' },
-    appr_reactivate: { base: 'approval_customer_service', section: 'customer_service', types: ['account_reactivation'], label: 'Approve Reactivation' },
-    appr_block:      { base: 'approval_customer_service', section: 'customer_service', types: ['account_block'], label: 'Approve Account Block' },
-    appr_close:      { base: 'approval_customer_service', section: 'customer_service', types: ['account_closure'], label: 'Approve Account Closure' },
-    appr_direct:     { base: 'approval_tellering', section: 'tellering', types: ['customer_credit','customer_debit','cash_receipt'], label: 'Approve Direct Postings' },
-    appr_non_cash:   { base: 'approval_non_cash', section: 'non_cash', types: ['intra_bank_transfer','inter_staff_credit'], label: 'Approve Non Cash Postings' },
-    appr_journals:   { base: 'approval_tellering', section: 'tellering', types: ['customer_credit_journal','customer_debit_journal'], label: 'Approve Journals' },
-    // Client (2026-10-22): "Others" only ever held Administration's two
-    // request types, so it's now an Administration group with one item each.
-    appr_op_entry:   { base: 'approval_others', section: 'others', types: ['operational_entry'], label: 'Approve Income & Expense Posting' },
-    appr_op_account: { base: 'approval_others', section: 'others', types: ['create_operational_account'], label: 'Approve New Income/Expense Account' },
-  };
-  // SURGICAL CHANGE 2026-10-21 (client): the Administration balance
-  // reports move to Approvals, grouped by period — Daily / Weekly /
-  // Monthly / Yearly, each listing the same five balance reports. Tool key
-  // is balp_<period>_<report>; the report opens on that period, with the
-  // usual date buttons + From/To pickers to change it.
-  const BALANCE_PERIODS = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']];
-  const BALANCE_REPORTS = [
-    ['overall',   'overall_balance',      'Overall Balance'],
-    ['customers', 'customer_directory',   "All Customers' Balance"],
-    ['salary',    'staff_directory',      'Staff Salary Balance'],
-    ['tellers',   'teller_balances',      'Teller Balances'],
-    ['incexp',    'operational_accounts', 'Income & Expense Balance'],
-  ];
-  const BALANCE_SUB_TOOLS = {};
-  BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
-    BALANCE_SUB_TOOLS[`balp_${pk}_${rk}`] = { base, preset: pk, report: rk, short: rl, label: `${pl} ${rl}` };
-  }));
-  // SURGICAL ADDITION 2026-10-22 (client sheet "Administrative / Audit &
-  // ICT Unit"): Administration is regrouped into Administrative, Audits,
-  // ICT Unit and Operations (the existing tools).
-  const ADMIN_SUB_TOOLS = {
-    adm_staff:     { base: 'staff_roster',    label: 'Staff Management & Roles' },
-    adm_balance:   { base: 'overall_balance', label: 'Account Balance' },
-    aud_cs:        { base: 'overall_balance', label: 'Customer Service / Marketing Audit' },
-    aud_tellers:   { base: 'overall_balance', label: 'Tellering / Non-Tellering Audit' },
-    aud_types:     { base: 'overall_balance', label: 'Account Types Audit' },
-    aud_customers: { base: 'overall_balance', label: 'Customer Accounts Audit' },
-    ict_access:    { base: 'staff_roster',    label: 'Staff Access Control' },
-    ict_backup:    { base: 'staff_roster',    label: 'Data Backup' },
-    ict_security:  { base: 'staff_roster',    label: 'Data Security' },
-    ict_network:   { base: 'staff_roster',    label: 'Network Management' },
-    ict_cyber:     { base: 'staff_roster',    label: 'Cybersecurity' },
-  };
-  Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS, ...ADMIN_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
@@ -932,7 +935,7 @@
     // gets its own separate "My Approvals" totals view instead.
     if (['check_balance','account_statement','operational_accounts','my_close_day'].includes(tool)) return true;
     const base = DEFAULT_PERMS[staff.role] || [];
-    const grantOn = state.tempGrants.some(g => g.staffId === staff.id && g.tool === tool && g.enabled);
+    const grantOn = (state.tempGrants || []).some(g => g.staffId === staff.id && g.tool === tool && g.enabled);
     return base.includes(tool) || grantOn;
   }
 
