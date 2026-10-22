@@ -273,7 +273,7 @@
     approval_customer_service: 'Customer Service',
     approval_tellering: 'Teller',
     approval_non_cash: 'Non Cash',
-    approval_others: 'Others',
+    approval_others: 'Administration',
     approval_history: 'Approval History',
     permissions: 'Permissions Matrix',
     operational_posting: 'Income & Expense Posting',
@@ -873,6 +873,10 @@
     appr_direct:     { base: 'approval_tellering', section: 'tellering', types: ['customer_credit','customer_debit','cash_receipt'], label: 'Approve Direct Postings' },
     appr_non_cash:   { base: 'approval_non_cash', section: 'non_cash', types: ['intra_bank_transfer','inter_staff_credit'], label: 'Approve Non Cash Postings' },
     appr_journals:   { base: 'approval_tellering', section: 'tellering', types: ['customer_credit_journal','customer_debit_journal'], label: 'Approve Journals' },
+    // Client (2026-10-22): "Others" only ever held Administration's two
+    // request types, so it's now an Administration group with one item each.
+    appr_op_entry:   { base: 'approval_others', section: 'others', types: ['operational_entry'], label: 'Approve Income & Expense Posting' },
+    appr_op_account: { base: 'approval_others', section: 'others', types: ['create_operational_account'], label: 'Approve New Income/Expense Account' },
   };
   // SURGICAL CHANGE 2026-10-21 (client): the Administration balance
   // reports move to Approvals, grouped by period — Daily / Weekly /
@@ -2617,7 +2621,7 @@ function hideProcessing() {
           ${toolBtn('approval_queue')}
           ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close'])}
           ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals'])}
-          ${toolBtn('approval_others')}
+          ${group('appr_admin', 'Administration', ['appr_op_entry','appr_op_account'])}
           ${BALANCE_PERIODS.map(([pk, pl]) => {
             const keys = BALANCE_REPORTS.map(([rk]) => `balp_${pk}_${rk}`);
             const isOpen = !!state.ui.tellerGroupOpen[`balp_${pk}`] || keys.includes(state.ui.tool);
@@ -3730,7 +3734,7 @@ function hideProcessing() {
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}${subTool ? '' : `<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Others']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div>`}<div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>${subTool ? escapeHtml(subTool.label) : 'Approval Queue'}</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}${subTool ? '' : `<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Administration']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div>`}<div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>${subTool ? escapeHtml(subTool.label) : 'Approval Queue'}</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
   }
 
   function renderApprovalHistory() {
@@ -4853,17 +4857,22 @@ function staffLedgerEvents(staffId) {
       const date = cod.date || String(cod.submittedAt || cod.resolvedAt || '').slice(0,10) || businessDate();
       addEvent({ key: cod.id || `cod-${date}`, date, type: `COD ${String(cod.status || 'Submitted').toUpperCase()}`, amount: Number(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0), delta: 0, details: `Op. Balance ${money(getStaffOperationalBalance(staffId))} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? 0)} • Variance ${money(cod.variance || 0)}`, runningType: 'cod' });
     });
-    // SURGICAL CHANGE 2026-10-22 (client): the teller's statement is kept
-    // from the TELLER ACCOUNT'S side — the mirror of the customer's entry.
-    // Cash coming in (a customer credit the teller posts, or funding into
-    // the T-account) is a DEBIT to the teller account; cash going out (a
-    // customer debit, or a transfer out) is a CREDIT. Balance = debits -
-    // credits, the same figure as the Till / operational balance.
+    // SURGICAL CHANGE 2026-10-22 (client): the teller's statement records
+    // the teller's crediting/debiting operations as the mirror of the
+    // customer's entry (see the side rules below).
     let running = 0;
     return events.sort((a,b)=> new Date(`${a.date}T12:00:00Z`) - new Date(`${b.date}T12:00:00Z`)).map(event => {
       const affects = ['form','credit','debit'].includes(event.runningType) && Number(event.delta || 0) !== 0;
       if (affects) running += Number(event.delta || 0);
-      const side = affects ? (Number(event.delta) > 0 ? 'debit' : 'credit') : '';
+      // Client (2026-10-22): funding moves between staff accounts are shown
+      // like a customer account's — money received from Treasury is a
+      // CREDIT, money sent out (e.g. Till to Treasury) a DEBIT — while the
+      // teller's own customer work is the mirror of the customer's entry
+      // (a customer credit is a DEBIT here, a customer debit a CREDIT).
+      // The balance column is unaffected: it is always the teller's real
+      // balance, the same as the Till.
+      const isFunding = event.runningType === 'form';
+      const side = !affects ? '' : (isFunding ? (Number(event.delta) > 0 ? 'credit' : 'debit') : (Number(event.delta) > 0 ? 'debit' : 'credit'));
       return { ...event, side, runningBalance: running, staffName: staff.name || staffId };
     }).map((event, seq) => ({ ...event, seq })).reverse(); // newest first; seq keeps same-day order
   }
