@@ -545,12 +545,14 @@
           state.audit = snap.audit || [];
           state.customers = snap.customers || state.customers || [];
           state.__sync = snap.__sync || {};
+          state.__history = snap.__history || null;
           syncStaffBusinessEffectsFromApprovedRequests();
           syncOperationalEffectsFromApprovedRequests();
           recalcAllCustomerBalances();
           recalcAllTellerBalances();
         } else {
           state.__sync = {};
+          state.__history = null;
         }
       }
       bulkIdbOk = true;
@@ -569,7 +571,7 @@
     clearTimeout(bulkWriteTimer);
     bulkWriteTimer = null;
     if (!bulkIdbOk) return;
-    bulkStore().put({ savedAt: new Date().toISOString(), approvals: state.approvals || [], audit: state.audit || [], customers: state.customers || [], __sync: state.__sync || {} })
+    bulkStore().put({ savedAt: new Date().toISOString(), approvals: state.approvals || [], audit: state.audit || [], customers: state.customers || [], __sync: state.__sync || {}, __history: state.__history || null })
       .catch(err => { console.warn('[DUCESS] IndexedDB save failed — back to browser storage.', err); bulkIdbOk = false; save(); });
   }
   window.addEventListener('pagehide', () => { if (bulkWriteTimer) flushBulkWrite(); });
@@ -603,13 +605,13 @@
     const { staffProfiles, ictLogs, ...persistUi } = state.ui || {};
     const useBulk = bulkIdbOk && isSupabaseApprovalMode();
     const persist = useBulk
-      ? { ...state, ui: persistUi, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __sync: undefined, __bulkInIdb: true }
+      ? { ...state, ui: persistUi, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __sync: undefined, __history: undefined, __bulkInIdb: true }
       : { ...state, ui: persistUi, __bulkInIdb: undefined };
     try { write(persist); if (useBulk) scheduleBulkWrite(); return; }
     catch (err) {
       if (isSupabaseApprovalMode()) {
         try {
-          write({ ...persist, __sync: undefined, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __slimSaved: new Date().toISOString() });
+          write({ ...persist, __sync: undefined, __history: undefined, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __slimSaved: new Date().toISOString() });
           return;
         } catch (err2) { /* fall through to warning */ }
       }
@@ -1257,6 +1259,164 @@
     return null;
   }
 
+  // ---- Fix B 2026-10-22: recent history + summaries --------------------
+  // A device holds full detail from state.__history.from (a business date)
+  // onwards, plus SUMMARY rows for everything older: approvals and customer
+  // transactions marked payload.__bf / tx.__bf, each standing for __count
+  // records with the same totals (see sql/2026-10-22-fix-b-history-window.sql
+  // for exactly which records are summarised). Every screen keeps working
+  // on state as before; a screen that needs an older date first calls
+  // historyCovers(date), which fetches the missing detail and re-renders.
+  // from === HISTORY_ALL means everything is held in full.
+  const HISTORY_ALL = '1900-01-01';
+  const historyEnabled = runtimeConfig.historyWindow !== false;
+  let historySupported = true;
+  let historyWindowCache = null;
+  let historyLoading = null;
+  let historyNeededDuringRender = false;
+  const SUMMARISED_TYPES = ['customer_credit', 'customer_debit', 'inter_staff_credit', 'cash_receipt'];
+  const histNum = (v) => (/^\s*-?\d+(\.\d+)?\s*$/.test(String(v ?? '')) ? Number(v) : 0);
+  function historyBizDate(p = {}) {
+    const d = String(p.date || p.businessDate || p.float_date || '');
+    return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : '';
+  }
+  // JS twin of ducess_is_summarised (SQL).
+  function isSummarisedApproval(a, from) {
+    if (!from || from === HISTORY_ALL || !a || a.status !== 'approved' || !SUMMARISED_TYPES.includes(a.type)) return false;
+    const p = a.payload || {};
+    const d = historyBizDate(p);
+    if (!d || d >= from) return false;
+    if (p.accountType === 'staff' || p.accountType === 'staff_wallet') return false;
+    if (Array.isArray(p.chargeBreakdown) && p.chargeBreakdown.length) return false;
+    return histNum(p.commissionAmount) === 0 && histNum(p.totalChargeAmount) === 0;
+  }
+  const representedCount = (list) => (list || []).reduce((n, a) => n + (a?.payload?.__bf ? Number(a.payload.__count || 1) : 1), 0);
+  const historyFrom = () => state.__history?.from || null;
+  const historyTxFrom = () => state.__history?.txFrom || null;
+  // The later of the two start dates is what the device fully covers.
+  const historyCoveredFrom = () => [historyFrom(), historyTxFrom()].filter(d => d && d !== HISTORY_ALL).sort().pop() || null;
+  const historyActive = () => historyEnabled && historySupported && isSupabaseApprovalMode() && !!gateway.history?.window;
+  function setHistory(patch) { state.__history = { ...(state.__history || {}), ...patch }; }
+
+  // One window answer serves both the approvals and the customers load.
+  async function getHistoryWindow(from) {
+    const key = from || '';
+    if (historyWindowCache && (historyWindowCache.key === key || historyWindowCache.data.from === key) && Date.now() - historyWindowCache.at < 60000) return historyWindowCache.data;
+    const res = await gateway.history.window(from || null);
+    if (!res?.ok) { if (res?.error?.code === 'HISTORY_UNSUPPORTED') historySupported = false; return null; }
+    if (!res.data?.from) return null;
+    historyWindowCache = { key, at: Date.now(), data: res.data };
+    return res.data;
+  }
+
+  // Merges fresh approval rows. Returns false when a row would also be
+  // inside a local summary (an older record changed) — caller reloads.
+  function mergeApprovalRows(rows, removedIds = []) {
+    const from = historyFrom();
+    const byId = new Map((state.approvals || []).map(a => [String(a.id), a]));
+    for (const a of rows || []) {
+      if (!byId.has(String(a.id)) && isSummarisedApproval(a, from)) return false;
+    }
+    removedIds.forEach(id => byId.delete(String(id)));
+    (rows || []).forEach(a => byId.set(String(a.id), a));
+    state.approvals = [...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+    return true;
+  }
+
+  // True when the loaded history already reaches back to `date`
+  // ('' / null = all dates). Otherwise starts fetching it and returns false.
+  function historyCovers(date) {
+    if (!historyEnabled || !isSupabaseApprovalMode()) return true;
+    const from = historyCoveredFrom();
+    if (!from) return true;
+    const want = date ? String(date).slice(0, 10) : HISTORY_ALL;
+    if (want >= from) return true;
+    historyNeededDuringRender = true;
+    loadOlderHistory(want);
+    return false;
+  }
+
+  function loadOlderHistory(newFrom) {
+    if (historyLoading) return historyLoading;
+    historyLoading = (async () => {
+      window.__ducessHistoryBusy = true;
+      try {
+        await bulkReady;
+        const oldFrom = historyFrom(), oldTxFrom = historyTxFrom();
+        const needA = !!oldFrom && oldFrom !== HISTORY_ALL && newFrom < oldFrom;
+        const needT = !!oldTxFrom && oldTxFrom !== HISTORY_ALL && newFrom < oldTxFrom;
+        if (!needA && !needT) return true;
+        const target = newFrom === HISTORY_ALL ? null : newFrom;
+        const none = { ok: true, data: [] };
+        const [win, gapA, gapT] = await Promise.all([
+          target ? gateway.history.window(target) : Promise.resolve({ ok: true, data: { from: HISTORY_ALL, approvals: [], transactions: [] } }),
+          needA ? gateway.history.approvals(target, oldFrom) : Promise.resolve(none),
+          needT ? gateway.history.transactions(target, oldTxFrom) : Promise.resolve(none),
+        ]);
+        if (!win?.ok || !gapA?.ok || !gapT?.ok) { showToast('Could not load older records — check the connection and try again.'); return false; }
+        // Approvals: older summaries out, new summaries + the gap's detail in.
+        if (needA) {
+          const keep = (state.approvals || []).filter(a => !a?.payload?.__bf);
+          state.approvals = [...(win.data.approvals || []), ...keep, ...gapA.data].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+        }
+        // Transactions: same per customer.
+        const byCustomer = (rows) => { const m = new Map(); rows.forEach(row => { const k = String(row.customer_id); const list = m.get(k) || []; list.push(gateway.history.toLocal(row)); m.set(k, list); }); return m; };
+        const newSummary = byCustomer(needT ? (win.data.transactions || []) : []);
+        const gapTx = byCustomer(gapT.data);
+        if (needT) (state.customers || []).forEach(c => {
+          if (c.accountType === 'staff_wallet') return;
+          const id = String(c.id);
+          const hadSummary = (c.transactions || []).some(t => t.__bf);
+          if (!hadSummary && !gapTx.has(id) && !newSummary.has(id)) return;
+          const seen = new Set((c.transactions || []).map(t => String(t.id)));
+          c.transactions = [
+            ...(newSummary.get(id) || []),
+            ...(c.transactions || []).filter(t => !t.__bf),
+            ...(gapTx.get(id) || []).filter(t => !seen.has(String(t.id))),
+          ];
+        });
+        setHistory({ ...(needA ? { from: newFrom } : {}), ...(needT ? { txFrom: newFrom } : {}) });
+        if (state.__sync?.approvals) state.__sync.approvals.count = representedCount(state.approvals);
+        historyWindowCache = null;
+        syncStaffBusinessEffectsFromApprovedRequests();
+        syncOperationalEffectsFromApprovedRequests();
+        recalcAllCustomerBalances();
+        recalcAllTellerBalances();
+        save();
+        return true;
+      } catch (err) {
+        console.warn('[DUCESS] loading older history failed', err);
+        return false;
+      } finally {
+        historyLoading = null;
+        window.__ducessHistoryBusy = false;
+        renderWorkspace();
+      }
+    })();
+    return historyLoading;
+  }
+
+  // A customer's statement needs that customer's full transaction list.
+  function customerHistoryCovers(customer) {
+    if (!customer || !(customer.transactions || []).some(t => t.__bf)) return true;
+    historyNeededDuringRender = true;
+    if (!historyLoading) {
+      historyLoading = (async () => {
+        window.__ducessHistoryBusy = true;
+        try {
+          const res = await gateway.history.customerTransactions(customer.id);
+          if (res?.ok) {
+            customer.transactions = res.data.map(gateway.history.toLocal);
+            recalcCustomerBalance(customer);
+            save();
+          }
+        } catch (err) { console.warn('[DUCESS] loading customer history failed', err); }
+        finally { historyLoading = null; window.__ducessHistoryBusy = false; renderWorkspace(); }
+      })();
+    }
+    return false;
+  }
+
   async function syncApprovalsDelta() {
     const mark = state.__sync?.approvals;
     if (!syncSupported.approvals || !mark?.cursor || syncStale(mark) || !(state.approvals || []).length || !gateway.sync?.changedSince) return null;
@@ -1275,11 +1435,10 @@
       if (!res?.ok || !Array.isArray(res.data)) return null;
       fresh = res.data;
     }
-    const byId = new Map((state.approvals || []).map(a => [String(a.id), a]));
-    fresh.forEach(a => byId.set(String(a.id), a));
-    if (byId.size !== snap.count) return null;
+    const before = state.approvals;
+    if (!mergeApprovalRows(fresh)) { state.approvals = before; return null; }
+    if (representedCount(state.approvals) !== snap.count) { state.approvals = before; return null; }
     if (fresh.length) {
-      state.approvals = [...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
       syncStaffBusinessEffectsFromApprovedRequests();
       syncOperationalEffectsFromApprovedRequests();
       reconcileBusinessDateFromClosures();
@@ -1290,7 +1449,22 @@
     return defaultResultOk(state.approvals);
   }
 
-  async function syncApprovalsFromGateway(filters = {}) {
+  // Overlapping whole-list syncs (startup + login, tab return + realtime)
+  // share one download instead of each fetching everything.
+  let approvalsSyncInFlight = null;
+  let customersSyncInFlight = null;
+  function syncApprovalsFromGateway(filters = {}) {
+    if (filters && Object.keys(filters).length) return syncApprovalsFromGatewayOnce(filters);
+    if (!approvalsSyncInFlight) approvalsSyncInFlight = syncApprovalsFromGatewayOnce().finally(() => { approvalsSyncInFlight = null; });
+    return approvalsSyncInFlight;
+  }
+  function syncCustomersListFromGateway(filters = {}) {
+    if (filters && Object.keys(filters).length) return syncCustomersListFromGatewayOnce(filters);
+    if (!customersSyncInFlight) customersSyncInFlight = syncCustomersListFromGatewayOnce().finally(() => { customersSyncInFlight = null; });
+    return customersSyncInFlight;
+  }
+
+  async function syncApprovalsFromGatewayOnce(filters = {}) {
     if (!isSupabaseApprovalMode() || !gateway.approvals?.listApprovalRequests) return defaultResultOk(state.approvals || []);
     const wholeList = !filters || !Object.keys(filters).length;
     if (wholeList) {
@@ -1303,13 +1477,25 @@
     // gateway's default of the latest 100) — Opening Cash, Till and COD
     // are summed over every approved request, so a capped list dropped a
     // teller's older funding and the figures stopped adding up.
-    const result = await gateway.approvals.listApprovalRequests({ all: true, ...filters });
+    let result = null;
+    if (wholeList && historyActive() && historyFrom() !== HISTORY_ALL) {
+      const hw = await getHistoryWindow(historyCoveredFrom());
+      const recent = hw ? await gateway.history.approvals(hw.from) : null;
+      if (recent?.ok) {
+        result = { ok: true, data: [...hw.approvals, ...recent.data].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0)) };
+        setHistory({ from: hw.from });
+      } else if (recent?.error?.code === 'HISTORY_UNSUPPORTED') historySupported = false;
+    }
+    if (!result) {
+      result = await gateway.approvals.listApprovalRequests({ all: true, ...filters });
+      if (wholeList && result?.ok) setHistory({ from: HISTORY_ALL });
+    }
     if (result?.ok && Array.isArray(result.data)) {
       state.approvals = result.data;
       if (wholeList) {
         const win = snap ? await syncChangedSince('approvals', snap.cursor) : null;
         const digest = snap && win ? await syncDigestCheck('approvals', null) : { next: null };
-        setSyncMark('approvals', snap && win && { cursor: snap.cursor, fullAt: new Date().toISOString(), digest: digest.next || undefined, count: result.data.length, recent: syncRecent(snap.cursor, win) });
+        setSyncMark('approvals', snap && win && { cursor: snap.cursor, fullAt: new Date().toISOString(), digest: digest.next || undefined, count: representedCount(result.data), recent: syncRecent(snap.cursor, win) });
       }
       syncStaffBusinessEffectsFromApprovedRequests();
       syncOperationalEffectsFromApprovedRequests();
@@ -1329,9 +1515,7 @@
     if (!list.length || !isSupabaseApprovalMode() || !(state.approvals || []).length) return syncApprovalsFromGateway();
     const result = await gateway.approvals.listApprovalRequests({ ids: list });
     if (!result?.ok || !Array.isArray(result.data)) return syncApprovalsFromGateway();
-    const byId = new Map((state.approvals || []).map(a => [a.id, a]));
-    result.data.forEach(a => byId.set(a.id, a));
-    state.approvals = [...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+    if (!mergeApprovalRows(result.data)) return syncApprovalsFromGateway();
     syncStaffBusinessEffectsFromApprovedRequests();
     syncOperationalEffectsFromApprovedRequests();
     reconcileBusinessDateFromClosures();
@@ -1572,11 +1756,27 @@
     const [digC, digT] = await Promise.all([syncDigestCheck('customers', mark.digest), syncDigestCheck('transactions', mark.txDigest)]);
     if (!digC.ok || !digT.ok) return null;
     if (ids.length) {
-      const res = await gateway.customers.listCustomers({ ids });
-      if (!res?.ok || !Array.isArray(res.data)) return null;
-      const incoming = res.data.map(normalizeGatewayCustomerForState).filter(Boolean);
+      // Fix B 2026-10-22 (egress): a changed customer row refreshes just its
+      // details; new transactions are fetched by id and appended. (This used
+      // to re-download each touched customer's whole history.)
+      const custIds = [...new Set(changedC.map(r => String(r.id)))];
+      const txIds = [...new Set(changedT.map(r => String(r.id)))];
+      const [custRes, txRes] = await Promise.all([
+        custIds.length ? gateway.history.customersByIds(custIds) : Promise.resolve({ ok: true, data: [] }),
+        txIds.length ? gateway.history.transactionsByIds(txIds) : Promise.resolve({ ok: true, data: [] }),
+      ]);
+      if (!custRes?.ok || !txRes?.ok) return null;
       const byId = new Map((state.customers || []).map(c => [String(c.id), c]));
-      incoming.forEach(c => byId.set(String(c.id), c));
+      custRes.data.map(normalizeGatewayCustomerForState).filter(Boolean).forEach(c => {
+        const prev = byId.get(String(c.id));
+        byId.set(String(c.id), { ...(prev || {}), ...c, transactions: prev?.transactions || [] });
+      });
+      for (const { customerId, tx } of txRes.data) {
+        const c = byId.get(String(customerId));
+        if (!c) return null;
+        c.transactions ||= [];
+        if (!c.transactions.some(t => String(t.id) === String(tx.id))) c.transactions.push(tx);
+      }
       state.customers = [...byId.values()];
     }
     if (nonWalletCustomers().length !== snapC.count) return null;
@@ -1593,7 +1793,7 @@
     return defaultResultOk(state.customers);
   }
 
-  async function syncCustomersListFromGateway(filters = {}) {
+  async function syncCustomersListFromGatewayOnce(filters = {}) {
     if (!isSupabaseApprovalMode() || !gateway.customers?.listCustomers) return defaultResultOk(state.customers || []);
     const wholeList = !filters || !Object.keys(filters).length;
     if (wholeList) {
@@ -1602,7 +1802,19 @@
       if (delta) return delta;
     }
     const snaps = wholeList && syncSupported.customers ? await Promise.all([takeSyncSnapshot('customers'), takeSyncSnapshot('transactions')]) : [null, null];
-    const result = await gateway.customers.listCustomers(filters);
+    let result = null;
+    if (wholeList && historyActive() && historyTxFrom() !== HISTORY_ALL) {
+      const hw = await getHistoryWindow(historyCoveredFrom());
+      const recentTx = hw ? await gateway.history.transactions(hw.from) : null;
+      if (recentTx?.ok) {
+        result = await gateway.history.customers([...hw.transactions, ...recentTx.data]);
+        if (result?.ok) setHistory({ txFrom: hw.from });
+      } else if (recentTx?.error?.code === 'HISTORY_UNSUPPORTED') historySupported = false;
+    }
+    if (!result?.ok) {
+      result = await gateway.customers.listCustomers(filters);
+      if (wholeList && result?.ok) setHistory({ txFrom: HISTORY_ALL });
+    }
     if (result?.ok && Array.isArray(result.data)) {
       // Replace customers entirely from Supabase — drop seed customers (c1, c2 etc)
       const incoming = result.data.map(normalizeGatewayCustomerForState).filter(Boolean);
@@ -1711,10 +1923,7 @@
         if (!res?.ok || !Array.isArray(res.data)) { await syncApprovalsFromGateway(); scheduleRender(); return; }
         fresh = res.data;
       }
-      const byId = new Map((state.approvals || []).map(a => [a.id, a]));
-      removed.forEach(id => byId.delete(id));
-      fresh.forEach(a => byId.set(a.id, a));
-      state.approvals = [...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+      if (!mergeApprovalRows(fresh, removed)) { await syncApprovalsFromGateway(); scheduleRender(); return; }
       syncStaffBusinessEffectsFromApprovedRequests();
       syncOperationalEffectsFromApprovedRequests();
       reconcileBusinessDateFromClosures();
@@ -3055,7 +3264,16 @@ function hideProcessing() {
     if (state.ui.tool) bindToolHandlers();
   }
 
+  // A screen that reached for older history than this device holds shows a
+  // short loading note; it re-renders by itself once the records arrive.
   function renderTool(tool) {
+    historyNeededDuringRender = false;
+    const html = renderToolContent(tool);
+    if (historyNeededDuringRender && historyLoading) return `<div class="form-card"><div class="note" id="historyLoadingNote">Loading older records…</div></div>`;
+    return html;
+  }
+
+  function renderToolContent(tool) {
     if (APPROVAL_SUB_TOOLS[tool]) return renderApprovals();
     if (ADMIN_SUB_TOOLS[tool]) return renderAdminSub(tool);
     if (BALANCE_SUB_TOOLS[tool]) return renderPeriodBalance(BALANCE_SUB_TOOLS[tool]);
@@ -3310,6 +3528,7 @@ function hideProcessing() {
 
     let statementHtml = '';
     const isTellerAccount = customer?.accountType === 'staff_operational' && customer.linkedStaffId;
+    if (generated) { if (isTellerAccount) historyCovers(filter.from || null); else customerHistoryCovers(customer); }
     if (generated && isTellerAccount) {
       // 2026-10-22: a teller's T-account statement is the teller's own
       // operations, from the teller account's side (see staffLedgerEvents).
@@ -4633,6 +4852,11 @@ function nextPaint() {
   // the existing balance filters (filterByDate): weekly = last 7 days,
   // monthly/yearly = the business date's month/year, custom = From..To.
   function balancePeriodRange(f) {
+    const r = balancePeriodRangeOf(f);
+    historyCovers(r.start || null);
+    return r;
+  }
+  function balancePeriodRangeOf(f) {
     const ref = dateOnly(businessDate()) || '';
     const preset = f?.preset || 'daily';
     if (preset === 'all') return { start: '', end: '', preset };
@@ -4978,6 +5202,11 @@ function nextPaint() {
       const cat = ictCategory(tool);
       if (!adminSessionLoaded.ict[cat]) loadIctLogs(cat);
       if (byId('ictBackupBtn')) byId('ictBackupBtn').onclick = async () => {
+        // A backup must hold every record, not the recent part + summaries.
+        if (!historyCovers(null)) {
+          showProcessing('Loading all records for the backup...');
+          try { const ok = await historyLoading; if (!ok) return showToast('Could not load all records — backup not downloaded.'); } finally { hideProcessing(); }
+        }
         const stripApproval = (a) => { const p = { ...(a.payload || {}) }; ['photo','photoRef','fieldNote'].forEach(k => { if (p[k]) p[k] = '[omitted]'; }); return { ...a, payload: p }; };
         const snapshot = { app: 'DUCESS', exportedAt: new Date().toISOString(), businessDate: businessDate(), exportedBy: currentStaff()?.name || '',
           staff: state.staff, customers: (state.customers || []).map(c => ({ ...c, photo: c.photo ? '[omitted]' : '' })), approvals: (state.approvals || []).map(stripApproval),
@@ -6763,6 +6992,7 @@ function normalizeStaffLedgerEntryType(row) {
     const approvals = state.approvals || [];
     const activeKey = filter.activeKey || null;
     const filterDate = filter.date || businessDate();
+    historyCovers(filterDate);
 
     // Get filtered approvals for the selected category
     let detailRows = '';
@@ -9354,8 +9584,24 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     return dateOnly(businessDate && businessDate()) || '';
   }
 
+  // First date a filter can reach (null = all dates) — used to make sure
+  // the loaded history goes back that far (Fix B 2026-10-22).
+  function filterStartDate(f) {
+    const ref = filterDateReference();
+    const preset = f?.preset || 'daily';
+    if (preset === 'all') return null;
+    if (preset === 'custom') return f.from || null;
+    if (preset === 'daily') return ref;
+    const d = new Date(`${ref}T12:00:00`);
+    if (preset === 'weekly') { d.setDate(d.getDate() - 6); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+    if (preset === 'monthly') return `${ref.slice(0,7)}-01`;
+    if (preset === 'yearly') return `${ref.slice(0,4)}-01-01`;
+    return null;
+  }
+
   function filterByDate(rows, filter) {
     const activeFilter = filter || { preset: 'daily', from: '', to: '' };
+    historyCovers(filterStartDate(activeFilter));
     if (activeFilter.preset === 'all') return rows || [];
     const referenceIso = filterDateReference(rows || []);
     const referenceDate = new Date(`${referenceIso}T12:00:00`);

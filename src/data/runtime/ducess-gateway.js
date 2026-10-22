@@ -135,6 +135,8 @@ const ROLE_DEFAULT_TOOLS = {
       counterparty: rawTx.counterparty || rawTx.channel || '',
       date: rawTx.date || rawTx.effective_at || rawTx.created_at || new Date().toISOString(),
       balanceAfter: rawTx.balanceAfter ?? rawTx.balance_after ?? null,
+      // Fix B 2026-10-22: summary ("brought forward") rows keep their markers.
+      ...(rawTx.__bf ? { __bf: true, __count: Number(rawTx.__count || 1) } : {}),
     };
   }
 
@@ -880,6 +882,9 @@ async function submitDebtRepayment(_payload) {
       // 2026-10-22 Administration redesign: staff profiles + ICT logs live
       // in Supabase; the local adapter has no table, so the app keeps them
       // in browser storage instead.
+      history: {
+        window: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+      },
       sync: {
         snapshot: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
         digest: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
@@ -2504,10 +2509,27 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(data || null);
     }
 
+    function txRowToLocal(row) {
+      return normalizeLocalTransaction({
+        id: row.id,
+        type: row.tx_type,
+        amount: row.amount,
+        details: row.details,
+        posted_by: row.posted_by,
+        posted_by_id: row.posted_by_id,
+        approved_by: row.approved_by,
+        counterparty: row.counterparty,
+        effective_at: row.effective_at || row.created_at,
+        created_at: row.created_at,
+        balance_after: row.balance_after,
+        __bf: row.__bf, __count: row.__count,
+      });
+    }
+
     async function buildCustomersForUi(rows, opts = {}) {
       const customerRows = Array.isArray(rows) ? rows : [];
       const customerIds = customerRows.map((row) => row.id).filter(Boolean);
-      const txResult = opts.skipTransactions ? defaultResult.ok([]) : await fetchTransactionsByCustomerIds(customerIds);
+      const txResult = opts.txRows ? defaultResult.ok(opts.txRows) : opts.skipTransactions ? defaultResult.ok([]) : await fetchTransactionsByCustomerIds(customerIds);
       if (!txResult.ok) return txResult;
       const txRows = txResult.data;
       const txByCustomer = new Map();
@@ -2515,19 +2537,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         const key = row.customer_id;
         if (!key) return;
         if (!txByCustomer.has(key)) txByCustomer.set(key, []);
-        txByCustomer.get(key).push(normalizeLocalTransaction({
-          id: row.id,
-          type: row.tx_type,
-          amount: row.amount,
-          details: row.details,
-          posted_by: row.posted_by,
-          posted_by_id: row.posted_by_id,
-          approved_by: row.approved_by,
-          counterparty: row.counterparty,
-          effective_at: row.effective_at || row.created_at,
-          created_at: row.created_at,
-          balance_after: row.balance_after,
-        }));
+        txByCustomer.get(key).push(txRowToLocal(row));
       });
 
       const normalized = customerRows.map((row) => customerToSummary({
@@ -2972,6 +2982,27 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const permsResult = await getEffectivePermissions(payload?.staffId);
       if (!permsResult.ok) return permsResult;
       return defaultResult.ok(permsResult.data.some((perm) => perm.toolCode === payload?.toolCode && perm.allowed !== false));
+    }
+
+    // Pages through a set-returning history function (1000 rows a page).
+    async function rpcPages(fn, args) {
+      const all = [];
+      for (let offset = 0; ; offset += 1000) {
+        const { data, error } = await client.rpc(fn, { ...args, p_offset: offset, p_limit: 1000 });
+        if (error) return defaultResult.err(isMissingRpcError(error) ? 'HISTORY_UNSUPPORTED' : 'HISTORY_FETCH_FAILED', 'Could not load history.', error);
+        const rows = Array.isArray(data) ? data : [];
+        all.push(...rows);
+        if (rows.length < 1000) break;
+      }
+      return defaultResult.ok(all);
+    }
+    // History functions return whole rows; keep only the columns the normal
+    // transaction read selects, so dates and fields come out identical.
+    const txSelectColumns = customerTransactionsSelect.split(',').map(c => c.trim()).filter(Boolean);
+    function pickTxColumns(row) {
+      const out = {};
+      txSelectColumns.forEach(c => { out[c] = row[c] === undefined ? null : row[c]; });
+      return out;
     }
 
     function syncSpec(kind) {
@@ -3621,6 +3652,54 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // Fix B 2026-10-22 (egress): incremental sync. Needs the updated_at
       // columns from sql/2026-10-22-fix-b-incremental-sync.sql; until that
       // runs these return SYNC_UNSUPPORTED and the app keeps full reloads.
+      // Fix B 2026-10-22: recent history + summaries (sql/2026-10-22-fix-b-history-window.sql).
+      history: {
+        async window(from) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.rpc('ducess_history_window', { p_from: from || null });
+          if (error) return defaultResult.err(isMissingRpcError(error) ? 'HISTORY_UNSUPPORTED' : 'HISTORY_WINDOW_FAILED', 'Could not load history summary.', error);
+          return defaultResult.ok({ from: data?.from || null, approvals: (data?.approvals || []).map(normalizeApprovalRecord).filter(Boolean), transactions: data?.transactions || [] });
+        },
+        async approvals(from, oldFrom) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const rows = await rpcPages(oldFrom !== undefined ? 'ducess_history_gap_approvals' : 'ducess_recent_approvals', oldFrom !== undefined ? { p_new_from: from, p_old_from: oldFrom } : { p_from: from });
+          if (!rows.ok) return rows;
+          return defaultResult.ok(rows.data.map(normalizeApprovalRecord).filter(Boolean));
+        },
+        // Customers (no photos) with transactions from the window start plus
+        // the summary rows for older ones; oldFrom given = only the gap.
+        async transactions(from, oldFrom) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const rows = await rpcPages(oldFrom !== undefined ? 'ducess_history_gap_transactions' : 'ducess_recent_transactions', oldFrom !== undefined ? { p_new_from: from, p_old_from: oldFrom } : { p_from: from });
+          if (!rows.ok) return rows;
+          return defaultResult.ok(rows.data.map(pickTxColumns));
+        },
+        async customers(txRows) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const rowsResult = await fetchCustomersRows({});
+          if (!rowsResult.ok) return rowsResult;
+          return buildCustomersForUi(rowsResult.data || [], { txRows });
+        },
+        async transactionsByIds(ids) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const list = (ids || []).filter(Boolean);
+          if (!list.length) return defaultResult.ok([]);
+          const { data, error } = await client.from(customerTransactionsTable).select(customerTransactionsSelect).in('id', list);
+          if (error) return defaultResult.err('CUSTOMER_TX_FETCH_FAILED', 'Could not fetch transactions.', error);
+          return defaultResult.ok((Array.isArray(data) ? data : []).map(row => ({ customerId: row.customer_id, tx: txRowToLocal(row) })));
+        },
+        toLocal: (row) => txRowToLocal(row),
+        async customerTransactions(customerId) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          return fetchTransactionsByCustomerIds([customerId]);
+        },
+        async customersByIds(ids) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const rowsResult = await fetchCustomersRows({ ids });
+          if (!rowsResult.ok) return rowsResult;
+          return buildCustomersForUi(rowsResult.data || [], { skipTransactions: true });
+        },
+      },
       sync: {
         async digest(kind, prevAt) {
           if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
