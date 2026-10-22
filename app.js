@@ -1208,7 +1208,23 @@
   // never deletes these rows — only manual SQL clean-ups do — so weekly is
   // enough; a full reload grows with history (MBs at hundreds/day).
   const SYNC_FULL_EVERY_MS = 7 * 24 * 3600000;
-  const syncStale = (mark) => !mark?.fullAt || Date.now() - new Date(mark.fullAt).getTime() > SYNC_FULL_EVERY_MS;
+  // With the deletion check installed (ducess_sync_digest) a mark carries a
+  // digest and never needs the periodic full reload.
+  const syncStale = (mark) => !mark?.digest && (!mark?.fullAt || Date.now() - new Date(mark.fullAt).getTime() > SYNC_FULL_EVERY_MS);
+  let digestSupported = true;
+  // Deletion check: the database returns a row count + id checksum for rows
+  // added up to the time stored at the last sync. If that changed, rows
+  // were deleted → { ok: false } (caller does a full reload). Unknown /
+  // not installed → { ok: true, next: null } (fall back to the weekly reload).
+  async function syncDigestCheck(kind, prev) {
+    if (!digestSupported || !gateway.sync?.digest) return { ok: true, next: null };
+    let res;
+    try { res = await gateway.sync.digest(kind, prev?.at || null); } catch (_) { return { ok: true, next: null }; }
+    if (!res?.ok || !res.data?.now) { if (res?.error?.code === 'SYNC_UNSUPPORTED') digestSupported = false; return { ok: true, next: null }; }
+    const d = res.data;
+    if (prev?.at && d.prev && (Number(d.prev.count) !== Number(prev.count) || String(d.prev.sum) !== String(prev.sum))) return { ok: false };
+    return { ok: true, next: { at: d.at, count: Number(d.now.count), sum: String(d.now.sum) } };
+  }
   const syncSupported = { approvals: true, customers: true };
   const syncSince = (cursor) => new Date(new Date(cursor).getTime() - SYNC_OVERLAP_MS).toISOString();
   const syncMaxTs = (cursor, rows) => rows.reduce((m, r) => (r.ts && new Date(r.ts) > new Date(m) ? r.ts : m), cursor);
@@ -1250,6 +1266,8 @@
     if (changed.length > SYNC_MAX_DELTA) return null;
     const snap = await takeSyncSnapshot('approvals');
     if (!snap) return null;
+    const digest = await syncDigestCheck('approvals', mark.digest);
+    if (!digest.ok) return null;
     const ids = [...new Set(changed.map(r => String(r.id)))];
     let fresh = [];
     if (ids.length) {
@@ -1267,7 +1285,7 @@
       reconcileBusinessDateFromClosures();
     }
     const cursor = syncMaxTs(mark.cursor, changedAll);
-    setSyncMark('approvals', { cursor, fullAt: mark.fullAt, count: snap.count, recent: syncRecent(cursor, [...recentRows(mark.recent), ...changedAll]) });
+    setSyncMark('approvals', { cursor, fullAt: mark.fullAt, digest: digest.next || undefined, count: snap.count, recent: syncRecent(cursor, [...recentRows(mark.recent), ...changedAll]) });
     save();
     return defaultResultOk(state.approvals);
   }
@@ -1290,7 +1308,8 @@
       state.approvals = result.data;
       if (wholeList) {
         const win = snap ? await syncChangedSince('approvals', snap.cursor) : null;
-        setSyncMark('approvals', snap && win && { cursor: snap.cursor, fullAt: new Date().toISOString(), count: result.data.length, recent: syncRecent(snap.cursor, win) });
+        const digest = snap && win ? await syncDigestCheck('approvals', null) : { next: null };
+        setSyncMark('approvals', snap && win && { cursor: snap.cursor, fullAt: new Date().toISOString(), digest: digest.next || undefined, count: result.data.length, recent: syncRecent(snap.cursor, win) });
       }
       syncStaffBusinessEffectsFromApprovedRequests();
       syncOperationalEffectsFromApprovedRequests();
@@ -1550,6 +1569,8 @@
     // Transactions are insert-only: the count must grow by exactly the
     // rows that are new since the last sync, or something was missed.
     if (snapT.count !== mark.txCount + changedT.length) return null;
+    const [digC, digT] = await Promise.all([syncDigestCheck('customers', mark.digest), syncDigestCheck('transactions', mark.txDigest)]);
+    if (!digC.ok || !digT.ok) return null;
     if (ids.length) {
       const res = await gateway.customers.listCustomers({ ids });
       if (!res?.ok || !Array.isArray(res.data)) return null;
@@ -1566,7 +1587,7 @@
       recalcAllTellerBalances();
     }
     const cursor = syncMaxTs(mark.cursor, allC), txCursor = syncMaxTs(mark.txCursor, allT);
-    setSyncMark('customers', { cursor, txCursor, fullAt: mark.fullAt, count: snapC.count, txCount: snapT.count,
+    setSyncMark('customers', { cursor, txCursor, fullAt: mark.fullAt, digest: (digC.next && digT.next) ? digC.next : undefined, txDigest: digT.next || undefined, count: snapC.count, txCount: snapT.count,
       recent: syncRecent(cursor, [...recentRows(mark.recent), ...allC]), txRecent: syncRecent(txCursor, [...recentRows(mark.txRecent), ...allT]) });
     save();
     return defaultResultOk(state.customers);
@@ -1594,7 +1615,8 @@
       if (wholeList) {
         const [snapC, snapT] = snaps;
         const [winC, winT] = snapC && snapT ? await Promise.all([syncChangedSince('customers', snapC.cursor), syncChangedSince('transactions', snapT.cursor)]) : [null, null];
-        setSyncMark('customers', winC && winT && { cursor: snapC.cursor, txCursor: snapT.cursor, fullAt: new Date().toISOString(), count: snapC.count, txCount: snapT.count, recent: syncRecent(snapC.cursor, winC), txRecent: syncRecent(snapT.cursor, winT) });
+        const [digC, digT] = winC && winT ? await Promise.all([syncDigestCheck('customers', null), syncDigestCheck('transactions', null)]) : [{}, {}];
+        setSyncMark('customers', winC && winT && { cursor: snapC.cursor, txCursor: snapT.cursor, fullAt: new Date().toISOString(), digest: (digC.next && digT.next) ? digC.next : undefined, txDigest: digT.next || undefined, count: snapC.count, txCount: snapT.count, recent: syncRecent(snapC.cursor, winC), txRecent: syncRecent(snapT.cursor, winT) });
       }
       normalizeStaffWalletAccounts();
       syncAllStaffWallets();

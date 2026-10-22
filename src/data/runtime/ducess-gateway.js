@@ -882,6 +882,7 @@ async function submitDebtRepayment(_payload) {
       // in browser storage instead.
       sync: {
         snapshot: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+        digest: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
         changedSince: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
       },
       adminx: {
@@ -3621,6 +3622,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // columns from sql/2026-10-22-fix-b-incremental-sync.sql; until that
       // runs these return SYNC_UNSUPPORTED and the app keeps full reloads.
       sync: {
+        async digest(kind, prevAt) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.rpc('ducess_sync_digest', { p_kind: kind, p_prev: prevAt || null });
+          if (error) return defaultResult.err(isMissingRpcError(error) || isMissingColumnOrRelationError(error) ? 'SYNC_UNSUPPORTED' : 'SYNC_DIGEST_FAILED', 'Could not read the sync check.', error);
+          return defaultResult.ok(data);
+        },
         async snapshot(kind) {
           if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
           const spec = syncSpec(kind);
