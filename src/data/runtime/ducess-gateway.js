@@ -2984,15 +2984,18 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(permsResult.data.some((perm) => perm.toolCode === payload?.toolCode && perm.allowed !== false));
     }
 
-    // Pages through a set-returning history function (1000 rows a page).
-    async function rpcPages(fn, args) {
+    // Pages through a set-returning history function, 1000 rows a page; each
+    // page continues after the previous page's last row (keyset paging).
+    async function rpcPages(fn, args, cursorCol) {
       const all = [];
-      for (let offset = 0; ; offset += 1000) {
-        const { data, error } = await client.rpc(fn, { ...args, p_offset: offset, p_limit: 1000 });
+      let after = null;
+      for (;;) {
+        const { data, error } = await client.rpc(fn, { ...args, p_after_at: after ? after[cursorCol] : null, p_after_id: after ? String(after.id) : null, p_limit: 1000 });
         if (error) return defaultResult.err(isMissingRpcError(error) ? 'HISTORY_UNSUPPORTED' : 'HISTORY_FETCH_FAILED', 'Could not load history.', error);
         const rows = Array.isArray(data) ? data : [];
         all.push(...rows);
         if (rows.length < 1000) break;
+        after = rows[rows.length - 1];
       }
       return defaultResult.ok(all);
     }
@@ -3662,7 +3665,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         },
         async approvals(from, oldFrom) {
           if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
-          const rows = await rpcPages(oldFrom !== undefined ? 'ducess_history_gap_approvals' : 'ducess_recent_approvals', oldFrom !== undefined ? { p_new_from: from, p_old_from: oldFrom } : { p_from: from });
+          const rows = await rpcPages(oldFrom !== undefined ? 'ducess_history_gap_approvals' : 'ducess_recent_approvals', oldFrom !== undefined ? { p_new_from: from, p_old_from: oldFrom } : { p_from: from }, 'requested_at');
           if (!rows.ok) return rows;
           return defaultResult.ok(rows.data.map(normalizeApprovalRecord).filter(Boolean));
         },
@@ -3670,7 +3673,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         // the summary rows for older ones; oldFrom given = only the gap.
         async transactions(from, oldFrom) {
           if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
-          const rows = await rpcPages(oldFrom !== undefined ? 'ducess_history_gap_transactions' : 'ducess_recent_transactions', oldFrom !== undefined ? { p_new_from: from, p_old_from: oldFrom } : { p_from: from });
+          const rows = await rpcPages(oldFrom !== undefined ? 'ducess_history_gap_transactions' : 'ducess_recent_transactions', oldFrom !== undefined ? { p_new_from: from, p_old_from: oldFrom } : { p_from: from }, 'created_at');
           if (!rows.ok) return rows;
           return defaultResult.ok(rows.data.map(pickTxColumns));
         },

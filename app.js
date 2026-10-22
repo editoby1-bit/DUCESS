@@ -1282,11 +1282,13 @@
   }
   // JS twin of ducess_is_summarised (SQL).
   function isSummarisedApproval(a, from) {
-    if (!from || from === HISTORY_ALL || !a || a.status !== 'approved' || !SUMMARISED_TYPES.includes(a.type)) return false;
+    if (!from || from === HISTORY_ALL || !a || !SUMMARISED_TYPES.includes(a.type)) return false;
+    if (a.status !== 'approved' && a.status !== 'rejected') return false;
     const p = a.payload || {};
     const d = historyBizDate(p);
     if (!d || d >= from) return false;
     if (p.accountType === 'staff' || p.accountType === 'staff_wallet') return false;
+    if (a.status === 'rejected') return true;
     if (Array.isArray(p.chargeBreakdown) && p.chargeBreakdown.length) return false;
     return histNum(p.commissionAmount) === 0 && histNum(p.totalChargeAmount) === 0;
   }
@@ -1301,12 +1303,19 @@
   // One window answer serves both the approvals and the customers load.
   async function getHistoryWindow(from) {
     const key = from || '';
-    if (historyWindowCache && (historyWindowCache.key === key || historyWindowCache.data.from === key) && Date.now() - historyWindowCache.at < 60000) return historyWindowCache.data;
-    const res = await gateway.history.window(from || null);
-    if (!res?.ok) { if (res?.error?.code === 'HISTORY_UNSUPPORTED') historySupported = false; return null; }
-    if (!res.data?.from) return null;
-    historyWindowCache = { key, at: Date.now(), data: res.data };
-    return res.data;
+    const hit = historyWindowCache && (historyWindowCache.key === key || historyWindowCache.from === key) && Date.now() - historyWindowCache.at < 300000;
+    if (hit) return historyWindowCache.promise;
+    const promise = (async () => {
+      const res = await gateway.history.window(from || null);
+      if (!res?.ok) { if (res?.error?.code === 'HISTORY_UNSUPPORTED') historySupported = false; return null; }
+      return res.data?.from ? res.data : null;
+    })();
+    const entry = { key, from: null, at: Date.now(), promise };
+    historyWindowCache = entry;
+    const data = await promise;
+    if (!data) { if (historyWindowCache === entry) historyWindowCache = null; return null; }
+    entry.from = data.from;
+    return data;
   }
 
   // Merges fresh approval rows. Returns false when a row would also be
