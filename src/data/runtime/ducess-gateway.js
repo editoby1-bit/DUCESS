@@ -880,6 +880,10 @@ async function submitDebtRepayment(_payload) {
       // 2026-10-22 Administration redesign: staff profiles + ICT logs live
       // in Supabase; the local adapter has no table, so the app keeps them
       // in browser storage instead.
+      sync: {
+        snapshot: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+        changedSince: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+      },
       adminx: {
         listStaffProfiles: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
         getStaffProfile: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
@@ -1185,6 +1189,13 @@ function subscribeRealtime() {
   const amount = txType === 'credit' && totalChargeAmount > 0
     ? normalizeNumber(entry?.customerCreditAmount || computedCustomerCredit)
     : sourceAmount;
+  if (Array.isArray(options.resumePool) && options.resumePool.length) {
+    const hit = options.resumePool.findIndex(tx => String(tx.account_id) === String(accountSummary.accountId) && String(tx.tx_type) === txType && normalizeNumber(tx.amount) === amount);
+    if (hit >= 0) {
+      const done = options.resumePool.splice(hit, 1)[0];
+      return defaultResult.ok({ alreadyPosted: true, requestId: approvalRequestId, accountId: accountSummary.accountId, customerId: entry?.customerId || accountSummary.customerId || null, amount, sourceAmount, totalChargeAmount, chargeBreakdown: chargeRows, customerCreditAmount: amount, txType, balanceAfter: done.balance_after ?? null, transactionId: done.id || null });
+    }
+  }
   const delta = txType === 'credit' ? amount : -amount;
   const balanceAfter = currentBalance + delta;
   const chargeText = txType === 'credit' && chargeRows.length
@@ -1584,12 +1595,15 @@ if (inserted.error) {
       if (existingTxResult.data.length >= expectedEntryCount && expectedEntryCount > 0) {
         return defaultResult.ok({ posted: true, requestType: type, transactions: existingTxResult.data, cashLedger: null, decisionNote: decisionNote || '', alreadyPosted: true });
       }
-      if (existingTxResult.data.length > 0 && existingTxResult.data.length < expectedEntryCount) {
-        return defaultResult.err('PARTIAL_POST_DETECTED', 'A partial backend posting was detected for this approval request. Resolve before retrying.');
-      }
+      // Fix B 2026-10-22: a journal that stopped part-way (timeout / lost
+      // connection) used to be blocked with PARTIAL_POST_DETECTED. Approving
+      // it again now resumes: lines already posted for this request are
+      // matched (account + type + amount, each used once) and skipped, and
+      // only the missing lines are posted.
+      const resumePool = existingTxResult.data.length > 0 ? [...existingTxResult.data] : null;
       const results = [];
       for (const entry of entries) {
-        const postedResult = await postSingleCustomerTransaction(requestRow, entry, txType, approver, { skipExistingCheck: true });
+        const postedResult = await postSingleCustomerTransaction(requestRow, entry, txType, approver, { skipExistingCheck: true, resumePool });
         if (!postedResult.ok) return postedResult;
         results.push(postedResult.data);
       }
@@ -1608,7 +1622,7 @@ if (inserted.error) {
             accountNumber: payload.fundingLeg.accountNumber,
             amount: normalizeNumber(payload.formAmount),
             details: `Journal funding leg for ${payload.journalNumber || ''}`
-          }, fundingTxType, approver, { skipExistingCheck: true });
+          }, fundingTxType, approver, { skipExistingCheck: true, resumePool });
           if (!fundingResult.ok) return fundingResult;
           results.push(fundingResult.data);
         }
@@ -2307,10 +2321,15 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
 
+    // Fix B 2026-10-22 (egress): customer reads skip photo_path — a base64
+    // photo per customer was re-downloaded with every customer list sync.
+    // The photo now loads only when a customer is shown (getCustomerPhoto).
+    const customersListSelect = customersSelect.split(',').map(c => c.trim()).filter(c => c && c !== 'photo_path').join(', ');
     async function fetchCustomersRows(filters = {}) {
       if (!canUseSupabase()) return defaultResult.err('SUPABASE_UNAVAILABLE', 'Supabase client is not available.');
-      let query = client.from(customersTable).select(customersSelect);
+      let query = client.from(customersTable).select(customersListSelect);
       if (filters.customerId) query = query.eq('id', filters.customerId);
+      if (Array.isArray(filters.ids)) query = query.in('id', filters.ids.length ? filters.ids : ['00000000-0000-0000-0000-000000000000']);
       if (filters.accountNumber) query = query.eq('account_number', String(filters.accountNumber).trim());
       if (filters.linkedStaffId) query = query.eq('linked_staff_id', filters.linkedStaffId);
       if (filters.status) query = query.eq('status', filters.status);
@@ -2879,6 +2898,21 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(permsResult.data.some((perm) => perm.toolCode === payload?.toolCode && perm.allowed !== false));
     }
 
+    function syncSpec(kind) {
+      // Transactions are insert-only, so they carry inserted_at (server
+      // time) rather than an updated_at trigger.
+      if (kind === 'approvals') return { table: approvalRequestsTable, col: 'updated_at', select: 'id, updated_at' };
+      if (kind === 'transactions') return { table: customerTransactionsTable, col: 'inserted_at', select: 'id, customer_id, inserted_at', notNull: 'customer_id' };
+      return { table: customersTable, col: 'updated_at', select: 'id, updated_at' };
+    }
+
+    async function getCustomerPhoto(customerId) {
+      if (!canUseSupabase() || !customerId) return defaultResult.ok('');
+      const { data, error: queryError } = await client.from(customersTable).select('photo_path').eq('id', customerId).maybeSingle();
+      if (queryError) return defaultResult.err('CUSTOMER_PHOTO_FAILED', 'Could not load customer photo.', queryError);
+      return defaultResult.ok(data?.photo_path || '');
+    }
+
     async function listCustomers(filters = {}) {
       if (!canUseSupabase()) return local.customers.listCustomers(filters);
       const rowsResult = await fetchCustomersRows(filters);
@@ -3444,6 +3478,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         revokeTempGrant: (...args) => local.permissions.revokeTempGrant(...args),
       },
       customers: {
+        getCustomerPhoto,
         listCustomers,
         searchCustomers,
         getCustomerById,
@@ -3490,6 +3525,33 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // Audit & ICT Unit"). Tables come from the staff_profiles / ict_logs
       // SQL script. The profile list never pulls photos (egress); a single
       // profile (with photo) loads only when that staff member is opened.
+      // Fix B 2026-10-22 (egress): incremental sync. Needs the updated_at
+      // columns from sql/2026-10-22-fix-b-incremental-sync.sql; until that
+      // runs these return SYNC_UNSUPPORTED and the app keeps full reloads.
+      sync: {
+        async snapshot(kind) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const spec = syncSpec(kind);
+          let cq = client.from(spec.table).select('id', { count: 'exact', head: true });
+          if (spec.notNull) cq = cq.not(spec.notNull, 'is', null);
+          const [countRes, latestRes] = await Promise.all([
+            cq,
+            client.from(spec.table).select(spec.col).order(spec.col, { ascending: false, nullsFirst: false }).limit(1),
+          ]);
+          const err = countRes.error || latestRes.error;
+          if (err) return defaultResult.err(isMissingColumnOrRelationError(err) ? 'SYNC_UNSUPPORTED' : 'SYNC_SNAPSHOT_FAILED', 'Could not read sync snapshot.', err);
+          return defaultResult.ok({ count: Number(countRes.count || 0), cursor: latestRes.data?.[0]?.[spec.col] || null });
+        },
+        async changedSince(kind, since) {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const spec = syncSpec(kind);
+          let q = client.from(spec.table).select(spec.select).gt(spec.col, since).order(spec.col, { ascending: true }).limit(1000);
+          if (spec.notNull) q = q.not(spec.notNull, 'is', null);
+          const { data, error } = await q;
+          if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'SYNC_UNSUPPORTED' : 'SYNC_CHANGES_FAILED', 'Could not read changes.', error);
+          return defaultResult.ok((Array.isArray(data) ? data : []).map(r => ({ ...r, ts: r[spec.col] })));
+        },
+      },
       adminx: {
         async listStaffProfiles() {
           if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');

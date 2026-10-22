@@ -515,7 +515,7 @@
     catch (err) {
       if (isSupabaseApprovalMode()) {
         try {
-          write({ ...persist, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __slimSaved: new Date().toISOString() });
+          write({ ...persist, __sync: undefined, approvals: [], audit: [], customers: (state.customers || []).map(c => ({ ...c, transactions: [] })), __slimSaved: new Date().toISOString() });
           return;
         } catch (err2) { /* fall through to warning */ }
       }
@@ -1100,8 +1100,90 @@
 
   function isSupabaseApprovalMode() { return gateway?.__meta?.adapter === 'supabase' && gateway?.approvals; }
 
+  // Fix B 2026-10-22 (Supabase egress): login, tab return, the 5-minute
+  // safety net and realtime fallbacks used to re-download EVERY approval,
+  // customer and transaction. Whole-list syncs now ask the database only
+  // for rows changed since the last sync (updated_at / inserted_at columns
+  // from sql/2026-10-22-fix-b-incremental-sync.sql) and merge them in.
+  // A row-count check catches deletes or anything missed and falls back
+  // to the full reload, as does a database without those columns yet.
+  const SYNC_OVERLAP_MS = 120000;
+  const SYNC_MAX_DELTA = 100;
+  // Full reload at least this often anyway (catches a delete + insert
+  // between syncs, which the row count alone can't see).
+  const SYNC_FULL_EVERY_MS = 12 * 3600000;
+  const syncStale = (mark) => !mark?.fullAt || Date.now() - new Date(mark.fullAt).getTime() > SYNC_FULL_EVERY_MS;
+  const syncSupported = { approvals: true, customers: true };
+  const syncSince = (cursor) => new Date(new Date(cursor).getTime() - SYNC_OVERLAP_MS).toISOString();
+  const syncMaxTs = (cursor, rows) => rows.reduce((m, r) => (r.ts && new Date(r.ts) > new Date(m) ? r.ts : m), cursor);
+  // Rows already merged inside the overlap window, keyed id -> timestamp,
+  // so the overlap re-check doesn't re-download them every time.
+  function syncRecent(cursor, rows) {
+    const top = new Date(cursor).getTime(), floor = top - SYNC_OVERLAP_MS;
+    const recent = {};
+    rows.forEach(r => { const t = r.ts ? new Date(r.ts).getTime() : NaN; if (t > floor && t <= top) recent[r.id] = r.ts; });
+    return Object.keys(recent).length <= 500 ? recent : null;
+  }
+  const recentRows = (recent) => Object.entries(recent || {}).map(([id, ts]) => ({ id, ts }));
+  const isUnseen = (recent) => (r) => !recent || recent[r.id] !== r.ts;
+  function setSyncMark(kind, mark) { state.__sync ||= {}; if (mark) state.__sync[kind] = mark; else delete state.__sync[kind]; }
+  async function takeSyncSnapshot(kind) {
+    if (!gateway.sync?.snapshot) return null;
+    try {
+      const res = await gateway.sync.snapshot(kind);
+      if (res?.ok && res.data?.cursor) return res.data;
+      if (res?.error?.code === 'SYNC_UNSUPPORTED') syncSupported[kind === 'approvals' ? 'approvals' : 'customers'] = false;
+    } catch (_) {}
+    return null;
+  }
+  async function syncChangedSince(kind, cursor) {
+    try {
+      const res = await gateway.sync.changedSince(kind, syncSince(cursor));
+      if (res?.ok && Array.isArray(res.data)) return res.data;
+      if (res?.error?.code === 'SYNC_UNSUPPORTED') syncSupported[kind === 'approvals' ? 'approvals' : 'customers'] = false;
+    } catch (_) {}
+    return null;
+  }
+
+  async function syncApprovalsDelta() {
+    const mark = state.__sync?.approvals;
+    if (!syncSupported.approvals || !mark?.cursor || syncStale(mark) || !(state.approvals || []).length || !gateway.sync?.changedSince) return null;
+    const changedAll = await syncChangedSince('approvals', mark.cursor);
+    if (!changedAll || changedAll.length >= 1000) return null;
+    const changed = changedAll.filter(isUnseen(mark.recent));
+    if (changed.length > SYNC_MAX_DELTA) return null;
+    const snap = await takeSyncSnapshot('approvals');
+    if (!snap) return null;
+    const ids = [...new Set(changed.map(r => String(r.id)))];
+    let fresh = [];
+    if (ids.length) {
+      const res = await gateway.approvals.listApprovalRequests({ ids });
+      if (!res?.ok || !Array.isArray(res.data)) return null;
+      fresh = res.data;
+    }
+    const byId = new Map((state.approvals || []).map(a => [String(a.id), a]));
+    fresh.forEach(a => byId.set(String(a.id), a));
+    if (byId.size !== snap.count) return null;
+    if (fresh.length) {
+      state.approvals = [...byId.values()].sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
+      syncStaffBusinessEffectsFromApprovedRequests();
+      syncOperationalEffectsFromApprovedRequests();
+      reconcileBusinessDateFromClosures();
+    }
+    const cursor = syncMaxTs(mark.cursor, changedAll);
+    setSyncMark('approvals', { cursor, fullAt: mark.fullAt, count: snap.count, recent: syncRecent(cursor, [...recentRows(mark.recent), ...changedAll]) });
+    save();
+    return defaultResultOk(state.approvals);
+  }
+
   async function syncApprovalsFromGateway(filters = {}) {
     if (!isSupabaseApprovalMode() || !gateway.approvals?.listApprovalRequests) return defaultResultOk(state.approvals || []);
+    const wholeList = !filters || !Object.keys(filters).length;
+    if (wholeList) {
+      const delta = await syncApprovalsDelta();
+      if (delta) return delta;
+    }
+    const snap = wholeList && syncSupported.approvals ? await takeSyncSnapshot('approvals') : null;
     // SURGICAL FIX 2026-09-30: fetch ALL requests by default (was the
     // gateway's default of the latest 100) — Opening Cash, Till and COD
     // are summed over every approved request, so a capped list dropped a
@@ -1109,6 +1191,10 @@
     const result = await gateway.approvals.listApprovalRequests({ all: true, ...filters });
     if (result?.ok && Array.isArray(result.data)) {
       state.approvals = result.data;
+      if (wholeList) {
+        const win = snap ? await syncChangedSince('approvals', snap.cursor) : null;
+        setSyncMark('approvals', snap && win && { cursor: snap.cursor, fullAt: new Date().toISOString(), count: result.data.length, recent: syncRecent(snap.cursor, win) });
+      }
       syncStaffBusinessEffectsFromApprovedRequests();
       syncOperationalEffectsFromApprovedRequests();
       reconcileBusinessDateFromClosures();
@@ -1352,8 +1438,51 @@
     return result;
   }
 
+  const nonWalletCustomers = () => (state.customers || []).filter(c => c.accountType !== 'staff_wallet');
+  async function syncCustomersDelta() {
+    const mark = state.__sync?.customers;
+    if (!syncSupported.customers || !mark?.cursor || syncStale(mark) || !mark?.txCursor || !nonWalletCustomers().length || !gateway.sync?.changedSince) return null;
+    const [allC, allT] = await Promise.all([syncChangedSince('customers', mark.cursor), syncChangedSince('transactions', mark.txCursor)]);
+    if (!allC || !allT || allC.length >= 1000 || allT.length >= 1000) return null;
+    const changedC = allC.filter(isUnseen(mark.recent));
+    const changedT = allT.filter(isUnseen(mark.txRecent));
+    const ids = [...new Set([...changedC.map(r => String(r.id)), ...changedT.map(r => String(r.customer_id))])];
+    if (ids.length > SYNC_MAX_DELTA) return null;
+    const [snapC, snapT] = await Promise.all([takeSyncSnapshot('customers'), takeSyncSnapshot('transactions')]);
+    if (!snapC || !snapT) return null;
+    // Transactions are insert-only: the count must grow by exactly the
+    // rows that are new since the last sync, or something was missed.
+    if (snapT.count !== mark.txCount + changedT.length) return null;
+    if (ids.length) {
+      const res = await gateway.customers.listCustomers({ ids });
+      if (!res?.ok || !Array.isArray(res.data)) return null;
+      const incoming = res.data.map(normalizeGatewayCustomerForState).filter(Boolean);
+      const byId = new Map((state.customers || []).map(c => [String(c.id), c]));
+      incoming.forEach(c => byId.set(String(c.id), c));
+      state.customers = [...byId.values()];
+    }
+    if (nonWalletCustomers().length !== snapC.count) return null;
+    if (ids.length) {
+      normalizeStaffWalletAccounts();
+      syncAllStaffWallets();
+      recalcAllCustomerBalances();
+      recalcAllTellerBalances();
+    }
+    const cursor = syncMaxTs(mark.cursor, allC), txCursor = syncMaxTs(mark.txCursor, allT);
+    setSyncMark('customers', { cursor, txCursor, fullAt: mark.fullAt, count: snapC.count, txCount: snapT.count,
+      recent: syncRecent(cursor, [...recentRows(mark.recent), ...allC]), txRecent: syncRecent(txCursor, [...recentRows(mark.txRecent), ...allT]) });
+    save();
+    return defaultResultOk(state.customers);
+  }
+
   async function syncCustomersListFromGateway(filters = {}) {
     if (!isSupabaseApprovalMode() || !gateway.customers?.listCustomers) return defaultResultOk(state.customers || []);
+    const wholeList = !filters || !Object.keys(filters).length;
+    if (wholeList) {
+      const delta = await syncCustomersDelta();
+      if (delta) return delta;
+    }
+    const snaps = wholeList && syncSupported.customers ? await Promise.all([takeSyncSnapshot('customers'), takeSyncSnapshot('transactions')]) : [null, null];
     const result = await gateway.customers.listCustomers(filters);
     if (result?.ok && Array.isArray(result.data)) {
       // Replace customers entirely from Supabase — drop seed customers (c1, c2 etc)
@@ -1364,6 +1493,11 @@
       // Re-add staff wallets that aren't already in incoming
       const incomingIds = new Set(incoming.map(c => c.id));
       staffWallets.forEach(w => { if (!incomingIds.has(w.id)) state.customers.push(w); });
+      if (wholeList) {
+        const [snapC, snapT] = snaps;
+        const [winC, winT] = snapC && snapT ? await Promise.all([syncChangedSince('customers', snapC.cursor), syncChangedSince('transactions', snapT.cursor)]) : [null, null];
+        setSyncMark('customers', winC && winT && { cursor: snapC.cursor, txCursor: snapT.cursor, fullAt: new Date().toISOString(), count: snapC.count, txCount: snapT.count, recent: syncRecent(snapC.cursor, winC), txRecent: syncRecent(snapT.cursor, winT) });
+      }
       normalizeStaffWalletAccounts();
       syncAllStaffWallets();
       recalcAllCustomerBalances();
@@ -2412,6 +2546,7 @@ if (approvalRecord.type === 'float_topup') {
     return String((nums.length ? Math.max(...nums) : 999) + 1);
   }
 
+  const customerPhotoCache = new Map();
   function lookupFill(root, customer) {
     const map = {
       name: customer?.name || '',
@@ -2428,7 +2563,24 @@ if (approvalRecord.type === 'float_topup') {
       if (el) { if(k==='balance') el.innerHTML = v || '—'; else el.textContent = v || '—'; }
     });
     const photo = q('[data-fill="photo"]', root);
-    if (photo) photo.innerHTML = customer?.photo ? `<img src="${customer.photo}" alt="photo">` : '<span>No Photo</span>';
+    if (photo) {
+      // Fix B 2026-10-22: customer lists no longer carry photos (egress);
+      // the photo loads here, once per customer per session.
+      const id = String(customer?.id || '');
+      const src = customer?.photo || customerPhotoCache.get(id) || '';
+      photo.dataset.photoFor = id;
+      photo.innerHTML = src ? `<img src="${src}" alt="photo">` : '<span>No Photo</span>';
+      if (!src && id && !photo.closest('.hidden') && !customerPhotoCache.has(id) && isSupabaseApprovalMode() && gateway.customers?.getCustomerPhoto) {
+        customerPhotoCache.set(id, '');
+        if (customerPhotoCache.size > 60) customerPhotoCache.delete(customerPhotoCache.keys().next().value);
+        gateway.customers.getCustomerPhoto(id).then(res => {
+          if (!res?.ok) { customerPhotoCache.delete(id); return; }
+          if (!res.data) return;
+          customerPhotoCache.set(id, res.data);
+          if (photo.isConnected && photo.dataset.photoFor === id) photo.innerHTML = `<img src="${res.data}" alt="photo">`;
+        }).catch(() => customerPhotoCache.delete(id));
+      }
+    }
     const nm = q('[data-fill="name"]', root);
     if (nm && customer && customerStatusLabel(customer) === 'Frozen') nm.innerHTML = `${escapeHtml(customer.name || '')} <span class="badge rejected">Frozen</span>`;
   }
@@ -5812,6 +5964,7 @@ function normalizeStaffLedgerEntryType(row) {
       const selected = getSelectedCustomer();
       if (!selected) return showToast('Search for customer first');
       if (row) row.classList.toggle('hidden');
+      if (row && !row.classList.contains('hidden')) lookupFill(byId('workspace'), selected);
     };
     hidePhoto();
     const selected = state.ui.checkBalanceLoaded ? getSelectedCustomer() : null;
