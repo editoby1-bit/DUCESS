@@ -5149,10 +5149,36 @@ function nextPaint() {
     const logRows = (logs || []).map((l, i) => `<tr><td>${i+1}</td><td>${fmtDate(l.created_at)}</td><td>${escapeHtml(l.staff_name || '—')}</td><td>${tool === 'ict_backup' ? 'Backup downloaded' : `${(l.checked_items || []).length} of ${(ICT_CHECKLISTS[tool] || []).length} checked`}</td><td>${escapeHtml(l.note || '')}</td></tr>`).join('');
     const history = `<div class="table-card"><h3>History</h3>${state.ui.ictSource === 'missing' ? `<div class="note" style="border-left-color:#c00000 !important">ICT records table not set up yet — run the ict_logs SQL script in Supabase. Until then records are kept in this browser only.</div>` : ''}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>By</th><th>Result</th><th>Note</th></tr></thead><tbody>${logs ? (logRows || '<tr><td colspan="5">No records yet</td></tr>') : '<tr><td colspan="5">Loading…</td></tr>'}</tbody></table></div></div>`;
     if (tool === 'ict_backup') {
-      return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">Data Backup</div><div class="note">Downloads a snapshot of the data this app holds — staff, customer accounts and balances, transactions, approval requests (photos excluded), journals, income &amp; expense accounts, close-of-day records. Store the file somewhere safe and offline. The full database itself is also backed up by Supabase.</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input" placeholder="e.g. Weekly backup, saved to office drive"></div></div><div class="cs2-button-row"><button id="ictBackupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Download Backup</button></div></div>${history}</div>`;
+      const gauge = storageGaugeHtml();
+      return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">Data Backup</div><div class="note">Downloads a snapshot of the data this app holds — staff, customer accounts and balances, transactions, approval requests (photos excluded), journals, income &amp; expense accounts, close-of-day records. Store the file somewhere safe and offline. Supabase's free plan keeps no automatic backups of the database, so download this regularly (weekly is a good habit).</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input" placeholder="e.g. Weekly backup, saved to office drive"></div></div><div class="cs2-button-row"><button id="ictBackupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Download Backup</button></div></div>${gauge}${history}</div>`;
     }
     const items = ICT_CHECKLISTS[tool] || [];
     return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">${escapeHtml(TOOL_LABELS[tool])} Check</div><div class="note">Tick what has been checked today and add a note, then Save Check. Each check is recorded with your name and the date.</div><div class="stack" style="gap:6px;margin:8px 0">${items.map((it, i) => `<label class="ict-item"><input type="checkbox" data-ict-item="${i}"><span>${escapeHtml(it)}</span></label>`).join('')}</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input"></div></div><div class="cs2-button-row"><button id="ictSaveBtn" class="sheet-btn cs2-btn cs2-btn-solid">Save Check</button></div></div>${history}</div>`;
+  }
+
+  // 2026-10-23: database space gauge (Free plan limit 500 MB). Read once per
+  // session (tiny request); admins are warned at login when it is high.
+  const STORAGE_LIMIT_BYTES = 500 * 1024 * 1024;
+  let storageUsage = null;
+  async function loadStorageUsage(force = false) {
+    if (!isSupabaseApprovalMode() || !gateway.adminx?.storageUsage) return null;
+    if (storageUsage && !force) return storageUsage;
+    const res = await gateway.adminx.storageUsage();
+    storageUsage = res?.ok ? { ...res.data, ok: true } : { ok: false, code: res?.error?.code };
+    return storageUsage;
+  }
+  function storageGaugeHtml() {
+    if (!isSupabaseApprovalMode()) return '';
+    if (!storageUsage) { loadStorageUsage().then(() => { if (state.ui.tool === 'ict_backup') renderWorkspace(); }); return `<div class="form-card"><div class="note">Checking database space…</div></div>`; }
+    if (!storageUsage.ok) return `<div class="form-card"><div class="cs2-title">Database Space</div><div class="note">${storageUsage.code === 'FUNCTION_MISSING' ? 'Run sql/2026-10-23-storage-gauge.sql in Supabase to see database space here.' : 'Could not read database space right now.'}</div></div>`;
+    const mb = (b) => (Number(b || 0) / 1048576).toFixed(1);
+    const pct = Math.min(100, Math.round(Number(storageUsage.database_bytes || 0) / STORAGE_LIMIT_BYTES * 100));
+    const color = pct >= 80 ? '#c62828' : pct >= 60 ? '#e09b00' : '#2e7d32';
+    const advice = pct >= 80 ? 'Space is running out — plan the yearly archive (old records to backup files, balances brought forward) or a paid plan now.' : pct >= 60 ? 'Over half used — start planning the yearly archive.' : 'Plenty of room.';
+    return `<div class="form-card"><div class="cs2-title">Database Space</div>
+      <div style="margin:8px 0 6px"><strong>${mb(storageUsage.database_bytes)} MB</strong> of 500 MB used (${pct}%) — Supabase free plan</div>
+      <div style="height:14px;border:1px solid #999;background:#eee"><div style="height:100%;width:${Math.max(pct, 1)}%;background:${color}"></div></div>
+      <div class="note" style="margin-top:6px">${advice} Requests: ${mb(storageUsage.approvals_bytes)} MB · Transactions: ${mb(storageUsage.transactions_bytes)} MB · Audit log: ${mb(storageUsage.audit_bytes)} MB · Customers: ${mb(storageUsage.customers_bytes)} MB. About 15 MB is Supabase's own fixed overhead.</div></div>`;
   }
 
   async function loadIctLogs(cat, force = false) {
@@ -10748,6 +10774,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         await syncCodFromGateway();
         render();
         await enforceAdminRecoveryKeySetup();
+        if (staffRoleCode(currentStaff()) === 'admin_officer') {
+          loadStorageUsage().then(u => {
+            const pct = u?.ok ? Math.round(Number(u.database_bytes || 0) / STORAGE_LIMIT_BYTES * 100) : 0;
+            if (pct >= 80) showToast(`Database space ${pct}% used — see ICT Unit → Data Backup.`);
+          }).catch(() => {});
+        }
       } catch (err) {
         console.warn('[DUCESS] Login failed with an unexpected error', err);
         errEl.textContent = 'Sign-in failed unexpectedly — check your connection and try again.';

@@ -1904,13 +1904,20 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const postingResult = await performDirectPostingForApproval(requestRow, approver, decisionNote, plan);
       if (!postingResult.ok) return postingResult;
 
+      // 2026-10-23 (database space): the approval and its audit entry keep a
+      // compact record of what was posted (account, type, amount, balance)
+      // instead of a full copy — the transactions table holds the detail.
+      const compactTx = (Array.isArray(postingResult.data?.transactions) ? postingResult.data.transactions : [])
+        .map(t => ({ accountId: t?.accountId ?? null, txType: t?.txType || '', amount: normalizeNumber(t?.amount), balanceAfter: t?.balanceAfter ?? null }));
+      const ledger = postingResult.data?.cashLedger;
+      const compactLedger = ledger ? { amount: normalizeNumber(ledger.amount), delta: normalizeNumber(ledger.delta) } : null;
       const postingMeta = {
         __posting: {
           posted: postingResult.data?.posted !== false,
           postedAt: new Date().toISOString(),
           requestType: requestRow.request_type || '',
-          transactions: Array.isArray(postingResult.data?.transactions) ? postingResult.data.transactions : [],
-          cashLedger: postingResult.data?.cashLedger || null,
+          transactions: compactTx,
+          cashLedger: compactLedger,
         }
       };
 
@@ -1922,8 +1929,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         metadata: {
           requestType: requestRow.request_type || '',
           posted: postingResult.data?.posted !== false,
-          transactions: postingResult.data?.transactions || [],
-          cashLedger: postingResult.data?.cashLedger || null,
+          transactions: compactTx,
+          cashLedger: compactLedger,
           decisionNote,
         }
       };
@@ -3751,6 +3758,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           const row = { ...profile, staff_id: staffId, updated_at: new Date().toISOString() };
           const { data, error } = await client.from('staff_profiles').upsert(row, { onConflict: 'staff_id' }).select('staff_id, updated_at').maybeSingle();
           if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'PROFILE_SAVE_FAILED', 'Could not save the staff profile.', error);
+          return defaultResult.ok(data);
+        },
+        async storageUsage() {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.rpc('ducess_storage_usage');
+          if (error) return defaultResult.err(isMissingRpcError(error) ? 'FUNCTION_MISSING' : 'STORAGE_USAGE_FAILED', 'Could not read database size.', error);
           return defaultResult.ok(data);
         },
         async listIctLogs(category) {
