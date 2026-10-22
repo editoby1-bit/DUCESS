@@ -1204,8 +1204,10 @@
   const SYNC_OVERLAP_MS = 120000;
   const SYNC_MAX_DELTA = 100;
   // Full reload at least this often anyway (catches a delete + insert
-  // between syncs, which the row count alone can't see).
-  const SYNC_FULL_EVERY_MS = 12 * 3600000;
+  // between syncs, which the row count alone can't see). The app itself
+  // never deletes these rows — only manual SQL clean-ups do — so weekly is
+  // enough; a full reload grows with history (MBs at hundreds/day).
+  const SYNC_FULL_EVERY_MS = 7 * 24 * 3600000;
   const syncStale = (mark) => !mark?.fullAt || Date.now() - new Date(mark.fullAt).getTime() > SYNC_FULL_EVERY_MS;
   const syncSupported = { approvals: true, customers: true };
   const syncSince = (cursor) => new Date(new Date(cursor).getTime() - SYNC_OVERLAP_MS).toISOString();
