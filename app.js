@@ -3402,8 +3402,17 @@ function hideProcessing() {
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Account Type</div>
-            <div class="cs2-input-wrap cs2-wide">
-              <select id="openAccountType" class="entry-input cs2-input">
+            <div class="cs2-input-wrap cs2-wide acct-type-picker">
+              ${(() => {
+                // 2026-10-23 (client): not a drop-down — the list opens inside
+                // the form, pushing the fields below down instead of covering them.
+                const cur = isStaffOp ? (opKind === 'treasury' ? 'treasury_account' : 'teller_account') : acctType;
+                const opts = [['customer', 'Customer Account'], ['teller_account', 'Teller Account'], ['treasury_account', 'Treasury Account'], ['staff_salary', 'Staff Salary Account'], ['expense', 'Expense Account'], ['income', 'Income Account']];
+                const curLabel = (opts.find(o => o[0] === cur) || opts[0])[1];
+                return `<button type="button" id="openAccountTypeBtn" class="acct-type-current" aria-expanded="false">${curLabel} <span class="acct-type-caret">▸</span></button>
+                <div id="openAccountTypeOptions" class="acct-type-options hidden">${opts.map(([v, l]) => `<button type="button" class="acct-type-option ${v === cur ? 'active' : ''}" data-acct-type="${v}">${l}</button>`).join('')}</div>`;
+              })()}
+              <select id="openAccountType" class="entry-input cs2-input hidden" aria-hidden="true" tabindex="-1">
                 <option value="customer"          ${acctType==='customer'          ?'selected':''}>Customer Account</option>
                 <option value="teller_account"    ${isStaffOp && opKind==='teller'   ?'selected':''}>Teller Account</option>
                 <option value="treasury_account"  ${isStaffOp && opKind==='treasury' ?'selected':''}>Treasury Account</option>
@@ -6390,6 +6399,21 @@ function normalizeStaffLedgerEntryType(row) {
         }
       })();
     }
+
+    // Account type picker (opens in place, covers nothing)
+    const typeBtn = byId('openAccountTypeBtn'), typeOpts = byId('openAccountTypeOptions');
+    if (typeBtn && typeOpts) typeBtn.onclick = () => {
+      const open = typeOpts.classList.toggle('hidden') === false;
+      typeBtn.setAttribute('aria-expanded', String(open));
+      const caret = typeBtn.querySelector('.acct-type-caret'); if (caret) caret.textContent = open ? '▾' : '▸';
+    };
+    qq('[data-acct-type]').forEach(btn => btn.onclick = () => {
+      const sel = byId('openAccountType'); if (!sel) return;
+      typeOpts?.classList.add('hidden');
+      if (sel.value === btn.dataset.acctType) { typeBtn?.setAttribute('aria-expanded', 'false'); const c = typeBtn?.querySelector('.acct-type-caret'); if (c) c.textContent = '▸'; return; }
+      sel.value = btn.dataset.acctType;
+      sel.dispatchEvent(new Event('change'));
+    });
 
     // Re-render when account type changes
     const typeSelect = byId('openAccountType');
