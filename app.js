@@ -3390,12 +3390,6 @@ function hideProcessing() {
       .map(s =>
       `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${roleLabelOf(staffRoleCode(s))})</option>`
     ).join('');
-    const systemNote = {
-      staff_operational: '"T" + number (T1, T2, T3, ...) — assigned automatically when you submit. Teller and Treasury accounts only — permanently linked to the chosen staff member. The account name is auto-set to TELLER <FULL NAME> or TREASURY <FIRST NAME>.',
-      staff_salary:      '"S" + number (S1, S2, S3, ...) — assigned automatically when you submit.',
-      expense:           '"E" + number (E1, E2, ...) — assigned automatically when you submit',
-      income:            '"I" + number (I1, I2, ...) — assigned automatically when you submit'
-    }[acctType] || '';
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Account Opening</div>
@@ -3441,7 +3435,7 @@ function hideProcessing() {
               </select>
             </div>
           </div>
-          <div class="cs2-note-box">Only staff currently assigned the ${opKind === 'treasury' ? 'Treasury' : 'Teller'} role, and who do not yet have an operational account, are listed. <strong>The link is permanent</strong> — the account stays with that staff member even if their role is later changed.</div>` : ''}
+          ` : ''}
           ${(isCustomer || isStaffSalary) ? `
           ${isCustomer ? `
           <div class="cs2-row">
@@ -3474,7 +3468,7 @@ function hideProcessing() {
             <input id="openPhoto" class="entry-input cs-sheet-input hidden-photo-input" type="file" accept="image/*">
             <div id="openPhotoStatus" class="cs2-note-box">No photo selected</div>
           </div>
-          ${isStaffSalary ? `<div class="cs2-note-box">${systemNote}</div><div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number: <strong>Loading…</strong></div>` : ''}` : `<div class="cs2-note-box">${systemNote}</div>${(acctType === 'staff_operational' || acctType === 'expense' || acctType === 'income') ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number: <strong>Loading…</strong></div>` : ''}`}
+          ${isStaffSalary ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number:&nbsp;<strong>Loading…</strong></div>` : ''}` : `${(acctType === 'staff_operational' || acctType === 'expense' || acctType === 'income') ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number:&nbsp;<strong>Loading…</strong></div>` : ''}`}
           <div class="cs2-button-row">
             <button id="submitOpening" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
           </div>
@@ -6391,11 +6385,11 @@ function normalizeStaffLedgerEntryType(row) {
           const el = byId('openAccountNumberPreview');
           if (!el || el.dataset.previewType !== previewType) return; // form moved on since the fetch started
           el.innerHTML = result?.ok && result.data
-            ? `Account Number (preview): <strong>${escapeHtml(result.data)}</strong> — assigned when you submit`
-            : `Account Number: <strong>Unavailable</strong> — will be assigned on submit`;
+            ? `Account Number:&nbsp;<strong>${escapeHtml(result.data)}</strong>`
+            : `Account Number:&nbsp;<strong>assigned on submit</strong>`;
         } catch (err) {
           const el = byId('openAccountNumberPreview');
-          if (el) el.innerHTML = `Account Number: <strong>Unavailable</strong> — will be assigned on submit`;
+          if (el) el.innerHTML = `Account Number:&nbsp;<strong>assigned on submit</strong>`;
         }
       })();
     }
