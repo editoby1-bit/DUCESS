@@ -2256,7 +2256,9 @@ if (approvalRecord.type === 'float_topup') {
     });
   }
 
+  const ARCHIVE_READ_ONLY_MSG = 'This is the Archive Viewer (read only) — nothing can be posted or approved here.';
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
+    if (runtimeConfig.archiveView) return defaultResultErr('ARCHIVE_READ_ONLY', ARCHIVE_READ_ONLY_MSG);
     reconcileBusinessDateFromClosures();
     const requestDate = approvalBusinessDate(type, payload);
     if (shouldLockApprovalType(type) && isBusinessDateClosed(requestDate)) {
@@ -2378,6 +2380,7 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   async function approveRequestRemote(id, payloadOverride = null) {
+    if (runtimeConfig.archiveView) { showToast(ARCHIVE_READ_ONLY_MSG); return defaultResultErr('ARCHIVE_READ_ONLY', ARCHIVE_READ_ONLY_MSG); }
     const pendingReq = (state.approvals || []).find(r => r.id === id);
     if (pendingReq && shouldLockApprovalType(pendingReq.type)) {
       const reqDate = approvalBusinessDate(pendingReq.type, pendingReq.payload || {});
@@ -2453,6 +2456,7 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   async function rejectRequestRemote(id) {
+    if (runtimeConfig.archiveView) { showToast(ARCHIVE_READ_ONLY_MSG); return defaultResultErr('ARCHIVE_READ_ONLY', ARCHIVE_READ_ONLY_MSG); }
     if (!isSupabaseApprovalMode()) { rejectRequest(id); return defaultResultOk(true); }
     const staff = currentStaff();
     // SURGICAL PATCH 2026-08-12c: bound with the same hard deadline as approve —
@@ -5260,13 +5264,16 @@ function nextPaint() {
     const enc = new TextEncoder(); const crcTable = makeZip.t ||= Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
     const crc32 = (u8) => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = crcTable[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
     const parts = []; const central = []; let offset = 0;
+    const now = new Date();
+    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
     files.forEach(f => {
       const name = enc.encode(f.name); const data = enc.encode(f.text); const crc = crc32(data);
       const h = new DataView(new ArrayBuffer(30));
-      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(8, 0, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true);
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(8, 0, true); h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true);
       parts.push(new Uint8Array(h.buffer), name, data);
       const c = new DataView(new ArrayBuffer(46));
-      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(12, dosTime, true); c.setUint16(14, dosDate, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
       central.push(new Uint8Array(c.buffer), name);
       offset += 30 + name.length + data.length;
     });
