@@ -1287,6 +1287,10 @@
   let historyNeededDuringRender = false;
   let renderAskedFrom = null;      // earliest date the screen being drawn asked for
   let activeArchiveCutoff = null;  // first business date still held in full (yearly archive)
+  // Screens that never show archived records (journals, staff, ICT, settings).
+  const NO_ARCHIVE_NOTICE = new Set(['journal_register', 'journal_credit', 'journal_debit', 'adm_staff', 'ict_access', 'ict_backup', 'ict_security',
+    'ict_network', 'ict_cyber', 'ict_archive', 'staff_directory', 'staff_roster', 'permissions', 'operational_accounts', 'customer_directory',
+    'account_opening', 'account_maintenance', 'account_reactivation']);
   const SUMMARISED_TYPES = ['customer_credit', 'customer_debit', 'inter_staff_credit', 'cash_receipt'];
   const histNum = (v) => (/^\s*-?\d+(\.\d+)?\s*$/.test(String(v ?? '')) ? Number(v) : 0);
   function historyBizDate(p = {}) {
@@ -3303,7 +3307,7 @@ function hideProcessing() {
     renderAskedFrom = null;
     const html = renderToolContent(tool);
     if (historyNeededDuringRender && historyLoading) return `<div class="form-card"><div class="note" id="historyLoadingNote">Loading older records…</div></div>`;
-    if (activeArchiveCutoff && renderAskedFrom && renderAskedFrom < activeArchiveCutoff) {
+    if (activeArchiveCutoff && renderAskedFrom && renderAskedFrom < activeArchiveCutoff && !NO_ARCHIVE_NOTICE.has(tool)) {
       return `<div class="note archive-note" style="margin-bottom:10px">Records up to ${fmtDate(`${dayBefore(activeArchiveCutoff)}T12:00:00`)} are archived — here they appear as "balance brought forward" totals. To see them in detail, open the archive file in the Archive Viewer (Administration → ICT Unit → Yearly Archive).</div>${html}`;
     }
     return html;
@@ -5115,9 +5119,13 @@ function nextPaint() {
 
   function renderAdminSub(tool) {
     if (tool === 'ict_archive') return renderYearlyArchive();
+    if (tool === 'adm_staff') return renderStaffManagement();
+    if (tool === 'ict_access') return renderStaffRoster();
+    if (tool.startsWith('ict_')) return renderIctTool(tool);
+    // Only the dated reports below work out a period (2026-10-23: the staff
+    // and ICT screens no longer do, so they never fetch older history).
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: 'daily' });
     const bar = renderPeriodBar();
-    if (tool === 'adm_staff') return renderStaffManagement();
     if (tool === 'adm_balance') return renderPeriodBalance({ report: 'overall', label: 'Account Balance', preset: 'daily' });
     if (tool === 'aud_cs') {
       const rows = auditCountsByType(r);
@@ -5162,7 +5170,10 @@ function nextPaint() {
       const rows = list.map((c, i) => { const f = periodFigures(c.balance, txItems(c), r); T.dr += f.debit; T.cr += f.credit; T.bal += f.closing; return `<tr><td>${i+1}</td><td>${escapeHtml(c.name || '—')}${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(String(c.accountNumber || '—'))}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`; }).join('');
       return `<div class="stack">${bar}<div class="table-card"><h3>Customer Account</h3><div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>A/C Name</th><th>A/C No</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No customer accounts</td></tr>'}${rows ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td></tr>` : ''}</tbody></table></div></div></div>`;
     }
-    if (tool === 'ict_access') return renderStaffRoster();
+    return '';
+  }
+
+  function renderIctTool(tool) {
     // ICT: backup + checklists
     const cat = ictCategory(tool);
     const logs = (state.ui.ictLogs || {})[cat];
@@ -5190,7 +5201,9 @@ function nextPaint() {
   async function loadArchiveInfo() {
     if (!isSupabaseApprovalMode() || !gateway.archive?.list || runtimeConfig.archiveView) return;
     const res = await gateway.archive.list();
-    if (!res?.ok) { archiveUi.listCode = res?.error?.code || 'ERROR'; archiveUi.list = []; activeArchiveCutoff = null; return; }
+    // Not set up → say so. Any other failure (e.g. before sign-in, when the
+    // archive functions are not available) → try again later.
+    if (!res?.ok) { archiveUi.listCode = res?.error?.code || 'ERROR'; archiveUi.list = res?.error?.code === 'ARCHIVE_UNSUPPORTED' ? [] : null; return; }
     archiveUi.list = res.data; archiveUi.listCode = '';
     activeArchiveCutoff = res.data.filter(a => a.status === 'archived').map(a => String(a.cutoff).slice(0, 10)).sort().pop() || null;
   }
@@ -5272,7 +5285,10 @@ function nextPaint() {
   function renderYearlyArchive() {
     if (runtimeConfig.archiveView) return `<div class="form-card"><div class="note">You are in the Archive Viewer (read only). Archiving and restoring are done in the live app.</div></div>`;
     if (!isSupabaseApprovalMode()) return `<div class="form-card"><div class="note">The yearly archive works with the live (Supabase) database only.</div></div>`;
-    if (!archiveUi.list) { loadArchiveInfo().then(() => { if (state.ui.tool === 'ict_archive') renderWorkspace(); }); return `<div class="form-card"><div class="note">Loading archives…</div></div>`; }
+    if (!archiveUi.list) {
+      if (!archiveUi.loading) { archiveUi.loading = true; loadArchiveInfo().finally(() => { archiveUi.loading = false; if (state.ui.tool === 'ict_archive' && archiveUi.list) renderWorkspace(); }); }
+      return `<div class="form-card"><div class="note">${archiveUi.listCode && archiveUi.listCode !== 'ARCHIVE_UNSUPPORTED' ? 'Could not load the archive list — check the connection, then open this screen again.' : 'Loading archives…'}</div></div>`;
+    }
     if (archiveUi.listCode === 'ARCHIVE_UNSUPPORTED') return `<div class="form-card"><div class="cs2-title">Yearly Archive</div><div class="note">Run sql/2026-10-23-yearly-archive.sql in Supabase to use the yearly archive.</div></div>`;
     const bizYear = Number(String(businessDate()).slice(0, 4));
     const latest = (archiveUi.list || []).filter(a => a.status === 'archived').map(a => String(a.cutoff).slice(0, 10)).sort().pop() || '';
@@ -11013,6 +11029,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         await syncCodFromGateway();
         render();
         await enforceAdminRecoveryKeySetup();
+        loadArchiveInfo().then(() => render()).catch(() => {});
         if (staffRoleCode(currentStaff()) === 'admin_officer') {
           loadStorageUsage().then(u => {
             const pct = u?.ok ? Math.round(Number(u.database_bytes || 0) / STORAGE_LIMIT_BYTES * 100) : 0;
