@@ -885,6 +885,9 @@ async function submitDebtRepayment(_payload) {
       history: {
         window: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
       },
+      archive: {
+        list: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
+      },
       sync: {
         snapshot: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
         digest: async () => ({ ok: false, error: { code: 'LOCAL_ONLY' } }),
@@ -3662,6 +3665,57 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // Fix B 2026-10-22 (egress): incremental sync. Needs the updated_at
       // columns from sql/2026-10-22-fix-b-incremental-sync.sql; until that
       // runs these return SYNC_UNSUPPORTED and the app keeps full reloads.
+      // 2026-10-23 yearly archive (sql/2026-10-23-yearly-archive.sql).
+      archive: {
+        async list() {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.rpc('ducess_archive_list');
+          if (error) return defaultResult.err(isMissingRpcError(error) ? 'ARCHIVE_UNSUPPORTED' : 'ARCHIVE_LIST_FAILED', 'Could not load archives.', error);
+          return defaultResult.ok(Array.isArray(data) ? data : []);
+        },
+        async stats(cutoff) {
+          const { data, error } = await client.rpc('ducess_archive_stats', { p_cutoff: cutoff });
+          if (error) return defaultResult.err(isMissingRpcError(error) ? 'ARCHIVE_UNSUPPORTED' : 'ARCHIVE_STATS_FAILED', error.message || 'Could not read archive preview.', error);
+          return defaultResult.ok(data);
+        },
+        // Every row of one table, as stored (photos and notes left out).
+        async exportTable(table, onPage) {
+          const all = [];
+          let after = null;
+          for (;;) {
+            const { data, error } = await client.rpc('ducess_export_rows', { p_table: table, p_after: after, p_limit: 1000 });
+            if (error) return defaultResult.err(isMissingRpcError(error) ? 'ARCHIVE_UNSUPPORTED' : 'ARCHIVE_EXPORT_FAILED', error.message || `Could not export ${table}.`, error);
+            const rows = Array.isArray(data) ? data : [];
+            all.push(...rows);
+            if (onPage) onPage(all.length);
+            if (rows.length < 1000 || rows[rows.length - 1]?.id === undefined) break;
+            after = String(rows[rows.length - 1].id);
+          }
+          return defaultResult.ok(all);
+        },
+        async archiveYear(cutoff, expected, by) {
+          const { data, error } = await client.rpc('ducess_archive_year', { p_cutoff: cutoff, p_expected: expected, p_by: by || '' });
+          if (error) return defaultResult.err('ARCHIVE_FAILED', String(error.message || 'Archive failed.').replace(/^DUCESS_[A-Z_]+:\s*/, ''), error);
+          return defaultResult.ok(data);
+        },
+        async restore(archiveId, rowsByTable, by, onProgress) {
+          const clear = await client.rpc('ducess_restore_clear', { p_archive: archiveId });
+          if (clear.error) return defaultResult.err('RESTORE_FAILED', clear.error.message || 'Could not prepare the restore.', clear.error);
+          let done = 0;
+          const total = Object.values(rowsByTable).reduce((n, rows) => n + rows.length, 0);
+          for (const [table, rows] of Object.entries(rowsByTable)) {
+            for (let i = 0; i < rows.length; i += 500) {
+              const { error } = await client.rpc('ducess_restore_stage', { p_archive: archiveId, p_table: table, p_rows: rows.slice(i, i + 500) });
+              if (error) return defaultResult.err('RESTORE_FAILED', String(error.message || 'Upload failed.').replace(/^DUCESS_[A-Z_]+:\s*/, ''), error);
+              done += Math.min(500, rows.length - i);
+              if (onProgress) onProgress(done, total);
+            }
+          }
+          const { data, error } = await client.rpc('ducess_restore_archive', { p_archive: archiveId, p_by: by || '' });
+          if (error) return defaultResult.err('RESTORE_FAILED', String(error.message || 'Restore failed.').replace(/^DUCESS_[A-Z_]+:\s*/, ''), error);
+          return defaultResult.ok(data);
+        },
+      },
       // Fix B 2026-10-22: recent history + summaries (sql/2026-10-22-fix-b-history-window.sql).
       history: {
         async window(from) {

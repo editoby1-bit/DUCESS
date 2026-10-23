@@ -362,6 +362,7 @@
     ict_security:  { base: 'staff_roster',    label: 'Data Security' },
     ict_network:   { base: 'staff_roster',    label: 'Network Management' },
     ict_cyber:     { base: 'staff_roster',    label: 'Cybersecurity' },
+    ict_archive:   { base: 'staff_roster',    label: 'Yearly Archive' },
   };
   Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS, ...ADMIN_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
 
@@ -377,6 +378,16 @@
   let bulkStoreInstance = null;
   let bulkReady = Promise.resolve();
   const state = bootstrapState();
+  // Archive Viewer (archive.html): a permanent banner so nobody mistakes it
+  // for the live system.
+  if (runtimeConfig.archiveView) {
+    const av = runtimeConfig.archiveView;
+    const bar = document.createElement('div');
+    bar.id = 'archiveViewBanner';
+    bar.style.cssText = 'position:sticky;top:0;z-index:9000;background:#7a1f1f;color:#fff;padding:8px 14px;font:600 14px Inter,system-ui,sans-serif;text-align:center';
+    bar.textContent = `ARCHIVE VIEW — read only — records as saved on ${String(av.createdAt || '').slice(0, 10)}${av.createdBy ? ` by ${av.createdBy}` : ''} (archive up to ${av.cutoff ? new Date(new Date(av.cutoff + 'T12:00:00').getTime() - 86400000).toISOString().slice(0, 10) : '?'}) — ${av.fileName || ''}`;
+    document.body.prepend(bar);
+  }
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
   ['staffProfiles','staffProfilesLoaded','staffProfilesSource','ictSource','ictLogs','admSelectedStaffId','admProfileDraft'].forEach(k => { delete state.ui[k]; });
@@ -386,7 +397,7 @@
   resetJournalUiState();
   if (isSupabaseApprovalMode()) {
     bulkReady = restoreBulkState();
-    bulkReady.finally(() => { syncAllSharedStateFromGateway(); });
+    bulkReady.finally(() => { syncAllSharedStateFromGateway(); loadArchiveInfo(); });
     setupRealtimeSubscriptions();
   }
 
@@ -1274,6 +1285,8 @@
   let historyWindowCache = null;
   let historyLoading = null;
   let historyNeededDuringRender = false;
+  let renderAskedFrom = null;      // earliest date the screen being drawn asked for
+  let activeArchiveCutoff = null;  // first business date still held in full (yearly archive)
   const SUMMARISED_TYPES = ['customer_credit', 'customer_debit', 'inter_staff_credit', 'cash_receipt'];
   const histNum = (v) => (/^\s*-?\d+(\.\d+)?\s*$/.test(String(v ?? '')) ? Number(v) : 0);
   function historyBizDate(p = {}) {
@@ -1335,6 +1348,8 @@
   // True when the loaded history already reaches back to `date`
   // ('' / null = all dates). Otherwise starts fetching it and returns false.
   function historyCovers(date) {
+    const asked = date ? String(date).slice(0, 10) : HISTORY_ALL;
+    if (!renderAskedFrom || asked < renderAskedFrom) renderAskedFrom = asked;
     if (!historyEnabled || !isSupabaseApprovalMode()) return true;
     const from = historyCoveredFrom();
     if (!from) return true;
@@ -3160,7 +3175,7 @@ function hideProcessing() {
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           ${group('adm_g', 'Administrative', ['adm_staff','adm_balance'])}
           ${group('aud_g', 'Audits', ['aud_cs','aud_tellers','aud_types','aud_customers'])}
-          ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber'])}
+          ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber','ict_archive'])}
           ${group('ops_g', 'Operations', module.tools.filter(t => t !== 'staff_roster'))}
         </div>`;
       }
@@ -3285,8 +3300,12 @@ function hideProcessing() {
   // short loading note; it re-renders by itself once the records arrive.
   function renderTool(tool) {
     historyNeededDuringRender = false;
+    renderAskedFrom = null;
     const html = renderToolContent(tool);
     if (historyNeededDuringRender && historyLoading) return `<div class="form-card"><div class="note" id="historyLoadingNote">Loading older records…</div></div>`;
+    if (activeArchiveCutoff && renderAskedFrom && renderAskedFrom < activeArchiveCutoff) {
+      return `<div class="note archive-note" style="margin-bottom:10px">Records up to ${fmtDate(`${dayBefore(activeArchiveCutoff)}T12:00:00`)} are archived — here they appear as "balance brought forward" totals. To see them in detail, open the archive file in the Archive Viewer (Administration → ICT Unit → Yearly Archive).</div>${html}`;
+    }
     return html;
   }
 
@@ -3545,7 +3564,7 @@ function hideProcessing() {
 
     let statementHtml = '';
     const isTellerAccount = customer?.accountType === 'staff_operational' && customer.linkedStaffId;
-    if (generated) { if (isTellerAccount) historyCovers(filter.from || null); else customerHistoryCovers(customer); }
+    if (generated) { if (isTellerAccount) historyCovers(filter.from || null); else { customerHistoryCovers(customer); const a = filter.from || HISTORY_ALL; if (!renderAskedFrom || a < renderAskedFrom) renderAskedFrom = a; } }
     if (generated && isTellerAccount) {
       // 2026-10-22: a teller's T-account statement is the teller's own
       // operations, from the teller account's side (see staffLedgerEvents).
@@ -5095,6 +5114,7 @@ function nextPaint() {
   }
 
   function renderAdminSub(tool) {
+    if (tool === 'ict_archive') return renderYearlyArchive();
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: 'daily' });
     const bar = renderPeriodBar();
     if (tool === 'adm_staff') return renderStaffManagement();
@@ -5156,6 +5176,224 @@ function nextPaint() {
     return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">${escapeHtml(TOOL_LABELS[tool])} Check</div><div class="note">Tick what has been checked today and add a note, then Save Check. Each check is recorded with your name and the date.</div><div class="stack" style="gap:6px;margin:8px 0">${items.map((it, i) => `<label class="ict-item"><input type="checkbox" data-ict-item="${i}"><span>${escapeHtml(it)}</span></label>`).join('')}</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input"></div></div><div class="cs2-button-row"><button id="ictSaveBtn" class="sheet-btn cs2-btn cs2-btn-solid">Save Check</button></div></div>${history}</div>`;
   }
 
+  // ---- 2026-10-23 Yearly archive (sql/2026-10-23-yearly-archive.sql) ----
+  // Admin flow: Preview → Download archive file (every record, checked
+  // against the database) → Archive now (one all-or-nothing database step
+  // that turns the year into "brought forward" totals). Restore puts an
+  // archived year back from its file. The Archive Viewer (archive.html)
+  // opens a file read-only, showing everything exactly as it was.
+  const ARCHIVE_TABLES = ['staff', 'staff_role_permissions', 'staff_temp_grants', 'staff_role_assignments', 'customers',
+    'customer_account_balances', 'customer_transactions', 'approval_requests', 'cod_submissions', 'cod_resolutions',
+    'debts', 'debt_repayments', 'audit_log', 'staff_cash_ledger', 'staff_profiles', 'ict_logs', 'ducess_archives'];
+  const archiveUi = { list: null, listCode: '', year: null, preview: null, saved: null, result: null, error: '' };
+
+  async function loadArchiveInfo() {
+    if (!isSupabaseApprovalMode() || !gateway.archive?.list || runtimeConfig.archiveView) return;
+    const res = await gateway.archive.list();
+    if (!res?.ok) { archiveUi.listCode = res?.error?.code || 'ERROR'; archiveUi.list = []; activeArchiveCutoff = null; return; }
+    archiveUi.list = res.data; archiveUi.listCode = '';
+    activeArchiveCutoff = res.data.filter(a => a.status === 'archived').map(a => String(a.cutoff).slice(0, 10)).sort().pop() || null;
+  }
+
+  // Which stored rows an archive with this cutoff covers (twins of the SQL).
+  const archiveSelect = {
+    approval_requests: (r, cut) => isSummarisedApproval({ type: r.request_type, status: r.status, payload: r.payload || {} }, cut),
+    customer_transactions: (r, cut) => r.customer_id != null && new Date(r.created_at) < new Date(`${cut}T00:00:00Z`),
+    staff_cash_ledger: (r, cut) => new Date(r.created_at) < new Date(`${cut}T00:00:00Z`),
+    audit_log: (r, cut) => new Date(r.created_at) < new Date(`${cut}T00:00:00Z`),
+  };
+  function archivedRowsOf(file, cut) {
+    const out = {};
+    Object.entries(archiveSelect).forEach(([t, pick]) => { out[t] = (file.tables[t] || []).filter(r => pick(r, cut)); });
+    return out;
+  }
+  // The file must hold exactly what the preview counted.
+  function checkArchiveFile(file, preview) {
+    const cut = String(preview.cutoff).slice(0, 10);
+    const rows = archivedRowsOf(file, cut);
+    const cents = (n) => Math.round(Number(n || 0) * 100);
+    const mine = {
+      approvals: { count: rows.approval_requests.length, amount: rows.approval_requests.reduce((s, r) => s + histNum(r.payload?.amount), 0) },
+      transactions: { count: rows.customer_transactions.length, amount: rows.customer_transactions.reduce((s, r) => s + (r.tx_type === 'credit' ? 1 : -1) * Number(r.amount || 0), 0) },
+      ledger: { count: rows.staff_cash_ledger.length, amount: rows.staff_cash_ledger.reduce((s, r) => s + Number(r.delta || 0), 0) },
+      audit: { count: rows.audit_log.length, amount: 0 },
+    };
+    const bad = Object.keys(mine).filter(k => mine[k].count !== Number(preview[k]?.count) || cents(mine[k].amount) !== cents(preview[k]?.amount));
+    return { ok: !bad.length, bad, rows };
+  }
+
+  async function gzipText(text) {
+    if (typeof CompressionStream === 'undefined') return new Blob([text], { type: 'application/json' });
+    return new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+  }
+  async function readArchiveFile(fileObj) {
+    const buf = new Uint8Array(await fileObj.arrayBuffer());
+    let text;
+    if (buf[0] === 0x1f && buf[1] === 0x8b) {
+      if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot open compressed archive files — use a current Chrome or Edge.');
+      text = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    } else text = new TextDecoder().decode(buf);
+    const file = JSON.parse(text);
+    if (file?.format !== 'ducess-archive' || !file.tables) throw new Error('This is not a DUCESS archive file.');
+    return file;
+  }
+  function downloadBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  }
+  // Plain (stored) zip of CSV files — opens anywhere, no library needed.
+  function makeZip(files) {
+    const enc = new TextEncoder(); const crcTable = makeZip.t ||= Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+    const crc32 = (u8) => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = crcTable[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+    const parts = []; const central = []; let offset = 0;
+    files.forEach(f => {
+      const name = enc.encode(f.name); const data = enc.encode(f.text); const crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(8, 0, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true);
+      parts.push(new Uint8Array(h.buffer), name, data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+      central.push(new Uint8Array(c.buffer), name);
+      offset += 30 + name.length + data.length;
+    });
+    const size = central.reduce((n, p) => n + p.length, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, size, true); e.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/zip' });
+  }
+  function toCsv(rows) {
+    if (!rows.length) return 'no records\n';
+    const cols = [...new Set(rows.flatMap(r => Object.keys(r)))];
+    const cell = (v) => { const s = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n') + '\n';
+  }
+
+  function renderYearlyArchive() {
+    if (runtimeConfig.archiveView) return `<div class="form-card"><div class="note">You are in the Archive Viewer (read only). Archiving and restoring are done in the live app.</div></div>`;
+    if (!isSupabaseApprovalMode()) return `<div class="form-card"><div class="note">The yearly archive works with the live (Supabase) database only.</div></div>`;
+    if (!archiveUi.list) { loadArchiveInfo().then(() => { if (state.ui.tool === 'ict_archive') renderWorkspace(); }); return `<div class="form-card"><div class="note">Loading archives…</div></div>`; }
+    if (archiveUi.listCode === 'ARCHIVE_UNSUPPORTED') return `<div class="form-card"><div class="cs2-title">Yearly Archive</div><div class="note">Run sql/2026-10-23-yearly-archive.sql in Supabase to use the yearly archive.</div></div>`;
+    const bizYear = Number(String(businessDate()).slice(0, 4));
+    const latest = (archiveUi.list || []).filter(a => a.status === 'archived').map(a => String(a.cutoff).slice(0, 10)).sort().pop() || '';
+    const years = []; for (let y = bizYear - 1; y >= bizYear - 10; y--) if (!latest || `${y + 1}-01-01` > latest) years.push(y);
+    if (!archiveUi.year || !years.includes(archiveUi.year)) archiveUi.year = years[0] || null;
+    const restoreTarget = (archiveUi.list || []).filter(a => a.status === 'archived').sort((a, b) => String(b.cutoff).localeCompare(String(a.cutoff)))[0];
+    const n = (v) => Number(v || 0).toLocaleString();
+    const listRows = (archiveUi.list || []).map((a, i) => `<tr><td>${i + 1}</td><td>Up to ${fmtDate(`${dayBefore(String(a.cutoff).slice(0, 10))}T12:00:00`)}</td><td>${fmtDateTime(a.archived_at)}</td><td>${escapeHtml(a.archived_by || '—')}</td><td>${n(a.stats?.approvals?.count)} requests · ${n(a.stats?.transactions?.count)} transactions</td><td>${a.status === 'archived' ? 'Archived' : `Restored ${fmtDateTime(a.restored_at)}`}</td><td>${restoreTarget && a.id === restoreTarget.id ? `<button class="sheet-btn secondary tiny-btn" id="archRestoreBtn">Restore…</button>` : ''}</td></tr>`).join('');
+    const p = archiveUi.preview;
+    const previewHtml = p ? `<div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>Records up to ${fmtDate(`${dayBefore(String(p.cutoff).slice(0, 10))}T12:00:00`)}</th><th>To archive</th><th>Becomes</th></tr></thead><tbody>
+        <tr><td>Approval requests (plain credits/debits, staff funding, cash receipts)</td><td>${n(p.approvals?.count)}</td><td>brought-forward totals per staff, account and type</td></tr>
+        <tr><td>Customer transactions</td><td>${n(p.transactions?.count)}</td><td>one brought-forward line per account and type</td></tr>
+        <tr><td>Staff cash ledger</td><td>${n(p.ledger?.count)}</td><td>one brought-forward line per staff and type</td></tr>
+        <tr><td>Audit log entries</td><td>${n(p.audit?.count)}</td><td>kept in the archive file only</td></tr>
+      </tbody></table></div><div class="note">Journals, charged postings, account openings, close of day and pending requests stay as they are. Every balance stays exactly the same.</div>` : '';
+    const ready = archiveUi.saved && p && archiveUi.saved.cutoff === String(p.cutoff).slice(0, 10);
+    const nothing = p && !Number(p.approvals?.count) && !Number(p.transactions?.count) && !Number(p.ledger?.count) && !Number(p.audit?.count);
+    return `<div class="stack">
+      <div class="form-card cs2-card"><div class="cs2-title">Yearly Archive</div>
+        <div class="note">Keeps the database small: a finished year's detail is saved to an archive file, and the database keeps "balance brought forward" totals for it. Balances, statements and reports for later dates are unchanged. Old years stay viewable from the archive file in the Archive Viewer, and an archived year can be restored.</div>
+        ${years.length ? `<div class="cs2-row"><div class="cs2-label">Archive up to</div><div class="cs2-input-wrap cs2-wide"><select id="archYear" class="entry-input">${years.map(y => `<option value="${y}" ${y === archiveUi.year ? 'selected' : ''}>31 December ${y}</option>`).join('')}</select></div></div>
+        <div class="cs2-button-row"><button id="archPreviewBtn" class="sheet-btn cs2-btn secondary">1. Preview</button>
+          <button id="archDownloadBtn" class="sheet-btn cs2-btn secondary" ${p && !nothing ? '' : 'disabled'}>2. Download archive file</button>
+          <button id="archRunBtn" class="sheet-btn cs2-btn cs2-btn-solid" ${ready && !nothing ? '' : 'disabled'}>3. Archive now</button></div>
+        ${nothing ? `<div class="note">Nothing to archive up to that date.</div>` : ''}
+        ${ready ? `<div class="note" style="border-left-color:#2e7d32 !important">Archive file saved and checked against the database (${n(p.approvals?.count)} requests, ${n(p.transactions?.count)} transactions). Keep the file somewhere safe before archiving — it is the only full copy of those records.</div>` : ''}` : `<div class="note">No finished year is left to archive.</div>`}
+        ${archiveUi.error ? `<div class="note" style="border-left-color:#c00000 !important">${escapeHtml(archiveUi.error)}</div>` : ''}
+        ${archiveUi.result ? `<div class="note" style="border-left-color:#2e7d32 !important">${archiveUi.result}</div>` : ''}
+        ${previewHtml}
+      </div>
+      <div class="table-card"><h3>Archives</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Period</th><th>Archived</th><th>By</th><th>Records</th><th>Status</th><th></th></tr></thead><tbody>${listRows || '<tr><td colspan="7">No archives yet</td></tr>'}</tbody></table></div>
+        <div class="cs2-button-row"><a class="sheet-btn cs2-btn secondary" href="archive.html" target="_blank" rel="noopener">Open Archive Viewer</a></div>
+        <input type="file" id="archRestoreFile" accept=".gz,.json" class="visually-hidden-file-input"></div>
+    </div>`;
+  }
+
+  function bindYearlyArchive() {
+    const cutoffOf = () => `${Number(archiveUi.year) + 1}-01-01`;
+    if (byId('archYear')) byId('archYear').onchange = (e) => { archiveUi.year = Number(e.target.value); archiveUi.preview = null; archiveUi.saved = null; archiveUi.error = ''; archiveUi.result = null; renderWorkspace(); };
+    if (byId('archPreviewBtn')) byId('archPreviewBtn').onclick = async () => {
+      archiveUi.error = ''; archiveUi.result = null; archiveUi.saved = null;
+      showProcessing('Checking what would be archived...');
+      try {
+        const res = await gateway.archive.stats(cutoffOf());
+        if (!res?.ok) archiveUi.error = res?.error?.message || 'Could not read the preview.';
+        else archiveUi.preview = res.data;
+      } finally { hideProcessing(); renderWorkspace(); }
+    };
+    if (byId('archDownloadBtn')) byId('archDownloadBtn').onclick = async () => {
+      const preview = archiveUi.preview; if (!preview) return;
+      archiveUi.error = ''; archiveUi.saved = null;
+      showProcessing('Saving all records to the archive file...');
+      try {
+        const tables = {};
+        for (const t of ARCHIVE_TABLES) {
+          const res = await gateway.archive.exportTable(t, (count) => { const el = byId('processingText'); if (el) el.textContent = `Saving records: ${t.replace(/_/g, ' ')} (${count.toLocaleString()})`; });
+          if (!res?.ok) { archiveUi.error = res?.error?.message || `Could not save ${t}.`; return; }
+          tables[t] = res.data;
+        }
+        const cut = String(preview.cutoff).slice(0, 10);
+        const file = { format: 'ducess-archive', version: 1, cutoff: cut, createdAt: new Date().toISOString(), createdBy: currentStaff()?.name || '', businessDate: businessDate(), preview, tables };
+        const check = checkArchiveFile(file, preview);
+        if (!check.ok) { archiveUi.error = `The file does not match the database (${check.bad.join(', ')} changed while saving). Nothing was archived — try again when no one is posting.`; return; }
+        const label = `to-${dayBefore(cut)}`;
+        downloadBlob(await gzipText(JSON.stringify(file)), `ducess-archive-${label}.json.gz`);
+        downloadBlob(makeZip(Object.entries(check.rows).map(([t, rows]) => ({ name: `${t}.csv`, text: toCsv(rows) }))), `ducess-archive-${label}-spreadsheets.zip`);
+        archiveUi.saved = { cutoff: cut };
+        recordIctLog('backup', [], `Archive file saved (records up to ${dayBefore(cut)})`).catch(() => {});
+      } catch (err) {
+        archiveUi.error = `Could not save the archive file: ${err?.message || err}`;
+      } finally { hideProcessing(); renderWorkspace(); }
+    };
+    if (byId('archRunBtn')) byId('archRunBtn').onclick = () => {
+      const preview = archiveUi.preview; if (!preview || !archiveUi.saved) return;
+      const upTo = fmtDate(`${dayBefore(String(preview.cutoff).slice(0, 10))}T12:00:00`);
+      confirmAction(`Archive all records up to ${upTo}? Their detail will be removed from the database and kept only in the archive file you saved (balances stay the same). This can be undone only by restoring from that file.`, async () => {
+        showProcessing('Archiving...');
+        try {
+          const res = await gateway.archive.archiveYear(String(preview.cutoff).slice(0, 10), preview, currentStaff()?.name || '');
+          if (!res?.ok) { archiveUi.error = res?.error?.message || 'Archive failed — nothing was changed.'; return; }
+          const s = res.data.summary_rows || {};
+          archiveUi.result = `Archived records up to ${upTo}: ${Number(preview.approvals?.count || 0).toLocaleString()} requests became ${Number(s.approvals || 0).toLocaleString()} brought-forward rows, ${Number(preview.transactions?.count || 0).toLocaleString()} transactions became ${Number(s.transactions || 0).toLocaleString()}. The freed space is reused for new records straight away; the Database Space figure drops after Supabase's routine clean-up (or run <code>vacuum full approval_requests, customer_transactions, staff_cash_ledger, audit_log;</code> in the Supabase SQL Editor).`;
+          archiveUi.preview = null; archiveUi.saved = null;
+          await reloadAfterArchiveChange();
+        } finally { hideProcessing(); renderWorkspace(); }
+      });
+    };
+    if (byId('archRestoreBtn')) byId('archRestoreBtn').onclick = () => byId('archRestoreFile')?.click();
+    if (byId('archRestoreFile')) byId('archRestoreFile').onchange = async (e) => {
+      const f = e.target.files?.[0]; e.target.value = '';
+      const target = (archiveUi.list || []).filter(a => a.status === 'archived').sort((a, b) => String(b.cutoff).localeCompare(String(a.cutoff)))[0];
+      if (!f || !target) return;
+      archiveUi.error = ''; archiveUi.result = null;
+      let file;
+      try { showProcessing('Reading the archive file...'); file = await readArchiveFile(f); }
+      catch (err) { hideProcessing(); archiveUi.error = err?.message || 'Could not read that file.'; renderWorkspace(); return; }
+      hideProcessing();
+      const cut = String(target.cutoff).slice(0, 10);
+      if (file.cutoff !== cut) { archiveUi.error = `That file is for records up to ${dayBefore(file.cutoff)}, but the archive to restore covers records up to ${dayBefore(cut)}.`; renderWorkspace(); return; }
+      const rows = archivedRowsOf(file, cut);
+      confirmAction(`Restore all records up to ${fmtDate(`${dayBefore(cut)}T12:00:00`)} from this file? The brought-forward totals are replaced by the original records.`, async () => {
+        showProcessing('Restoring...');
+        try {
+          const res = await gateway.archive.restore(target.id, rows, currentStaff()?.name || '', (done, total) => { const el = byId('processingText'); if (el) el.textContent = `Uploading records ${done.toLocaleString()} of ${total.toLocaleString()}`; });
+          if (!res?.ok) { archiveUi.error = `Restore failed — nothing was changed. ${res?.error?.message || ''}`; return; }
+          archiveUi.result = `Restored all records up to ${fmtDate(`${dayBefore(cut)}T12:00:00`)}.`;
+          await reloadAfterArchiveChange();
+        } finally { hideProcessing(); renderWorkspace(); }
+      });
+    };
+  }
+
+  // After an archive or restore, this device reloads everything (other
+  // devices notice the change through the deletion check and do the same).
+  async function reloadAfterArchiveChange() {
+    state.__sync = {}; state.__history = null; historyWindowCache = null; storageUsage = null;
+    save();
+    await syncAllSharedStateFromGateway();
+    await loadArchiveInfo();
+  }
+
   // 2026-10-23: database space gauge (Free plan limit 500 MB). Read once per
   // session (tiny request); admins are warned at login when it is high.
   const STORAGE_LIMIT_BYTES = 500 * 1024 * 1024;
@@ -5168,7 +5406,7 @@ function nextPaint() {
     return storageUsage;
   }
   function storageGaugeHtml() {
-    if (!isSupabaseApprovalMode()) return '';
+    if (!isSupabaseApprovalMode() || runtimeConfig.archiveView) return '';
     if (!storageUsage) { loadStorageUsage().then(() => { if (state.ui.tool === 'ict_backup') renderWorkspace(); }); return `<div class="form-card"><div class="note">Checking database space…</div></div>`; }
     if (!storageUsage.ok) return `<div class="form-card"><div class="cs2-title">Database Space</div><div class="note">${storageUsage.code === 'FUNCTION_MISSING' ? 'Run sql/2026-10-23-storage-gauge.sql in Supabase to see database space here.' : 'Could not read database space right now.'}</div></div>`;
     const mb = (b) => (Number(b || 0) / 1048576).toFixed(1);
@@ -5202,6 +5440,7 @@ function nextPaint() {
   }
 
   function bindAdminSub(tool) {
+    if (tool === 'ict_archive') { bindYearlyArchive(); return; }
     qq('[data-adm-review]').forEach(btn => btn.onclick = () => { state.ui.tool = btn.dataset.admReview; save(); renderWorkspace(); });
     if (['adm_balance','aud_cs','aud_tellers','aud_types','aud_customers'].includes(tool)) bindPeriodBalance();
     if (tool === 'ict_access') { bindStaffDirectory(); return; }

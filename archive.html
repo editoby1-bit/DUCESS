@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DUCESS Archive Viewer</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css?v=20261023a" />
+</head>
+<div id="globalProcessingOverlay" class="processing-overlay hidden">
+  <div class="processing-box">
+    <div class="spinner"></div>
+    <div id="processingText">Processing...</div>
+    <button id="processingCancelBtn" type="button" class="processing-cancel-btn hidden">Cancel</button>
+  </div>
+</div>
+<body>
+
+  <!-- LOGIN SCREEN -->
+  <div id="loginScreen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-brand">
+        <img src="logo.png" alt="Ducess" class="login-logo">
+        <div class="login-title">DUCESS ENTERPRISE</div>
+        <div class="login-sub">Staff Portal</div>
+      </div>
+      <div class="login-form" autocomplete="off">
+        <div class="login-field">
+          <label for="loginStaffId">Staff ID</label>
+          <input id="loginStaffId" class="entry-input" type="text" placeholder="e.g. ADMIN001" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" />
+        </div>
+        <div class="login-field">
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" class="entry-input" type="password" placeholder="Enter your password" autocomplete="new-password" autocorrect="off" autocapitalize="none" spellcheck="false" data-no-password-store="true" />
+        </div>
+        <div id="loginError" class="login-error hidden"></div>
+        <button id="loginBtn" class="login-btn">Sign In</button>
+      </div>
+    </div>
+  </div>
+  <!-- END LOGIN SCREEN -->
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <div class="logo"><img src="logo.png" style="width:70%;height:70%;object-fit:contain;border-radius:50%;"></div>
+        <div>
+          <div class="eyebrow">Duces Enterprise</div>
+        </div>
+      </div>
+      <h1 class="dashboard-title">DASHBOARD</h1>
+      <div class="top-actions">
+        <div class="staff-identity">
+          <span id="staffNameDisplay" class="staff-name-display"></span>
+          <span id="staffRoleDisplay" class="staff-role-display"></span>
+        </div>
+        
+        <button class="ghost-btn" id="btnCOD">Close of Day</button>
+        <button class="ghost-btn" id="btnAudit">Audit Trail</button>
+        <button id="btnThemeCycle" class="ghost-btn theme-cycle-btn">Theme: Classic</button>
+        <button id="btnLogout" class="logout-link">Logout</button>
+      </div>
+    </header>
+
+    <section class="hero-card hidden">
+      <div>
+        <div class="section-label">Dashboard</div>
+        <div class="hero-title">WELCOME TO DUCESS ENTERPRISE LEDGER WORKFLOW</div>
+        <div class="hero-sub">Please note that this application is very robust and can detect non-compliance and fraudulent activities. Transparency is encouraged.</div>
+      </div>
+      <div class="hero-stats" id="heroStats"></div>
+    </section>
+
+    <section class="module-grid" id="moduleGrid"></section>
+
+    <section class="workspace-card">
+      <div class="workspace-head">
+        <div>
+          <div class="section-label" id="workspaceLabel">Customer Service</div>
+          <h2 id="workspaceTitle">Check Balance</h2>
+        </div>
+        <div class="workspace-right">
+          <input id="globalNameSearch" class="global-search" placeholder="Search customer by name" />
+        </div>
+      </div>
+      <div id="workspace"></div>
+    </section>
+  </div>
+
+  <div id="modalBack" class="modal-back hidden">
+    <div class="modal spec-color-scheme sheet-uniform">
+      <div class="modal-head">
+        <h3 id="modalTitle">Modal</h3>
+        <button class="icon-btn" id="modalClose">✕</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+      <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <!-- ARCHIVE VIEWER: pick an archive file, then the normal app runs on it, read-only. -->
+  <div id="archivePicker" style="position:fixed;inset:0;z-index:20000;display:flex;align-items:center;justify-content:center;background:#1d3557">
+    <div style="background:#fff;border-radius:16px;padding:28px;max-width:520px;width:calc(100% - 32px);font-family:Inter,system-ui,sans-serif">
+      <h2 style="margin:0 0 6px">DUCESS Archive Viewer</h2>
+      <p style="margin:0 0 14px;color:#444;line-height:1.5">Open an archive file (<code>ducess-archive-to-….json.gz</code>) saved from Administration → ICT Unit → Yearly Archive. Everything is shown exactly as it was when the file was saved, read-only. Nothing here changes the live database.</p>
+      <input type="file" id="archiveFileInput" accept=".gz,.json" style="margin:6px 0 12px">
+      <div id="archivePickerMsg" style="color:#444;min-height:1.4em"></div>
+      <p style="margin:14px 0 0;color:#666;font-size:13px">After opening, sign in with any Staff ID from the archive (any password) to view the records as that staff member.</p>
+    </div>
+  </div>
+  <script src="src/data/runtime/ducess-archive-client.js?v=20261023a"></script>
+  <script>
+  (function () {
+    const msg = (t) => { document.getElementById('archivePickerMsg').textContent = t; };
+    function load(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load ' + src)); document.body.appendChild(s); }); }
+    async function readFile(f) {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let text;
+      if (buf[0] === 0x1f && buf[1] === 0x8b) {
+        if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot open compressed archive files — use a current Chrome or Edge.');
+        text = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+      } else text = new TextDecoder().decode(buf);
+      const file = JSON.parse(text);
+      if (file?.format !== 'ducess-archive' || !file.tables) throw new Error('This is not a DUCESS archive file.');
+      return file;
+    }
+    document.getElementById('archiveFileInput').onchange = async (e) => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      try {
+        msg('Opening ' + f.name + '…');
+        const file = await readFile(f);
+        try { localStorage.removeItem('ducess_archive_view'); } catch (_) {}
+        await new Promise(res => { try { const r = indexedDB.open('ducess_cache', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => { try { const tx = r.result.transaction('kv', 'readwrite'); tx.objectStore('kv').delete('ducess_archive_view__bulk'); tx.oncomplete = tx.onerror = () => res(); } catch (_) { res(); } }; r.onerror = () => res(); } catch (_) { res(); } });
+        window.__DUCESS_CONFIG__ = { storageKey: 'ducess_archive_view', historyWindow: false, archiveView: { cutoff: file.cutoff, createdAt: file.createdAt, createdBy: file.createdBy, fileName: f.name } };
+        window.supabase = { createClient: () => window.DucessArchiveClient.create(file.tables) };
+        await load('src/data/runtime/ducess-config.js?v=20261023a');
+        await load('src/data/runtime/ducess-gateway.js?v=20261023a');
+        await load('app.js?v=20261023a');
+        document.getElementById('archivePicker').remove();
+      } catch (err) { msg(err && err.message ? err.message : String(err)); }
+    };
+  })();
+  </script>
+</body>
+</html>
