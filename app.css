@@ -13271,3 +13271,52 @@ input.date-mirror-native {
   text-transform:none !important;letter-spacing:0 !important;line-height:1.3;cursor:pointer;border-radius:0 !important;width:100%;box-sizing:border-box}
 .sheet-uniform label.ict-item input[type="checkbox"]{width:16px !important;height:16px !important;min-width:16px;min-height:0 !important;margin:0 !important;padding:0 !important;flex:0 0 16px;accent-color:#c00000}
 .sheet-uniform label.ict-item span{flex:1 1 auto}
+
+/* ===================================================================
+   2026-10-23 client: compact layout (desktop only — the mobile view is
+   left exactly as it was).
+   - Sidebar items and pop-up windows 30% smaller.
+   - Input boxes sized to the data they hold (11-digit phone/NIN/BVN,
+     short account numbers, amounts, dates) instead of long empty boxes.
+   - Account Opening: the account-type list opens inside the form.
+   =================================================================== */
+@media (min-width: 901px) {
+  #workspace .tool-tabs .tool-tab,
+  #workspace .tool-tabs .tellering-tools-only > .tool-tab { font-size: 8.4px !important; }
+  #workspace .tool-tabs .tool-group-toggle,
+  #workspace .tool-tabs .tool-column-title { font-size: 7.7px !important; }
+
+  .modal-back .modal { zoom: 0.7; }
+
+  /* sized to the data */
+  #workspace .workspace-tool-body .digit-11-input,
+  #workspace .workspace-tool-body input[id$="Phone"],
+  #workspace .workspace-tool-body input[id$="Nin"],
+  #workspace .workspace-tool-body input[id$="Bvn"] { width: calc(11ch + 22px) !important; min-width: 0 !important; flex: 0 0 auto !important; }
+  #workspace .workspace-tool-body input[maxlength="4"] { width: calc(4ch + 22px) !important; min-width: 0 !important; flex: 0 0 auto !important; }
+  #workspace .workspace-tool-body input[maxlength="6"] { width: calc(6ch + 22px) !important; min-width: 0 !important; flex: 0 0 auto !important; }
+  #workspace .workspace-tool-body input[maxlength="12"] { width: calc(8ch + 22px) !important; min-width: 0 !important; flex: 0 0 auto !important; }
+  #workspace .workspace-tool-body #txAmount, #workspace .workspace-tool-body #itrAmount, #workspace .workspace-tool-body #oeAmount,
+  #workspace .workspace-tool-body #staffCreditAmount, #workspace .workspace-tool-body #journalAmount,
+  #workspace .workspace-tool-body input[type="number"] { width: calc(13ch + 22px) !important; min-width: 0 !important; flex: 0 0 auto !important; }
+  #workspace .workspace-tool-body input[type="date"] { width: calc(10ch + 44px) !important; min-width: 0 !important; flex: 0 0 auto !important; }
+  #workspace .workspace-tool-body .date-mirror-display { width: calc(10ch + 26px) !important; min-width: 0 !important; flex: 0 0 auto !important; }
+  #workspace .workspace-tool-body select { width: auto !important; min-width: 0 !important; max-width: 100%; flex: 0 0 auto !important; }
+  /* the boxes' wrappers shrink with them */
+  #workspace .workspace-tool-body .cs2-input-wrap:has(> .digit-11-input),
+  #workspace .workspace-tool-body .cs2-input-wrap:has(> input[maxlength]),
+  #workspace .workspace-tool-body .cs2-input-wrap:has(> input[type="number"]),
+  #workspace .workspace-tool-body .cs2-input-wrap:has(> input[type="date"]),
+  #workspace .workspace-tool-body .cs2-input-wrap:has(> select) { width: auto !important; flex: 0 0 auto !important; min-width: 0 !important; }
+}
+
+/* Account Opening — account-type list opens in place (all screen sizes) */
+#workspace .acct-type-picker { display: flex !important; flex-direction: column; align-items: flex-start; gap: 4px; width: auto !important; max-width: 100%; flex: 1 1 auto !important; min-width: 0 !important; }
+#workspace .acct-type-picker button.acct-type-current { background: #fbecc8 !important; border: 1px solid #d8c896 !important; color: #1b1515 !important; padding: 5px 10px !important; font-size: 12px !important; font-weight: 600 !important; cursor: pointer; border-radius: 4px !important; text-align: left; box-shadow: none !important; min-height: 0 !important; height: auto !important; width: auto !important; }
+#workspace .acct-type-picker button.acct-type-current:hover, #workspace .acct-type-picker button.acct-type-current:focus-visible { border-color: #8a6d1f !important; outline: none; }
+#workspace .acct-type-caret { font-size: .8em; margin-left: 6px; }
+#workspace .acct-type-options { display: flex; flex-wrap: wrap !important; gap: 4px; max-width: 420px; }
+#workspace .acct-type-options.hidden { display: none !important; }
+#workspace .acct-type-picker button.acct-type-option { background: #fff !important; border: 1px solid #d8c896 !important; color: #1b1515 !important; padding: 3px 8px !important; font-size: 11px !important; font-weight: 500 !important; cursor: pointer; border-radius: 4px !important; box-shadow: none !important; min-height: 0 !important; height: auto !important; width: auto !important; }
+#workspace .acct-type-picker button.acct-type-option.active { background: #1b1515 !important; color: #fff !important; border-color: #1b1515 !important; }
+#workspace .acct-type-picker button.acct-type-option:hover { border-color: #8a6d1f !important; }
