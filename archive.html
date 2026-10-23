@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="app.css?v=20261023a" />
+  <link rel="stylesheet" href="app.css?v=20261023b" />
 </head>
 <div id="globalProcessingOverlay" class="processing-overlay hidden">
   <div class="processing-box">
@@ -111,7 +111,7 @@
       <p style="margin:14px 0 0;color:#666;font-size:13px">After opening, sign in with any Staff ID from the archive (any password) to view the records as that staff member.</p>
     </div>
   </div>
-  <script src="src/data/runtime/ducess-archive-client.js?v=20261023a"></script>
+  <script src="src/data/runtime/ducess-archive-client.js?v=20261023b"></script>
   <script>
   (function () {
     const msg = (t) => { document.getElementById('archivePickerMsg').textContent = t; };
@@ -136,9 +136,9 @@
         await new Promise(res => { try { const r = indexedDB.open('ducess_cache', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => { try { const tx = r.result.transaction('kv', 'readwrite'); tx.objectStore('kv').delete('ducess_archive_view__bulk'); tx.oncomplete = tx.onerror = () => res(); } catch (_) { res(); } }; r.onerror = () => res(); } catch (_) { res(); } });
         window.__DUCESS_CONFIG__ = { storageKey: 'ducess_archive_view', historyWindow: false, archiveView: { cutoff: file.cutoff, createdAt: file.createdAt, createdBy: file.createdBy, fileName: f.name } };
         window.supabase = { createClient: () => window.DucessArchiveClient.create(file.tables) };
-        await load('src/data/runtime/ducess-config.js?v=20261023a');
-        await load('src/data/runtime/ducess-gateway.js?v=20261023a');
-        await load('app.js?v=20261023a');
+        await load('src/data/runtime/ducess-config.js?v=20261023b');
+        await load('src/data/runtime/ducess-gateway.js?v=20261023b');
+        await load('app.js?v=20261023b');
         document.getElementById('archivePicker').remove();
       } catch (err) { msg(err && err.message ? err.message : String(err)); }
     };
