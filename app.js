@@ -200,7 +200,7 @@
       // funds itself via Cash Receipt (unchanged). Admin still has
       // staff_credit via the 'administration' module below — this removal
       // is Treasury-only, per client instruction.
-      tools: ['intra_transfer']
+      tools: ['credit','intra_transfer']
     },
     tellering: {
       title: 'Tellering',
@@ -298,7 +298,7 @@
     // Posting" (journal_register) removed from Treasury entirely — Treasury
     // funds tellers via Non Cash (still role-agnostic), just without a
     // Journal Register view of their own.
-    cash_officer: ['intra_transfer'],
+    cash_officer: ['credit','intra_transfer'],
     teller: ['check_balance','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer'],
     // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
     // own totals view ("my_approvals" — how much they've approved, by date)
@@ -3225,6 +3225,7 @@ function hideProcessing() {
         // Posting" (journal_register) removed from Treasury entirely — only
         // Non Cash Posting remains as a group here.
         const groupDefs = [
+          ['direct', 'Direct Posting', ['credit']],
           ['non_cash', 'Non Cash Posting', ['intra_transfer']]
         ];
         const groupHtml = groupDefs.map(([key, label, tools]) => {
