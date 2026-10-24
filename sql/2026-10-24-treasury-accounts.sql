@@ -80,19 +80,25 @@ do $$
 declare
   r record;
   v_adj numeric;
+  v_acct uuid;
 begin
   for r in select * from public.ducess_treasury_candidates() loop
     v_adj := r.shown_balance - r.transactions_balance;
+    -- the same account key the account's existing transactions use
+    select t.account_id into v_acct from public.customer_transactions t
+     where t.customer_id = r.id and t.account_id is not null order by t.created_at desc limit 1;
+    v_acct := coalesce(v_acct, r.id);
     if v_adj <> 0 then
       insert into public.customer_transactions (customer_id, account_id, tx_type, amount, details, posted_by, approved_by, effective_at, created_at, balance_after)
-      values (r.id, r.id, case when v_adj > 0 then 'credit' else 'debit' end, abs(v_adj),
+      values (r.id, v_acct, case when v_adj > 0 then 'credit' else 'debit' end, abs(v_adj),
               'Treasury balance carried over (now a business Treasury account)', 'System', 'System', now(), now(), r.shown_balance);
     end if;
     insert into public.customer_account_balances (account_id, book_balance, updated_at)
-    values (r.id, r.shown_balance, now())
+    values (v_acct, r.shown_balance, now())
     on conflict (account_id) do update set book_balance = excluded.book_balance, updated_at = excluded.updated_at;
     update public.customers set account_type = 'treasury', linked_staff_id = null where id = r.id;
-    if to_regclass('public.customer_accounts') is not null then
+    if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'customer_accounts' and column_name = 'customer_id')
+       and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'customer_accounts' and column_name = 'account_type') then
       execute 'update public.customer_accounts set account_type = ''treasury'' where customer_id = $1' using r.id;
     end if;
     insert into public.audit_log (action_type, entity_type, entity_id, metadata, created_at)
