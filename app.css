@@ -13286,7 +13286,7 @@ input.date-mirror-native {
   #workspace .tool-tabs .tool-group-toggle,
   #workspace .tool-tabs .tool-column-title { font-size: 7.7px !important; }
 
-  #modalBack.modal-back .modal { zoom: 0.37 !important; } /* 2026-10-25 client: pop-ups a further 30% smaller (0.525 x 0.7) */
+  .modal-back .modal { zoom: 0.7; }
 
   /* sized to the data */
   #workspace .workspace-tool-body .digit-11-input,
@@ -13320,3 +13320,16 @@ input.date-mirror-native {
 #workspace .acct-type-picker button.acct-type-option { background: #fff !important; border: 1px solid #d8c896 !important; color: #1b1515 !important; padding: 3px 8px !important; font-size: 11px !important; font-weight: 500 !important; cursor: pointer; border-radius: 4px !important; box-shadow: none !important; min-height: 0 !important; height: auto !important; width: auto !important; }
 #workspace .acct-type-picker button.acct-type-option.active { background: #1b1515 !important; color: #fff !important; border-color: #1b1515 !important; }
 #workspace .acct-type-picker button.acct-type-option:hover { border-color: #8a6d1f !important; }
+
+/* 2026-10-25 client: the forms/work areas that open beside the sidebar
+   (Credit Entry, Account Opening, reports, etc.) are made ~47% smaller
+   overall (25% then a further 30%: 0.75 x 0.7 = 0.525). Desktop only; the
+   sidebar and the pop-up windows are not touched. max-width keeps the form
+   from stretching to fill the column at the smaller scale. */
+@media (min-width: 901px) {
+  #workspace .workspace-tool-body {
+    zoom: 0.525;
+    max-width: 945px !important;
+    margin: 0 !important;
+  }
+}
