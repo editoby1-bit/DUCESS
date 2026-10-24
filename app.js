@@ -180,7 +180,7 @@
       // universal (see hasPermission's free-tool list) — every staff role
       // needs somewhere to reach it, and this module is already the one
       // every role can open (via check_balance).
-      tools: ['check_balance','account_opening','account_maintenance','account_reactivation','my_statement']
+      tools: ['check_balance','account_opening','account_maintenance','account_reactivation']
     },
     cash_officer: {
       title: 'Treasury',
@@ -200,13 +200,13 @@
       // funds itself via Cash Receipt (unchanged). Admin still has
       // staff_credit via the 'administration' module below — this removal
       // is Treasury-only, per client instruction.
-      tools: ['intra_transfer','cash_receipt','my_statement']
+      tools: ['intra_transfer']
     },
     tellering: {
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','debit','credit','journal_debit','journal_credit','journal_register','intra_transfer','my_statement']
+      tools: ['check_balance','debit','credit','journal_debit','journal_credit','journal_register','intra_transfer']
     },
     approvals: {
       title: 'Approval',
@@ -235,7 +235,7 @@
       // Teller and Overall Balance moved to Approval -> Daily/Weekly/
       // Monthly/Yearly Balances. Income & Expense Balance stays here too
       // because it also carries the Create Account / Post into Account forms.
-      tools: ['central_close_day','cash_receipt','staff_credit','my_statement','operational_posting','operational_accounts','staff_roster','transaction_summary','permissions']
+      tools: ['central_close_day','cash_receipt','staff_credit','operational_posting','operational_accounts','staff_roster','transaction_summary','permissions']
     },
     balances: {
       title: 'Balances',
@@ -298,14 +298,14 @@
     // Posting" (journal_register) removed from Treasury entirely — Treasury
     // funds tellers via Non Cash (still role-agnostic), just without a
     // Journal Register view of their own.
-    cash_officer: ['intra_transfer','cash_receipt','my_statement'],
-    teller: ['check_balance','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','my_statement'],
+    cash_officer: ['intra_transfer'],
+    teller: ['check_balance','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer'],
     // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
     // own totals view ("my_approvals" — how much they've approved, by date)
     // rather than the cash statement everyone else gets, since they never
     // hold a cash account themselves.
     approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary','my_statement'],
+    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory']
   };
 
@@ -3179,7 +3179,6 @@ function hideProcessing() {
           <div class="tool-column-title tellering-tools-only-title">Tellering Tools</div>
           ${toolBtn('check_balance')}
           ${groupHtml}
-          ${toolBtn('my_statement')}
         </div>`;
       }
       if (state.ui.module === 'administration') {
@@ -3207,9 +3206,8 @@ function hideProcessing() {
         };
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           ${toolBtn('approval_queue')}
-          ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close'])}
-          ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals'])}
-          ${group('appr_admin', 'Administration', ['appr_op_entry','appr_op_account'])}
+          ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close','appr_op_account'])}
+          ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals','appr_op_entry'])}
           ${BALANCE_PERIODS.map(([pk, pl]) => {
             const keys = BALANCE_REPORTS.map(([rk]) => `balp_${pk}_${rk}`);
             const isOpen = !!state.ui.tellerGroupOpen[`balp_${pk}`] || keys.includes(state.ui.tool);
@@ -3236,9 +3234,26 @@ function hideProcessing() {
         }).join('');
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
-          ${toolBtn('cash_receipt')}
           ${groupHtml}
-          ${toolBtn('my_statement')}
+        </div>`;
+      }
+      if (state.ui.module === 'customer_service') {
+        // 2026-10-24 (client design sheet): Account Opening expands in the
+        // sidebar like every other group; each account type opens the same
+        // Account Opening form for that type. Everything else is unchanged.
+        const toolBtn = (t) => module.tools.includes(t) ? `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${TOOL_LABELS[t]}</button>` : '';
+        state.ui.tellerGroupOpen ||= {};
+        const openingTypes = [['customer','Customer Account'],['staff_salary','Staff Account'],['income','Income Account'],['expense','Expenses Account'],['staff_operational','Teller Account'],['treasury','Treasury Account']];
+        const curOpenType = state.ui.tool === 'account_opening' ? ((state.ui.accountOpeningDraft || {}).accountType || 'customer') : '';
+        const openingOpen = !!state.ui.tellerGroupOpen.cs_opening || state.ui.tool === 'account_opening';
+        const canOpen = hasPermission('account_opening');
+        const openingGroup = module.tools.includes('account_opening') ? `<button type="button" class="tool-group-toggle ${openingOpen ? 'open' : ''}" data-posting-group="cs_opening">${TOOL_LABELS.account_opening} <span class="tool-group-caret">${openingOpen ? '▾' : '▸'}</span></button>
+          <div class="tool-group-body ${openingOpen ? '' : 'hidden'}">${openingTypes.map(([v, l]) => `<button class="tool-tab ${curOpenType===v?'active':''}" data-open-acct-type="${v}" ${canOpen?'':'disabled'}>${l}</button>`).join('')}</div>` : '';
+        return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
+          ${toolBtn('check_balance')}
+          ${openingGroup}
+          ${toolBtn('account_maintenance')}
+          ${toolBtn('account_reactivation')}
         </div>`;
       }
       // SURGICAL CHANGE 2026-10-16 (client: uniform design across the
@@ -3311,6 +3326,28 @@ function hideProcessing() {
         return;
       }
       if (state.ui.tool === nextTool) smoothScrollToOpenedSegment('.workspace-tool-body');
+    });
+    qq('[data-open-acct-type]').forEach(btn => btn.onclick = () => {
+      const type = btn.dataset.openAcctType;
+      const draft = state.ui.accountOpeningDraft ||= {};
+      const isActive = state.ui.tool === 'account_opening' && (draft.accountType || 'customer') === type;
+      if (isActive) {
+        state.ui.tool = null;
+      } else {
+        if ((draft.accountType || 'customer') !== type) {
+          draft.accountType = type;
+          draft.opKind = type === 'staff_operational' ? 'teller' : '';
+          draft.name = '';
+          draft.linkedStaffId = '';
+          draft.accountNumber = '';
+        }
+        state.ui.tool = 'account_opening';
+        state.ui.audAccountKind = '';
+      }
+      state.ui.modalToggleTool = null;
+      save();
+      renderWorkspace();
+      if (state.ui.tool === 'account_opening') smoothScrollToOpenedSegment('.workspace-tool-body');
     });
     if (state.ui.tool) bindToolHandlers();
   }
@@ -3429,30 +3466,8 @@ function hideProcessing() {
     ).join('');
     return `
       <div class="form-card cs2-card opening-card">
-        <div class="cs2-title">Account Opening</div>
+        <div class="cs2-title">Account Opening — ${({customer:'Customer Account',staff_salary:'Staff Account',income:'Income Account',expense:'Expenses Account',staff_operational:'Teller Account',treasury:'Treasury Account'})[acctType] || 'Customer Account'}</div>
         <div class="cs2-stack">
-          <div class="cs2-row">
-            <div class="cs2-label">Account Type</div>
-            <div class="cs2-input-wrap cs2-wide acct-type-picker">
-              ${(() => {
-                // 2026-10-23 (client): not a drop-down — the list opens inside
-                // the form, pushing the fields below down instead of covering them.
-                const cur = isStaffOp ? 'teller_account' : (acctType === 'treasury' ? 'treasury_account' : acctType);
-                const opts = [['customer', 'Customer Account'], ['teller_account', 'Teller Account'], ['treasury_account', 'Treasury Account'], ['staff_salary', 'Staff Salary Account'], ['expense', 'Expense Account'], ['income', 'Income Account']];
-                const curLabel = (opts.find(o => o[0] === cur) || opts[0])[1];
-                return `<button type="button" id="openAccountTypeBtn" class="acct-type-current" aria-expanded="false">${curLabel} <span class="acct-type-caret">▸</span></button>
-                <div id="openAccountTypeOptions" class="acct-type-options hidden">${opts.map(([v, l]) => `<button type="button" class="acct-type-option ${v === cur ? 'active' : ''}" data-acct-type="${v}">${l}</button>`).join('')}</div>`;
-              })()}
-              <select id="openAccountType" class="entry-input cs2-input hidden" aria-hidden="true" tabindex="-1">
-                <option value="customer"          ${acctType==='customer'          ?'selected':''}>Customer Account</option>
-                <option value="teller_account"    ${isStaffOp                      ?'selected':''}>Teller Account</option>
-                <option value="treasury_account"  ${acctType==='treasury'          ?'selected':''}>Treasury Account</option>
-                <option value="staff_salary"      ${acctType==='staff_salary'      ?'selected':''}>Staff Salary Account</option>
-                <option value="expense"           ${acctType==='expense'           ?'selected':''}>Expense Account</option>
-                <option value="income"            ${acctType==='income'            ?'selected':''}>Income Account</option>
-              </select>
-            </div>
-          </div>
           <div class="cs2-row">
             <div class="cs2-label">${needsStaffLink ? 'Account Display Name' : 'Account Name'}</div>
             <div class="cs2-input-wrap cs2-wide">

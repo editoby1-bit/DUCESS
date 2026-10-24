@@ -13286,7 +13286,7 @@ input.date-mirror-native {
   #workspace .tool-tabs .tool-group-toggle,
   #workspace .tool-tabs .tool-column-title { font-size: 7.7px !important; }
 
-  .modal-back .modal { zoom: 0.7; }
+  .modal-back .modal { zoom: 0.525; } /* 2026-10-24 client: pop-ups a further 25% smaller (0.7 x 0.75) */
 
   /* sized to the data */
   #workspace .workspace-tool-body .digit-11-input,
