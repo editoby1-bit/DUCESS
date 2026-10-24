@@ -2207,6 +2207,19 @@ if (approvalRecord.type === 'float_topup') {
     return syncDebtBalancesFromGateway();
   }
 
+  // 2026-10-24: Treasury accounts are business accounts with real
+  // transactions — refresh the business-account side of these postings.
+  if (approvalRecord.type === 'cash_receipt' || approvalRecord.type === 'inter_staff_credit') {
+    const ids = approvalRecord.type === 'cash_receipt'
+      ? [enrichedPayload.treasuryAccountId]
+      : [enrichedPayload.sourceAccountId, enrichedPayload.targetAccountId];
+    for (const id of ids.filter(Boolean)) {
+      const c = (state.customers || []).find(x => x.id === id);
+      if (c && c.accountType !== 'staff_operational') await syncCustomerFromGateway({ customerId: c.id, accountNumber: c.accountNumber });
+    }
+    return defaultResultOk(true);
+  }
+
   return defaultResultOk(null);
 }
 
@@ -2580,6 +2593,15 @@ if (approvalRecord.type === 'float_topup') {
         // Credit Cash Officer's own operational account balance — recorded in staff_cash_ledger
         // The frontend getStaffOperationalBalance reads from state.approvals directly,
         // so no separate ledger entry needed in local mode.
+        // 2026-10-24: a receipt into a business Treasury account is a real
+        // credit on that account.
+        const treasury = (state.customers || []).find(c => c.id === (req.payload.treasuryAccountId || req.payload.operationalAccountId) && c.accountType === 'treasury');
+        if (treasury) {
+          const amt = Number(req.payload.amount || 0);
+          treasury.transactions ||= [];
+          treasury.transactions.push(txObj('credit', amt, String(req.payload.note || '').trim() || `Cash received${req.payload.receivedFromName ? ' from ' + req.payload.receivedFromName : ''}`, req.requestedByName, req.requestedBy, currentStaff()?.name || '', req.payload.receivedFromName || '', req.payload.date));
+          recalcCustomerBalance(treasury);
+        }
         break;
       }
       case 'inter_staff_credit': {
@@ -2602,6 +2624,17 @@ if (approvalRecord.type === 'float_topup') {
             src.transactions ||= [];
             src.transactions.push(txObj('debit', fundAmount, fundDetails, req.requestedByName, req.requestedBy, currentStaff()?.name || '', req.payload.targetAccountName || '', req.payload.date));
             recalcCustomerBalance(src);
+          }
+        }
+        // 2026-10-24: money sent from a staff account into a business
+        // account (e.g. the Till into a Treasury account) is a real credit there.
+        {
+          const dst = (state.customers || []).find(c => c.id === req.payload.targetAccountId || (req.payload.targetAccountNumber && c.accountNumber === req.payload.targetAccountNumber));
+          if (dst && dst.accountType !== 'staff_operational') {
+            const amt = Number(req.payload.amount || 0);
+            dst.transactions ||= [];
+            dst.transactions.push(txObj('credit', amt, String(req.payload.note || '').trim() || `Transfer from ${req.payload.sourceAccountName || 'staff account'}`, req.requestedByName, req.requestedBy, currentStaff()?.name || '', req.payload.sourceAccountName || '', req.payload.date));
+            recalcCustomerBalance(dst);
           }
         }
         break;
@@ -3232,6 +3265,7 @@ function hideProcessing() {
         state.ui.tool = null;
       } else {
         state.ui.tool = nextTool;
+        state.ui.audAccountKind = '';
         if (nextTool === 'staff_directory') {
           // Always re-fetch fresh on entry — a newly approved staff_salary
           // account (or a status change) shouldn't be masked by a stale cache.
@@ -3381,9 +3415,12 @@ function hideProcessing() {
     const isStaffSalary = acctType === 'staff_salary';
     const needsStaffLink = isStaffOp; // salary no longer linked to staff
     const isSystemAssigned = acctType !== 'customer';
-    // Teller / Treasury Account (customer-service-opened, 2026-10-11): both
-    // are the 'staff_operational' account type; opKind says which one.
-    const opKind = openingDraft.opKind === 'treasury' ? 'treasury' : 'teller';
+    // Teller Account (customer-service-opened, 2026-10-11) is the
+    // 'staff_operational' type, linked to one teller. 2026-10-24 (client):
+    // a Treasury Account is no longer linked to a staff member — it is a
+    // business account ('treasury') that money flows in and out of like a
+    // customer account.
+    const opKind = 'teller';
     const staffOptions = (state.staff || [])
       .filter(s => s.is_active !== false)
       .filter(s => !isStaffOp || isEligibleForOperationalAccount(s, opKind))
@@ -3400,7 +3437,7 @@ function hideProcessing() {
               ${(() => {
                 // 2026-10-23 (client): not a drop-down — the list opens inside
                 // the form, pushing the fields below down instead of covering them.
-                const cur = isStaffOp ? (opKind === 'treasury' ? 'treasury_account' : 'teller_account') : acctType;
+                const cur = isStaffOp ? 'teller_account' : (acctType === 'treasury' ? 'treasury_account' : acctType);
                 const opts = [['customer', 'Customer Account'], ['teller_account', 'Teller Account'], ['treasury_account', 'Treasury Account'], ['staff_salary', 'Staff Salary Account'], ['expense', 'Expense Account'], ['income', 'Income Account']];
                 const curLabel = (opts.find(o => o[0] === cur) || opts[0])[1];
                 return `<button type="button" id="openAccountTypeBtn" class="acct-type-current" aria-expanded="false">${curLabel} <span class="acct-type-caret">▸</span></button>
@@ -3408,8 +3445,8 @@ function hideProcessing() {
               })()}
               <select id="openAccountType" class="entry-input cs2-input hidden" aria-hidden="true" tabindex="-1">
                 <option value="customer"          ${acctType==='customer'          ?'selected':''}>Customer Account</option>
-                <option value="teller_account"    ${isStaffOp && opKind==='teller'   ?'selected':''}>Teller Account</option>
-                <option value="treasury_account"  ${isStaffOp && opKind==='treasury' ?'selected':''}>Treasury Account</option>
+                <option value="teller_account"    ${isStaffOp                      ?'selected':''}>Teller Account</option>
+                <option value="treasury_account"  ${acctType==='treasury'          ?'selected':''}>Treasury Account</option>
                 <option value="staff_salary"      ${acctType==='staff_salary'      ?'selected':''}>Staff Salary Account</option>
                 <option value="expense"           ${acctType==='expense'           ?'selected':''}>Expense Account</option>
                 <option value="income"            ${acctType==='income'            ?'selected':''}>Income Account</option>
@@ -3430,7 +3467,7 @@ function hideProcessing() {
             <div class="cs2-label">Link to Staff Member</div>
             <div class="cs2-input-wrap cs2-wide">
               <select id="openLinkedStaff" class="entry-input cs2-input">
-                <option value="">— Select ${opKind === 'treasury' ? 'Treasury' : 'Teller'} Staff Member —</option>
+                <option value="">— Select Teller Staff Member —</option>
                 ${staffOptions}
               </select>
             </div>
@@ -3468,7 +3505,7 @@ function hideProcessing() {
             <input id="openPhoto" class="entry-input cs-sheet-input hidden-photo-input" type="file" accept="image/*">
             <div id="openPhotoStatus" class="cs2-note-box">No photo selected</div>
           </div>
-          ${isStaffSalary ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number:&nbsp;<strong>Loading…</strong></div>` : ''}` : `${(acctType === 'staff_operational' || acctType === 'expense' || acctType === 'income') ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number:&nbsp;<strong>Loading…</strong></div>` : ''}`}
+          ${isStaffSalary ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number:&nbsp;<strong>Loading…</strong></div>` : ''}` : `${(acctType === 'staff_operational' || acctType === 'treasury' || acctType === 'expense' || acctType === 'income') ? `<div class="cs2-note-box" id="openAccountNumberPreview" data-preview-type="${acctType}">Account Number:&nbsp;<strong>Loading…</strong></div>` : ''}`}
           <div class="cs2-button-row">
             <button id="submitOpening" class="sheet-btn cs2-btn cs2-btn-solid">Submit for Approval</button>
           </div>
@@ -3715,7 +3752,7 @@ function hideProcessing() {
     const accountPanelTitle = isCredit ? 'Debit Account' : 'Credit Account';
     const journalPanelTitle = isCredit ? 'Credit Journal' : 'Debit Journal';
     const row = (label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="display-field">${value}</div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
-    const accountTypeLabel = (t) => t === 'staff_operational' ? 'Staff Operational' : (t === 'staff_salary' ? 'Staff Salary' : (t === 'expense' ? 'Expense' : (t === 'income' ? 'Income' : 'Customer')));
+    const accountTypeLabel = (t) => t === 'staff_operational' ? 'Staff Operational' : (t === 'staff_salary' ? 'Staff Salary' : (t === 'expense' ? 'Expense' : (t === 'income' ? 'Income' : (t === 'treasury' ? 'Treasury' : 'Customer'))));
     const balanceFor = (c) => c ? (c.accountType === 'staff_operational' ? getStaffOperationalBalance(c.linkedStaffId) : (c.balance || 0)) : 0;
     // SURGICAL PATCH 2026-09-22 (client-confirmed design, cont'd 2): the
     // performing teller can fund a journal from ANY account — not
@@ -4407,7 +4444,7 @@ function hideProcessing() {
   function requestSummary(a) {
     const p = a.payload || {};
     if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${escapeHtml(p.sourceAccountName||p.sourceAccountNumber||'—')} → ${escapeHtml(p.destAccountName||p.destAccountNumber||'—')} • ${p.date}`;
-    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')} • ${p.date}`;
+    if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')}${p.treasuryAccountName || p.treasuryAccountNumber ? ` into ${escapeHtml(p.treasuryAccountName || p.treasuryAccountNumber)}` : ''} • ${p.date}`;
     if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')}${p.collectorName ? ` • Received from ${escapeHtml(p.collectorName)}` : ''} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${escapeHtml(p.staffName || 'staff')} for ${p.date}`;
     if (a.type === 'customer_credit' || a.type === 'customer_debit') return `${escapeHtml(p.accountNumber || '')} • ${money(p.amount)}${a.type === 'customer_credit' ? chargeSummaryText(p) : ''}`;
@@ -4565,13 +4602,15 @@ function hideProcessing() {
   } else if (req.type === 'cash_receipt') {
     html = `<div class="stack"><div class="form-grid three modal-cs-grid">
       ${field('Treasury', p.staffName || '—', 'field-wide')}
+      ${p.treasuryAccountId ? field('Treasury Account', `${p.treasuryAccountName || '—'} (${p.treasuryAccountNumber || '—'})`, 'field-wide') : ''}
       ${field('Date', p.date || '—', 'field-date')}
       ${field('Amount', money(p.amount || 0), 'field-account')}
       ${p.note ? field('Note', p.note, 'field-wide') : ''}
     </div></div>`;
   } else if (req.type === 'inter_staff_credit') {
     html = `<div class="stack"><div class="form-grid three modal-cs-grid">
-      ${field('From (Treasury)', p.staffName || '—', 'field-wide')}
+      ${field('By', p.staffName || '—', 'field-wide')}
+      ${p.sourceAccountId ? field('From (Account)', `${p.sourceAccountName || '—'} (${p.sourceAccountNumber || '—'})`, 'field-wide') : ''}
       ${field('To (Account)', `${p.targetAccountName || '—'} (${p.targetAccountNumber || '—'})`, 'field-wide')}
       ${field('Date', p.date || '—', 'field-date')}
       ${field('Amount', money(p.amount || 0), 'field-account')}
@@ -4826,7 +4865,7 @@ function nextPaint() {
     }).join('');
     return `
       <div class="table-card">
-        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button>${isSupabaseApprovalMode() ? `<button id="backfillTreasuryAccountsBtn" class="secondary tiny-btn" title="One-time: opens a TREASURY/ADMIN operational account for any Treasury or Admin staff who doesn't have one yet">Backfill Operational Accounts</button>` : ''}<button id="addStaffBtn">ADD STAFF</button></div>
+        <div class="action-inline"><h3 style="margin:0">Staff Directory</h3><button id="adminRecoveryKeyBtn" class="secondary tiny-btn" title="Generate or regenerate Admin recovery key">Recovery Key</button>${isSupabaseApprovalMode() ? `<button id="backfillTreasuryAccountsBtn" class="secondary tiny-btn" title="One-time: opens an ADMIN operational account for any Admin staff who doesn't have one yet">Backfill Operational Accounts</button>` : ''}<button id="addStaffBtn">ADD STAFF</button></div>
         ${isAdminStaff() ? `<div class="note" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin:6px 0;padding:7px 10px"><span><strong>Admin Security:</strong> Generate or regenerate the Admin Recovery Key for password recovery.</span><button id="adminRecoveryKeyInlineBtn" class="secondary tiny-btn">Generate / Regenerate Recovery Key</button></div>` : ''}
         <div class="action-row" style="justify-content:flex-start;gap:6px;align-items:center;margin:6px 0">
           <input id="staffDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.staffDirectorySearch || '')}" style="height:24px;max-width:160px;font-size:0.78em;padding:2px 8px">
@@ -5071,8 +5110,8 @@ function nextPaint() {
       ['Staff Account', (state.customers || []).filter(c => c.accountType === 'staff_salary'), 'aud_types'],
       ['Income Account', state.operations.incomeAccounts || [], 'operational_accounts'],
       ['Expenses Account', state.operations.expenseAccounts || [], 'operational_accounts'],
-      ['Teller Account', (state.customers || []).filter(c => c.accountType === 'staff_operational' && staffRole(c.linkedStaffId) !== 'cash_officer'), 'aud_tellers'],
-      ['Treasury Account', (state.customers || []).filter(c => c.accountType === 'staff_operational' && staffRole(c.linkedStaffId) === 'cash_officer'), 'aud_tellers'],
+      ['Teller Account', (state.customers || []).filter(c => c.accountType === 'staff_operational'), 'aud_tellers'],
+      ['Treasury Account', (state.customers || []).filter(c => c.accountType === 'treasury'), 'aud_customers:treasury'],
     ];
     return groups.map(([label, list, review]) => {
       const iso = (a) => dateOnly(a.createdAt || a.created_at || '') || '';
@@ -5130,20 +5169,21 @@ function nextPaint() {
         ['Staff Account', acctSum((state.customers || []).filter(c => c.accountType === 'staff_salary')), 'aud_types'],
         ['Income Account', opSum(state.operations.incomeAccounts || []), 'operational_accounts'],
         ['Expenses Account', opSum(state.operations.expenseAccounts || []), 'operational_accounts'],
-        ['Teller Account', tellerSum(ops.filter(c => staffRole(c.linkedStaffId) !== 'cash_officer')), 'aud_tellers'],
-        ['Treasury Account', tellerSum(ops.filter(c => staffRole(c.linkedStaffId) === 'cash_officer')), 'aud_tellers'],
+        ['Teller Account', tellerSum(ops), 'aud_tellers'],
+        ['Treasury Account', acctSum((state.customers || []).filter(c => c.accountType === 'treasury')), 'aud_customers:treasury'],
       ];
       const T = rows.reduce((a, [, x]) => ({ dr: a.dr + x.dr, cr: a.cr + x.cr, bal: a.bal + x.bal }), { dr: 0, cr: 0, bal: 0 });
       return `<div class="stack">${bar}<div class="table-card"><h3>Account Types</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Type of Account</th><th>Total DR</th><th>Total CR</th><th>Total Balance</th><th>Action</th></tr></thead><tbody>${rows.map(([l, x, rv], i) => `<tr><td>${i+1}</td><td>${l}</td><td>${money(x.dr)}</td><td>${money(x.cr)}</td><td>${money(x.bal)}</td><td><button class="secondary tiny-btn" data-adm-review="${rv}">Review</button></td></tr>`).join('')}<tr class="total-row"><td colspan="2"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td><td></td></tr></tbody></table></div></div></div>`;
     }
     if (tool === 'aud_customers') {
       const search = String(state.ui.periodBalanceSearch || '').trim().toLowerCase();
-      const list = (state.customers || []).filter(c => String(c.accountType || 'customer') === 'customer')
+      const kind = state.ui.audAccountKind === 'treasury' ? 'treasury' : 'customer';
+      const list = (state.customers || []).filter(c => String(c.accountType || 'customer') === kind)
         .filter(c => !search || [c.name, c.accountNumber, c.phone].some(v => String(v || '').toLowerCase().includes(search)))
         .sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
       let T = { dr: 0, cr: 0, bal: 0 };
       const rows = list.map((c, i) => { const f = periodFigures(c.balance, txItems(c), r); T.dr += f.debit; T.cr += f.credit; T.bal += f.closing; return `<tr><td>${i+1}</td><td>${escapeHtml(c.name || '—')}${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(String(c.accountNumber || '—'))}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`; }).join('');
-      return `<div class="stack">${bar}<div class="table-card"><h3>Customer Account</h3><div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>A/C Name</th><th>A/C No</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No customer accounts</td></tr>'}${rows ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td></tr>` : ''}</tbody></table></div></div></div>`;
+      return `<div class="stack">${bar}<div class="table-card"><h3>${kind === 'treasury' ? 'Treasury Account' : 'Customer Account'}</h3><div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>A/C Name</th><th>A/C No</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No ${kind === 'treasury' ? 'Treasury' : 'customer'} accounts</td></tr>`}${rows ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td></tr>` : ''}</tbody></table></div></div></div>`;
     }
     if (tool === 'ict_access') return renderStaffRoster();
     // ICT: backup + checklists
@@ -5205,7 +5245,7 @@ function nextPaint() {
   }
 
   function bindAdminSub(tool) {
-    qq('[data-adm-review]').forEach(btn => btn.onclick = () => { state.ui.tool = btn.dataset.admReview; save(); renderWorkspace(); });
+    qq('[data-adm-review]').forEach(btn => btn.onclick = () => { const [tool, kind] = btn.dataset.admReview.split(':'); state.ui.tool = tool; state.ui.audAccountKind = kind || ''; save(); renderWorkspace(); });
     if (['adm_balance','aud_cs','aud_tellers','aud_types','aud_customers'].includes(tool)) bindPeriodBalance();
     if (tool === 'ict_access') { bindStaffDirectory(); return; }
     if (tool === 'adm_staff') {
@@ -5643,10 +5683,14 @@ function staffLedgerEvents(staffId) {
     (state.approvals || []).filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
       const payload = req.payload || {};
       const date = payload.date || payload.float_date || String(req.approvedAt || req.requestedAt || '').slice(0,10) || businessDate();
-      // Cash receipt: Cash Officer funded their own operational account
+      // Cash receipt: Cash Officer funded their own operational account.
+      // 2026-10-24: receipts now go into a business Treasury account, which
+      // has its own statement — the officer gets a note-only line.
       if (req.type === 'cash_receipt' && payload.staffId === staffId) {
         const amount = Number(payload.amount || 0);
-        addEvent({ key: req.id || `cash-receipt-${date}-${amount}`, date, type: 'Cash Receipt', amount, delta: amount, details: 'Cash received', runningType: 'form' });
+        const ownOp = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId);
+        if (!payload.treasuryAccountId && ownOp && (!payload.operationalAccountId || payload.operationalAccountId === ownOp.id)) addEvent({ key: req.id || `cash-receipt-${date}-${amount}`, date, type: 'Cash Receipt', amount, delta: amount, details: 'Cash received', runningType: 'form' });
+        else addEvent({ key: req.id || `cash-receipt-${date}-${amount}`, date, type: 'Cash Receipt', amount, delta: 0, details: `Cash received into ${payload.treasuryAccountName || payload.treasuryAccountNumber || 'Treasury'}`, runningType: 'other' });
       }
       // Inter-staff credit: operational account topped up by Cash Officer
       if (req.type === 'inter_staff_credit') {
@@ -6413,9 +6457,12 @@ function normalizeStaffLedgerEntryType(row) {
     const typeSelect = byId('openAccountType');
     if (typeSelect) typeSelect.onchange = () => {
       const v = typeSelect.value;
-      if (v === 'teller_account' || v === 'treasury_account') {
+      if (v === 'teller_account') {
         openingDraft.accountType = 'staff_operational';
-        openingDraft.opKind = v === 'treasury_account' ? 'treasury' : 'teller';
+        openingDraft.opKind = 'teller';
+      } else if (v === 'treasury_account') {
+        openingDraft.accountType = 'treasury';
+        openingDraft.opKind = '';
       } else {
         openingDraft.accountType = v;
         openingDraft.opKind = '';
@@ -6453,16 +6500,7 @@ function normalizeStaffLedgerEntryType(row) {
       openingDraft.linkedStaffId = linkedStaffSelect.value;
       if ((openingDraft.accountType || 'customer') === 'staff_operational') {
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffSelect.value);
-        // SURGICAL FIX 2026-09-05/07 (client request): Treasury and Admin
-        // get "<ROLE> <FIRST NAME>" instead of the Teller convention
-        // "TELLER <FULL NAME>" — client asked specifically for first name
-        // only on those two.
-        const firstName = () => String(linkedStaff?.name || '').trim().split(/\s+/)[0] || linkedStaff?.name || '';
-        if (openingDraft.opKind === 'treasury') {
-          openingDraft.name = linkedStaff ? `TREASURY ${firstName().toUpperCase()}` : '';
-        } else {
-          openingDraft.name = linkedStaff ? `TELLER ${String(linkedStaff.name || '').toUpperCase()}` : '';
-        }
+        openingDraft.name = linkedStaff ? `TELLER ${String(linkedStaff.name || '').toUpperCase()}` : '';
         save();
         renderWorkspace();
       }
@@ -6535,9 +6573,9 @@ function normalizeStaffLedgerEntryType(row) {
         const linkedStaffId = (byId('openLinkedStaff')?.value || '').trim();
         if (!linkedStaffId) return showToast('Select a staff member to link this account to');
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffId);
-        const kind = openingDraft.opKind === 'treasury' ? 'treasury' : 'teller';
+        const kind = 'teller';
         if (!linkedStaff || !isEligibleForOperationalAccount(linkedStaff, kind)) {
-          return showToast(`${linkedStaff?.name || 'This staff member'} is not eligible — they must currently hold the ${kind === 'treasury' ? 'Treasury' : 'Teller'} role and have no operational account yet`);
+          return showToast(`${linkedStaff?.name || 'This staff member'} is not eligible — they must currently hold the Teller role and have no operational account yet`);
         }
         payload = {
           accountType: 'staff_operational', opKind: kind, name,
@@ -6562,7 +6600,7 @@ function normalizeStaffLedgerEntryType(row) {
           systemAssigned: true, generatedAccountNumber: ''
         };
       } else {
-        // expense or income — fully system-assigned, name only
+        // expense, income or treasury — fully system-assigned, name only
         payload = { accountType: acctType, name, systemAssigned: true, generatedAccountNumber: '' };
       }
 
@@ -6575,7 +6613,7 @@ function normalizeStaffLedgerEntryType(row) {
       // seen the (non-consuming) preview inline on the form before this
       // point, so the confirm prompt itself can stay plain.
       const confirmMessage = acctType === 'staff_operational'
-        ? `Open a ${payload.opKind === 'treasury' ? 'Treasury' : 'Teller'} account for ${payload.linkedStaffName}? The account will be permanently linked to this staff member.`
+        ? `Open a Teller account for ${payload.linkedStaffName}? The account will be permanently linked to this staff member.`
         : `Submit ${acctType.replace('_',' ')} account opening request?`;
 
       confirmAction(confirmMessage, async () => {
@@ -6734,18 +6772,16 @@ function normalizeStaffLedgerEntryType(row) {
   // That two-step is what keeps the acting staff as the accountable
   // issuer instead of letting money jump straight from an arbitrary
   // account into a staff account with nobody's name on it.
-  // Returns the staff's own operational account record, or null (and
-  // shows a toast + clears the destination) if they don't have one.
+  // Returns the staff's own operational account record, or null if they
+  // don't have one. 2026-10-24 (client): staff without one (Treasury
+  // officers) fund a staff account from a business Treasury account instead
+  // — the Debit side stays open and is checked to be a Treasury account.
   function applyStaffAccountLock(draft) {
     const dest = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
     if (!dest || dest.accountType !== 'staff_operational') return null;
     const st = currentStaff();
     const mine = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id);
-    if (!mine) {
-      showToast('You have no operational account — ask Admin to open one before funding a staff account');
-      draft.destId = ''; draft.destAcct = ''; draft.destName = ''; draft.destBalance = 0;
-      return null;
-    }
+    if (!mine) return null;
     draft.sourceId = mine.id;
     draft.sourceAcct = mine.accountNumber || mine.account_number || '';
     draft.sourceName = mine.name || mine.displayName || mine.display_name || '';
@@ -6769,10 +6805,10 @@ function normalizeStaffLedgerEntryType(row) {
     const draft = state.ui.intraTransferDraft ||= {};
     const sourceAccount = draft.sourceId ? (state.customers || []).find(c => c.id === draft.sourceId) : null;
     const destAccount = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
-    const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational');
     const st = currentStaff();
+    const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational' && (state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id));
     const myTellerId = staffFirstName(st);
-    const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')))) : '—';
+    const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
     const amountVal = escapeHtml(String(draft.amount || ''));
     // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
     // the client's sheet — the two top-level headings of the form are Debit
@@ -6864,11 +6900,13 @@ function normalizeStaffLedgerEntryType(row) {
       }
       const statusElId = isDest ? 'itrDestStatus' : 'itrSourceStatus';
       const typeElId = isDest ? 'itrDestType' : 'itrSourceType';
-      const typeLabel = (c) => c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : 'Customer')));
+      const typeLabel = (c) => c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
       if (match) {
         draft[idKey] = match.id;
         draft[nameKey] = match.name || match.full_name || match.display_name || acctNum;
-        draft[balanceKey] = Number(match.balance || 0);
+        // A staff operational account's spendable balance is its live
+        // operational balance, not the customer balance field.
+        draft[balanceKey] = match.accountType === 'staff_operational' ? getStaffOperationalBalance(match.linkedStaffId) : Number(match.balance || 0);
         // A destination that turns out to be a staff operational account
         // force-locks the Debit side to the acting staff's own account —
         // that changes the shape of the form (disabled field + note), so
@@ -6949,15 +6987,21 @@ function normalizeStaffLedgerEntryType(row) {
       // Re-apply the lock right before submit (not just on lookup) so a
       // stale draft — e.g. reloaded from a saved session — can never
       // slip an arbitrary source past this check.
-      if (isStaffFunding && !applyStaffAccountLock(draft)) return;
+      const lockedToOwn = isStaffFunding && !!applyStaffAccountLock(draft);
       if (!draft.sourceId) return showToast('Look up the source account first');
       const srcAccount = (state.customers || []).find(c => c.id === draft.sourceId);
+      if (isStaffFunding && !lockedToOwn && srcAccount?.accountType !== 'treasury') return showToast('Fund a staff account from a Treasury account');
+      // Money leaving a staff operational account (e.g. the Till handed to a
+      // Treasury account) goes the same way as staff funding, so the staff
+      // balance goes down with it.
+      const viaStaffFunding = isStaffFunding || srcAccount?.accountType === 'staff_operational';
+      if (srcAccount?.accountType === 'staff_operational') draft.sourceBalance = getStaffOperationalBalance(srcAccount.linkedStaffId);
       if (isLocalOnlyStaffAccount(srcAccount) || isLocalOnlyStaffAccount(destAccount)) return showToast(STAFF_WALLET_NON_CASH_MSG);
       if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (isStaffFunding && amount > Number(draft.sourceBalance || 0) + 0.01) {
-        return showToast(`Amount exceeds your operational balance (${money(draft.sourceBalance || 0)})`);
+      if (viaStaffFunding && amount > Number(draft.sourceBalance || 0) + 0.01) {
+        return showToast(`Amount exceeds the available balance (${money(draft.sourceBalance || 0)})`);
       }
       const st = currentStaff();
       const details = (byId('itrDetails')?.value || '').trim();
@@ -6979,13 +7023,13 @@ function normalizeStaffLedgerEntryType(row) {
           // the source — this was already role-agnostic, not
           // Treasury-only) — it now gets a Journal Number too, so it's
           // listed and searchable in the Journal Register.
-          const journalNumber = isStaffFunding ? nextJournalNumber() : '';
-          const result = isStaffFunding
+          const journalNumber = viaStaffFunding ? nextJournalNumber() : '';
+          const result = viaStaffFunding
             ? await submitApprovalThroughGateway('inter_staff_credit', {
                 staffId: st.id, staffName: st.name,
                 targetAccountId: draft.destId, targetAccountNumber: draft.destAcct, targetAccountName: draft.destName,
                 amount, paymentMode: 'transfer', date: businessDate(), note: details,
-                fundingSource: 'treasury_balance',
+                fundingSource: srcAccount?.accountType === 'staff_operational' ? 'treasury_balance' : 'account',
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
                 collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy, destDetails
               })
@@ -6996,7 +7040,7 @@ function normalizeStaffLedgerEntryType(row) {
                 amount, details, destDetails, paidBy, receivedBy
               });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
-          if (isStaffFunding) {
+          if (viaStaffFunding) {
             state.journals.push({
               id: uid('jn'), journalNumber, kind: 'transfer', date: businessDate(),
               staffId: st.id, staffName: st.name, counterparty: draft.destName || '',
@@ -7010,7 +7054,7 @@ function normalizeStaffLedgerEntryType(row) {
           }
           state.ui.intraTransferDraft = {};
           render();
-          showToast(isStaffFunding ? `Debit To Credit Entry sent for approval — ${journalNumber}` : 'Debit To Credit Entry sent for approval');
+          showToast(viaStaffFunding ? `Debit To Credit Entry sent for approval — ${journalNumber}` : 'Debit To Credit Entry sent for approval');
         } finally { hideProcessing(); }
       });
     };
@@ -7532,7 +7576,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (typeEl) typeEl.textContent = '—';
       return;
     }
-    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
+    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : (customer.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
   }
 
   function updateJournalAccountMeta(customer) {
@@ -7547,7 +7591,7 @@ function normalizeStaffLedgerEntryType(row) {
       return;
     }
     if (byId('journalAccBalance')) byId('journalAccBalance').innerHTML = balanceHtml(customer.accountType === 'staff_operational' ? getStaffOperationalBalance(customer.linkedStaffId) : (customer.balance || 0));
-    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : 'Customer')));
+    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : (customer.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
     // SURGICAL ADDITION 2026-09-22 (client-confirmed design): the account
     // being debited/credited for this journal row is looked up here — if
     // that account is itself a staff operational account, its owner's
@@ -8661,10 +8705,10 @@ function normalizeStaffLedgerEntryType(row) {
   function openCashReceiptModal() {
     const st = currentStaff();
     if (!hasPermission('cash_receipt')) return showToast('No access to cash receipt');
-    // Cash Officer's own staff operational account
-    const myOpAccount = (state.customers || []).find(c =>
-      c.accountType === 'staff_operational' && c.linkedStaffId === st.id
-    );
+    // 2026-10-24 (client): cash received goes into a business Treasury
+    // account (not linked to any staff member). With one Treasury account it
+    // is used automatically; with several, the officer picks one.
+    const treasuryAccounts = (state.customers || []).filter(c => c.accountType === 'treasury' && c.active !== false && !c.closed);
     // SURGICAL UPDATE 2026-09-09 (client-confirmed design): "Received From"
     // is required, not optional — "if you receive cash you have to know
     // the source." SURGICAL REMOVAL 2026-09-14 (client-confirmed design):
@@ -8680,7 +8724,9 @@ function normalizeStaffLedgerEntryType(row) {
     let selectedCustomer = null; // {id, name, accountNumber}
     openModal('Cash Receipt', `
       <div class="form-grid two compact-modal-grid">
-        <div class="field"><label>Treasury</label><div class="display-field">${escapeHtml(st.name || '')}</div></div>
+        <div class="field"><label>Treasury Account</label>${treasuryAccounts.length > 1
+          ? `<select id="cashReceiptTreasury" class="entry-input"><option value="">— Select —</option>${treasuryAccounts.map(c => `<option value="${c.id}">${escapeHtml(`${c.accountNumber || ''} ${c.name || ''}`.trim())}</option>`).join('')}</select>`
+          : `<div class="display-field">${escapeHtml(treasuryAccounts[0] ? `${treasuryAccounts[0].accountNumber || ''} ${treasuryAccounts[0].name || ''}`.trim() : '—')}</div>`}</div>
         <div class="field"><label>Amount Received</label><input id="cashReceiptAmount" class="entry-input" type="number"></div>
       </div>
       <div class="form-grid two compact-modal-grid" style="margin-top:8px">
@@ -8705,7 +8751,7 @@ function normalizeStaffLedgerEntryType(row) {
         <div class="field"><label>Customer Account Number</label><input id="cashReceiptCustomerAcct" class="entry-input"></div>
         <div class="field"><label>&nbsp;</label><div id="cashReceiptCustomerInfo" class="cs2-note-box" style="min-height:24px"></div></div>
       </div>
-      ${myOpAccount ? `<div class="note">This will credit your operational account: <strong>${escapeHtml(myOpAccount.name || myOpAccount.account_number || 'your account')}</strong></div>` : '<div class="note warning-note">No operational account linked to your staff profile. Ask admin to open one.</div>'}
+      ${treasuryAccounts.length ? '' : '<div class="note warning-note">No Treasury account yet — open one in Account Opening.</div>'}
     `, [
       { label: 'Cancel', className: 'secondary', onClick: closeModal },
       {
@@ -8713,7 +8759,8 @@ function normalizeStaffLedgerEntryType(row) {
         onClick: async () => {
           const amount = Number(byId('cashReceiptAmount')?.value || 0);
           if (!(amount > 0)) return showToast('Enter a valid amount');
-          if (!myOpAccount) return showToast('No operational account found — contact admin');
+          const treasury = treasuryAccounts.length > 1 ? treasuryAccounts.find(c => c.id === byId('cashReceiptTreasury')?.value) : treasuryAccounts[0];
+          if (!treasury) return showToast(treasuryAccounts.length ? 'Select the Treasury account' : 'No Treasury account yet — open one in Account Opening');
           if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
           const sourceType = byId('cashReceiptSourceType')?.value || '';
           if (!sourceType) return showToast('Select where this cash was received from');
@@ -8741,8 +8788,9 @@ function normalizeStaffLedgerEntryType(row) {
             const result = await submitApprovalThroughGateway('cash_receipt', {
               staffId: st.id,
               staffName: st.name,
-              operationalAccountId: myOpAccount.id,
-              operationalAccountNumber: myOpAccount.accountNumber || myOpAccount.account_number,
+              treasuryAccountId: treasury.id,
+              treasuryAccountNumber: treasury.accountNumber || treasury.account_number || '',
+              treasuryAccountName: treasury.name || '',
               amount,
               paymentMode,
               date: businessDate(),
@@ -10138,7 +10186,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       const debt = Number(ensureStaffAccount(st.id).debtBalance || 0);
       if (debt > 0) warnings.push(`Outstanding debt of ₦${money(debt)} stays tied to ${name}.`);
     }
-    if (CASH_HANDLING_ROLES.includes(newRole)) {
+    // 2026-10-24: Treasury officers work from business Treasury accounts —
+    // no personal operational account is opened for them.
+    if (CASH_HANDLING_ROLES.includes(newRole) && newRole !== 'cash_officer') {
       const hasOp = (state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === st.id);
       infos.push(hasOp ? `${name}'s existing operational account will be re-used (same account number and balance).` : `An operational account will be opened automatically for ${name}.`);
     }

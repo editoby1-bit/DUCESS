@@ -49,7 +49,9 @@ const ROLE_DEFAULT_TOOLS = {
   // ROLE/STAFF SEPARATION 2026-10-11: roles that carry an operational
   // (cash) account, and the account-name convention for each. Shared by
   // createStaff (legacy role-at-creation path) and assignStaffRole.
-  const CASH_ROLES = ['teller', 'cash_officer', 'admin_officer'];
+  // 2026-10-24: Treasury (cash_officer) no longer gets a personal operational
+  // account — Treasury accounts are business accounts opened in Account Opening.
+  const CASH_ROLES = ['teller', 'admin_officer'];
   function operationalDisplayName(roleCode, fullName) {
     const firstName = String(fullName || '').trim().split(/\s+/)[0] || fullName;
     return roleCode === 'cash_officer' ? `TREASURY ${firstName}` : roleCode === 'admin_officer' ? `ADMIN ${firstName}` : `TELLER ${fullName}`;
@@ -828,9 +830,9 @@ async function submitDebtRepayment(_payload) {
           // derive a simple counter from however many of this type already
           // exist locally. Consistent format with the Supabase RPCs (T#,
           // S#, E#, I#), just not a durable sequence.
-          const prefix = { staff_operational: 'T', staff_salary: 'S', expense: 'E', income: 'I' }[acctType];
+          const prefix = { staff_operational: 'T', treasury: 'T', staff_salary: 'S', expense: 'E', income: 'I' }[acctType];
           if (!prefix) return { ok: false, error: { code: 'INVALID_ACCOUNT_TYPE', message: `No system-assigned number generator for account type "${acctType}".` } };
-          const count = (Array.isArray(getLocalState().customers) ? getLocalState().customers : []).filter(c => c.accountType === acctType).length;
+          const count = (Array.isArray(getLocalState().customers) ? getLocalState().customers : []).filter(c => c.accountType === acctType || (prefix === 'T' && (c.accountType === 'staff_operational' || c.accountType === 'treasury'))).length;
           return { ok: true, data: `${prefix}${count + 1}` };
         },
         peekSystemAccountNumber: async (acctType) => {
@@ -838,9 +840,9 @@ async function submitDebtRepayment(_payload) {
           // generator above (local mode has no sequence to distinguish
           // "peek" from "consume" — the local generator is already
           // effectively a peek since it just counts existing rows).
-          const prefix = { staff_operational: 'T', staff_salary: 'S', expense: 'E', income: 'I' }[acctType];
+          const prefix = { staff_operational: 'T', treasury: 'T', staff_salary: 'S', expense: 'E', income: 'I' }[acctType];
           if (!prefix) return { ok: false, error: { code: 'INVALID_ACCOUNT_TYPE', message: `No system-assigned number preview for account type "${acctType}".` } };
-          const count = (Array.isArray(getLocalState().customers) ? getLocalState().customers : []).filter(c => c.accountType === acctType).length;
+          const count = (Array.isArray(getLocalState().customers) ? getLocalState().customers : []).filter(c => c.accountType === acctType || (prefix === 'T' && (c.accountType === 'staff_operational' || c.accountType === 'treasury'))).length;
           return { ok: true, data: `${prefix}${count + 1}` };
         },
       },
@@ -1268,6 +1270,23 @@ function subscribeRealtime() {
   });
 }
 
+    // 2026-10-24: what kind of account a posting touches — a business
+    // account (customer, Treasury, ...) takes real transactions, a staff
+    // operational account a staff cash ledger line.
+    async function postingAccountKind(id, number) {
+      const cols = 'id, account_number, account_type, linked_staff_id';
+      let row = null;
+      if (id && isUuidLike(String(id))) {
+        const r = await client.from(customersTable).select(cols).eq('id', id).limit(1).maybeSingle();
+        row = r.data || null;
+      }
+      if (!row && number) {
+        const r = await client.from(customersTable).select(cols).eq('account_number', String(number)).limit(1).maybeSingle();
+        row = r.data || null;
+      }
+      return row ? { id: row.id, accountNumber: row.account_number, type: row.account_type || 'customer', linkedStaffId: row.linked_staff_id || null } : null;
+    }
+
     async function performDirectPostingForApproval(requestRow, approver, decisionNote, plan = null) {
   const type = requestRow?.request_type || requestRow?.type || '';
   const payload = requestRow?.payload || {};
@@ -1279,7 +1298,7 @@ function subscribeRealtime() {
 
   // Generate system account number at approval time for non-customer types
   let generatedAccountNumber = String(payload.generatedAccountNumber || '').trim();
-  if (acctType === 'staff_operational' && !generatedAccountNumber) {
+  if ((acctType === 'staff_operational' || acctType === 'treasury') && !generatedAccountNumber) {
     const { data: seqData } = await client.rpc('generate_staff_operational_account_number');
     generatedAccountNumber = seqData || '';
   } else if (acctType === 'staff_salary' && !generatedAccountNumber) {
@@ -1422,6 +1441,19 @@ if (inserted.error) {
 
       // Cash receipt: Cash Officer self-credit to own operational account
       if (type === 'cash_receipt') {
+        // 2026-10-24: cash received into a business Treasury account is a
+        // real credit on that account.
+        const treasury = await postingAccountKind(payload.treasuryAccountId || payload.operationalAccountId, payload.treasuryAccountNumber || payload.operationalAccountNumber);
+        if (treasury?.type === 'treasury') {
+          const creditResult = await postSingleCustomerTransaction(requestRow, {
+            customerId: treasury.id, accountNumber: treasury.accountNumber,
+            amount: normalizeNumber(payload.amount), txType: 'credit',
+            details: payload.note || `Cash received${payload.receivedFromName ? ` from ${payload.receivedFromName}` : ''}`,
+            receivedOrPaidBy: payload.receivedFromName || '', paymentMode: payload.paymentMode || 'cash', date: payload.date
+          }, 'credit', approver, { skipExistingCheck: true, plan });
+          if (!creditResult.ok) return creditResult;
+          return defaultResult.ok({ posted: true, requestType: type, transactions: [creditResult.data], cashLedger: null, decisionNote: decisionNote || '' });
+        }
         const ledgerResult = await insertStaffCashLedgerEntry({
           approvalRequestId: requestRow.id,
           staffId: payload.staffId || null,
@@ -1440,6 +1472,57 @@ if (inserted.error) {
       // Inter-staff credit: Cash Officer credits a Teller's operational account
       if (type === 'inter_staff_credit') {
         const amount = normalizeNumber(payload.amount);
+        // 2026-10-24: one side may be a business account (a Treasury account
+        // funding a teller, or a teller's Till going into a Treasury
+        // account). That side is a real transaction on the account, the
+        // staff side a ledger line; both are written together.
+        const srcKind = payload.sourceAccountId || payload.sourceAccountNumber ? await postingAccountKind(payload.sourceAccountId, payload.sourceAccountNumber) : null;
+        const dstKind = await postingAccountKind(payload.targetAccountId, payload.targetAccountNumber);
+        const srcIsBusiness = !!srcKind && srcKind.type !== 'staff_operational';
+        const dstIsBusiness = !!dstKind && dstKind.type !== 'staff_operational';
+        if (srcIsBusiness || dstIsBusiness) {
+          const transactions = [];
+          let cashLedger = null;
+          if (srcKind) {
+            if (srcIsBusiness) {
+              const r = await postSingleCustomerTransaction(requestRow, {
+                customerId: srcKind.id, accountNumber: srcKind.accountNumber, amount, txType: 'debit',
+                details: payload.note || `Transfer to ${payload.targetAccountName || payload.targetAccountNumber || 'staff account'}`,
+                receivedOrPaidBy: payload.receivedBy || payload.paidBy || '', paymentMode: 'transfer', payoutSource: 'transfer', date: payload.date
+              }, 'debit', approver, { skipExistingCheck: true, plan });
+              if (!r.ok) return r;
+              transactions.push(r.data);
+            } else {
+              const r = await insertStaffCashLedgerEntry({
+                approvalRequestId: requestRow.id, staffId: srcKind.linkedStaffId || payload.staffId || null,
+                entryType: 'inter_staff_debit', amount, delta: -amount,
+                note: payload.note || `Transfer to ${payload.targetAccountName || payload.targetAccountNumber || 'account'}`,
+                floatDate: payload.date || null, createdByStaffId: requestRow.requested_by_staff_id || null, approvedByStaffId: approver?.staffId || null,
+              }, plan);
+              if (!r.ok) return r;
+              cashLedger = r.data;
+            }
+          }
+          if (dstIsBusiness) {
+            const r = await postSingleCustomerTransaction(requestRow, {
+              customerId: dstKind.id, accountNumber: dstKind.accountNumber, amount, txType: 'credit',
+              details: payload.note || `Transfer from ${payload.sourceAccountName || payload.sourceAccountNumber || 'staff account'}`,
+              receivedOrPaidBy: payload.paidBy || payload.receivedBy || '', paymentMode: 'transfer', date: payload.date
+            }, 'credit', approver, { skipExistingCheck: true, plan });
+            if (!r.ok) return r;
+            transactions.push(r.data);
+          } else {
+            const r = await insertStaffCashLedgerEntry({
+              approvalRequestId: requestRow.id, staffId: dstKind?.linkedStaffId || payload.staffId || null,
+              entryType: 'inter_staff_credit', amount, delta: amount,
+              note: payload.note || `Operational credit from ${payload.sourceAccountName || payload.staffName || 'Treasury'} to ${payload.targetAccountName || payload.targetAccountNumber || 'teller account'}`,
+              floatDate: payload.date || null, createdByStaffId: requestRow.requested_by_staff_id || null, approvedByStaffId: approver?.staffId || null,
+            }, plan);
+            if (!r.ok) return r;
+            cashLedger = r.data;
+          }
+          return defaultResult.ok({ posted: true, requestType: type, transactions, cashLedger, decisionNote: decisionNote || '' });
+        }
         // SURGICAL FIX 2026-09-16 (client-observed bug): this ledger write
         // previously ALWAYS credited payload.staffId — the ACTING/GIVING
         // staff who performed the transfer — with a POSITIVE delta and
@@ -2856,7 +2939,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         const { data: eligibleStaff, error: staffError } = await client
           .from(staffTable)
           .select('id, staff_code, full_name, role_code, is_active')
-          .in('role_code', ['cash_officer', 'admin_officer'])
+          .in('role_code', ['admin_officer'])
           .eq('is_active', true);
         if (staffError) return defaultResult.err('STAFF_QUERY_FAILED', staffError.message, staffError);
 
@@ -3062,6 +3145,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!canUseSupabase()) return defaultResult.err('NOT_SUPPORTED', 'System account number generation requires Supabase mode.');
       const rpcName = {
         staff_operational: 'generate_staff_operational_account_number',
+        treasury: 'generate_staff_operational_account_number',
         staff_salary: 'generate_staff_salary_account_number',
         expense: 'generate_expense_account_number',
         income: 'generate_income_account_number',
@@ -3085,6 +3169,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!canUseSupabase()) return defaultResult.err('NOT_SUPPORTED', 'System account number preview requires Supabase mode.');
       const rpcName = {
         staff_operational: 'peek_staff_operational_account_number',
+        treasury: 'peek_staff_operational_account_number',
         staff_salary: 'peek_staff_salary_account_number',
         expense: 'peek_expense_account_number',
         income: 'peek_income_account_number',
