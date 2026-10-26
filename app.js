@@ -3192,6 +3192,7 @@ function hideProcessing() {
           <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
         };
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
+          <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
           ${group('adm_g', 'Administrative', ['adm_staff','adm_balance'])}
           ${group('aud_g', 'Audits', ['aud_cs','aud_tellers','aud_types','aud_customers'])}
           ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber','central_close_day'])}
@@ -3206,6 +3207,7 @@ function hideProcessing() {
           <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${tools.map(toolBtn).join('')}</div>`;
         };
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
+          <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
           ${toolBtn('approval_queue')}
           ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close'])}
           ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals'])}
@@ -3236,6 +3238,7 @@ function hideProcessing() {
         }).join('');
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
+          <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
           ${groupHtml}
         </div>`;
       }
