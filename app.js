@@ -317,7 +317,7 @@
   // approval queue filtered to specific request types, or a balance report
   // with a fixed period — so no approval or balance logic is duplicated.
   const APPROVAL_SUB_TOOLS = {
-    appr_opening:    { base: 'approval_customer_service', section: 'customer_service', types: ['account_opening'], label: 'Approve Account Opening' },
+    appr_opening:    { base: 'approval_customer_service', section: 'customer_service', types: ['account_opening','create_operational_account'], label: 'Approve Account Opening' },
     appr_update:     { base: 'approval_customer_service', section: 'customer_service', types: ['account_maintenance'], label: 'Approve Account Update' },
     appr_reactivate: { base: 'approval_customer_service', section: 'customer_service', types: ['account_reactivation'], label: 'Approve Reactivation' },
     appr_block:      { base: 'approval_customer_service', section: 'customer_service', types: ['account_block'], label: 'Approve Account Block' },
@@ -3207,8 +3207,8 @@ function hideProcessing() {
         };
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           ${toolBtn('approval_queue')}
-          ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close','appr_op_account'])}
-          ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals','appr_op_entry'])}
+          ${group('appr_cs', 'Customer Service', ['appr_opening','appr_update','appr_reactivate','appr_block','appr_close'])}
+          ${group('appr_tt', 'Tellering / Treasury', ['appr_direct','appr_non_cash','appr_journals'])}
           ${BALANCE_PERIODS.map(([pk, pl]) => {
             const keys = BALANCE_REPORTS.map(([rk]) => `balp_${pk}_${rk}`);
             const isOpen = !!state.ui.tellerGroupOpen[`balp_${pk}`] || keys.includes(state.ui.tool);
@@ -4289,7 +4289,12 @@ function hideProcessing() {
     // own request types; the plain section tabs keep their whole category.
     const subTool = APPROVAL_SUB_TOOLS[state.ui.tool];
     const allRows = state.approvals.filter(a => {
-      if (!(subTool ? subTool.types.includes(a.type) : categories[currentSection].includes(a.type))) return false;
+      // 2026-10-26 (client): Income & Expense postings are approved with the
+      // other postings, by the method used: a transfer/non-cash method goes to
+      // Non Cash Postings, anything else to Direct Postings.
+      const opEntryHere = a.type === 'operational_entry' && (state.ui.tool === 'appr_direct' || state.ui.tool === 'appr_non_cash')
+        && ((/transfer|non.?cash|bank|pos|cheque/i.test(String(a.payload?.paymentMode || a.payload?.paymentMethod || a.payload?.method || a.payload?.mode || ''))) === (state.ui.tool === 'appr_non_cash'));
+      if (!(subTool ? (subTool.types.includes(a.type) || opEntryHere) : categories[currentSection].includes(a.type))) return false;
       if (a.status !== 'pending') return false; // decided items live in Approval History now
       const reqDate = approvalBusinessDate(a.type, a.payload || {});
       // Approval Queue belongs to the CURRENT OPEN business date only.
