@@ -1836,7 +1836,9 @@
       // Replace customers entirely from Supabase — drop seed customers (c1, c2 etc)
       const incoming = result.data.map(normalizeGatewayCustomerForState).filter(Boolean);
       // Preserve any locally-created staff_wallet customers (they're not in Supabase)
-      const staffWallets = (state.customers || []).filter(c => c.accountType === 'staff_wallet');
+      // 2026-10-26: drop wallets of staff who no longer exist (removed/wiped staff left ghost wallets in the browser).
+      const liveStaffIds = new Set((state.staff || []).map(st => st.id));
+      const staffWallets = (state.customers || []).filter(c => c.accountType === 'staff_wallet' && (!liveStaffIds.size || liveStaffIds.has(c.staffId)));
       state.customers = incoming;
       // Re-add staff wallets that aren't already in incoming
       const incomingIds = new Set(incoming.map(c => c.id));

@@ -13333,3 +13333,17 @@ input.date-mirror-native {
     margin: 0 !important;
   }
 }
+
+/* 2026-10-26: Customer Search list could not scroll (the uniform sheet style
+   clips the pop-up), so accounts at the bottom were unreachable. Keep the
+   title bar and Close button in place and scroll the list between them. */
+#modalBack .modal[data-modal-title="Customer Search"] {
+  display: flex !important;
+  flex-direction: column !important;
+  max-height: 85vh !important;
+}
+#modalBack .modal[data-modal-title="Customer Search"] > .modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
