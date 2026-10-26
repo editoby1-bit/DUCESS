@@ -3194,8 +3194,7 @@ function hideProcessing() {
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           ${group('adm_g', 'Administrative', ['adm_staff','adm_balance'])}
           ${group('aud_g', 'Audits', ['aud_cs','aud_tellers','aud_types','aud_customers'])}
-          ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber'])}
-          ${group('ops_g', 'Operations', module.tools.filter(t => t !== 'staff_roster'))}
+          ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber','central_close_day'])}
         </div>`;
       }
       if (state.ui.module === 'approvals') {
