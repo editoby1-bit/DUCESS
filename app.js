@@ -3923,6 +3923,10 @@ function hideProcessing() {
       );
     }
     list = filterByDate(list, filter);
+    // 2026-10-27 (client): pick a teller from a list instead of typing.
+    const tellerPick = state.ui.journalRegisterTeller || '';
+    const tellerNames = Array.from(new Set((state.journals || []).map(j => String(j.staffName || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    if (tellerPick) list = list.filter(j => String(j.staffName || '').trim() === tellerPick);
     const rows = list.map((j, i) => {
       const status = journalEffectiveStatus(j);
       const statusLabel = { draft: 'Draft', pending: 'Pending Approval', approved: 'Approved', rejected: 'Rejected', sent: 'Pending Approval' }[status] || status;
@@ -3943,7 +3947,7 @@ function hideProcessing() {
         <div class="action-inline"><h3 style="margin:0">Journal Register</h3></div>
         <div class="note" style="margin:6px 0">Every Journal ever saved or sent, by Journal Number — draft journals here haven't been sent for approval yet.</div>
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-journal-register-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="journalRegisterFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="journalRegisterTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="journalRegisterCustomApply">Apply Custom</button></div>
-        <div class="action-inline" style="margin-top:8px"><label class="inline-field"><span>Search by Journal Number, Teller Name or Account Number</span><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" placeholder="Type, then press Enter" style="max-width:260px"></label></div>
+        <div class="action-inline" style="margin-top:8px"><label class="inline-field"><span>Search by Journal Number, Teller Name or Account Number</span><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" placeholder="Type, then press Enter" style="max-width:260px"></label><button id="journalRegisterSearchBtn" class="secondary">Search</button><label class="inline-field"><span>Teller</span><select id="journalRegisterTeller" class="entry-input" style="max-width:220px"><option value="">All Tellers</option>${tellerNames.map(n => `<option value="${escapeHtml(n)}" ${n === tellerPick ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></label></div>
         <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Journal No.</th><th>Date</th><th>Kind</th><th>Staff</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No journals found</td></tr>'}</tbody></table></div>
       </div>`;
   }
@@ -3961,6 +3965,14 @@ function hideProcessing() {
     if (searchInput) searchInput.onkeyup = (e) => {
       if (e.key !== 'Enter') return;
       state.ui.journalRegisterSearch = searchInput.value;
+      save(); renderWorkspace();
+    };
+    if (byId('journalRegisterSearchBtn')) byId('journalRegisterSearchBtn').onclick = () => {
+      state.ui.journalRegisterSearch = byId('journalRegisterSearch')?.value || '';
+      save(); renderWorkspace();
+    };
+    if (byId('journalRegisterTeller')) byId('journalRegisterTeller').onchange = (e) => {
+      state.ui.journalRegisterTeller = e.target.value || '';
       save(); renderWorkspace();
     };
     qq('[data-journal-resume]').forEach(btn => btn.onclick = () => {
