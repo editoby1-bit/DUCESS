@@ -429,10 +429,6 @@
       dayClosures: [],
       activeStaffId: 'st4'
     };
-    s.operations.incomeAccounts.push({ id:'ia1', name:'Commission', accountNumber:'I1', createdAt:new Date().toISOString() });
-    s.operations.incomeAccounts.push({ id:'ia2', name:'Registration Fee', accountNumber:'I2', createdAt:new Date().toISOString() });
-    s.operations.incomeAccounts.push({ id:'ia3', name:'Security Fee', accountNumber:'I3', createdAt:new Date().toISOString() });
-    s.operations.incomeAccounts.push({ id:'ia4', name:'Passbook Sold', accountNumber:'I4', createdAt:new Date().toISOString() });
     s.operations.expenseAccounts.push({ id:'ea1', name:'Transport Expense', accountNumber:'E1', createdAt:new Date().toISOString() });
     s.staff.forEach(st => ensureStaffAccount(st.id, s));
     s.audit.push({ id: uid('aud'), at: new Date().toISOString(), actorId: 'system', actor: 'System', action: 'seed', details: 'Initial demo data created' });
@@ -481,7 +477,6 @@
       const latest = latestClosedBusinessDay();
       state.businessDate = latest?.date ? (latest.nextBusinessDate || nextDate(latest.date)) : today();
     }
-    ensureDefaultIncomeAccounts(state);
     reconcileBusinessDateFromClosures();
     state.staff.forEach(st => { ensureStaffWalletCustomer(st.id); ensureStaffAccount(st.id); });
     normalizeStaffWalletAccounts();
@@ -4098,7 +4093,6 @@ function hideProcessing() {
               <div class="nc-till-label">Cash Withdrawal</div>
               <div class="nc-till-label">Till</div>
             </div>
-            ${isCreditKind ? `<div class="posting-row posting-row-commission-toggle subtle-commission-toggle-row nc-extra-row"><label class="commission-toggle-chip"><input id="txApplyCharges" type="checkbox" ${telleringDraft.singleCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div><div class="posting-row posting-row-commission subtle-commission-row nc-extra-row ${telleringDraft.singleCharges.apply ? '' : 'hidden'}" id="txChargesRow"><div class="charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="single" ${telleringDraft.singleCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="single" class="entry-input sheet-input commission-input ${telleringDraft.singleCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.singleCharges.values[def.key] || ''))}" /></div>`).join('')}</div><div class="commission-mini-field"><label class="sheet-label">Total Charges</label><div class="display-field commission-display" id="txTotalCharges">${money(0)}</div></div><div class="commission-mini-field"><label class="sheet-label">To Customer Account</label><div class="display-field commission-display" id="txCustomerGets">${money(0)}</div></div></div>` : ''}
           </div>
         </div>
       </div>`;
@@ -4191,7 +4185,6 @@ function hideProcessing() {
                 <div class="nc-cell nc-tag">Account Type</div>
                 <div class="nc-cell"><div class="display-field" id="journalAccountType">—</div></div>
               </div>
-              ${isCreditKind ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row nc-extra-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row nc-extra-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
               <div class="action-row journal-submit-row nc-extra-row"><button id="journalSubmit" class="secondary">Submit Journal</button><button class="secondary" id="journalClear">Clear Journal</button><button id="journalCollapseBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
             </div>
           </div>
