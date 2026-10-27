@@ -13328,7 +13328,7 @@ input.date-mirror-native {
    from stretching to fill the column at the smaller scale. */
 @media (min-width: 901px) {
   #workspace .workspace-tool-body {
-    zoom: 0.66;
+    zoom: 0.84;
     max-width: 945px !important;
     margin: 0 !important;
   }
@@ -13347,3 +13347,63 @@ input.date-mirror-native {
   min-height: 0 !important;
   overflow-y: auto !important;
 }
+
+/* ===== 2026-10-28 client: FLAT, ALWAYS-VISIBLE DASHBOARD BAR + OPEN SIDEBAR GROUPS =====
+   1) The circular dashboard (logo hub + orbiting tiles) becomes one flat row
+      of the section buttons (Customer Service, Tellering, Approval, Administration,
+      Treasury) pinned to the top of the screen, so they are always visible while a
+      tool is open and nobody has to scroll back up. The logo hub is hidden here
+      (the logo is still on the sign-in screen and in the top bar).
+   2) Every group in the left tool list is always open: all sub-items are shown
+      under their heading at all times; the headings no longer collapse. */
+#moduleGrid.module-grid{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 80 !important;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 6px 0 10px !important;
+  padding: 8px 12px !important;
+  background: var(--bg, #f4f7fa) !important;
+  border-bottom: 1px solid var(--line, #d9e2ec) !important;
+}
+#moduleGrid.module-grid::before,
+#moduleGrid.module-grid::after{ content: none !important; display: none !important; }
+#moduleGrid .module-grid-title,
+#moduleGrid .module-hub{ display: none !important; }
+#moduleGrid .module-card{
+  position: static !important;
+  left: auto !important; top: auto !important; right: auto !important; bottom: auto !important;
+  transform: none !important;
+  grid-column: auto !important;
+  width: auto !important; height: auto !important; min-width: 0 !important; min-height: 0 !important;
+  margin: 0 !important;
+  padding: 6px 16px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  border-radius: 999px !important;
+}
+#moduleGrid .module-card .module-icon{
+  width: auto !important; height: auto !important; margin: 0 !important;
+  font-size: 20px !important; line-height: 1 !important;
+}
+#moduleGrid .module-card .module-title{
+  margin: 0 !important; font-size: 12px !important; white-space: nowrap !important;
+}
+/* Land just under the pinned bar when a section/tool scrolls into view. */
+.workspace-card, .workspace-tool-body{ scroll-margin-top: 78px; }
+
+/* Sidebar groups: always open, headings no longer collapse. */
+.tool-group-body.hidden{ display: flex !important; }
+.tool-group-toggle{ pointer-events: none !important; cursor: default !important; }
+.tool-group-toggle .tool-group-caret{ display: none !important; }
