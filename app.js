@@ -3912,13 +3912,17 @@ function hideProcessing() {
       // label and only ever matched Journal Number — searching by an
       // account number involved in the journal silently returned nothing,
       // which read as "broken". Now matches either.
+      // 2026-10-26 (client): also matches the performing teller's name, and
+      // the search now combines with the date filter above it (From/To or
+      // Daily/Weekly/Monthly) instead of replacing it. 'All' (the default)
+      // keeps searching every date, exactly as before.
       list = list.filter(j =>
         String(j.journalNumber || '').toUpperCase().includes(searchNumber) ||
+        String(j.staffName || '').toUpperCase().includes(searchNumber) ||
         (j.rows || []).some(r => String(r.accountNumber || '').toUpperCase().includes(searchNumber))
       );
-    } else {
-      list = filterByDate(list, filter);
     }
+    list = filterByDate(list, filter);
     const rows = list.map((j, i) => {
       const status = journalEffectiveStatus(j);
       const statusLabel = { draft: 'Draft', pending: 'Pending Approval', approved: 'Approved', rejected: 'Rejected', sent: 'Pending Approval' }[status] || status;
@@ -3939,7 +3943,7 @@ function hideProcessing() {
         <div class="action-inline"><h3 style="margin:0">Journal Register</h3></div>
         <div class="note" style="margin:6px 0">Every Journal ever saved or sent, by Journal Number — draft journals here haven't been sent for approval yet.</div>
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-journal-register-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="journalRegisterFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="journalRegisterTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="journalRegisterCustomApply">Apply Custom</button></div>
-        <div class="action-inline" style="margin-top:8px"><label class="inline-field"><span>Search by Journal Number or Account Number</span><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" style="max-width:260px"></label></div>
+        <div class="action-inline" style="margin-top:8px"><label class="inline-field"><span>Search by Journal Number, Teller Name or Account Number</span><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" placeholder="Type, then press Enter" style="max-width:260px"></label></div>
         <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Journal No.</th><th>Date</th><th>Kind</th><th>Staff</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No journals found</td></tr>'}</tbody></table></div>
       </div>`;
   }
@@ -3947,7 +3951,6 @@ function hideProcessing() {
   function bindJournalRegister() {
     qq('[data-journal-register-preset]').forEach(btn => btn.onclick = () => {
       state.ui.journalRegisterFilter = { preset: btn.dataset.journalRegisterPreset, from: '', to: '' };
-      state.ui.journalRegisterSearch = '';
       save(); renderWorkspace();
     });
     if (byId('journalRegisterCustomApply')) byId('journalRegisterCustomApply').onclick = () => {
@@ -4177,8 +4180,7 @@ function hideProcessing() {
                 <div class="nc-cell"><div class="display-field" id="journalAccountType">—</div></div>
               </div>
               ${isCreditKind ? `<div class="journal-entry-top row-three commission-journal-row subtle-commission-toggle-row nc-extra-row"><div class="journal-cell commission-toggle-cell"><label class="commission-toggle-chip commission-toggle-chip-mini"><input id="journalApplyCharges" type="checkbox" ${telleringDraft.journalCharges.apply ? 'checked' : ''}> <span>Apply Charges</span></label></div></div><div class="journal-entry-top row-three commission-journal-row subtle-commission-row nc-extra-row ${telleringDraft.journalCharges.apply ? '' : 'hidden'}" id="journalChargesRow"><div class="charges-grid journal-charges-grid">${CHARGE_DEFS.map(def => `<div class="charge-item"><label class="charge-toggle-chip"><input type="checkbox" data-charge-check="${def.key}" data-charge-scope="journal" ${telleringDraft.journalCharges.checked[def.key] ? 'checked' : ''}> <span>${def.label}</span></label><input data-charge-input="${def.key}" data-charge-scope="journal" class="entry-input commission-input ${telleringDraft.journalCharges.checked[def.key] ? '' : 'hidden'}" type="number" value="${escapeHtml(String(telleringDraft.journalCharges.values[def.key] || ''))}"></div>`).join('')}</div><div class="journal-cell commission-mini-field"><div class="display-field commission-display" id="journalTotalCharges">${money(0)}</div><div class="journal-cell-label">Total Charges</div></div><div class="journal-cell commission-mini-field grow"><div class="display-field commission-display" id="journalCustomerGets">${money(0)}</div><div class="journal-cell-label">To Customer Account</div></div></div>` : ''}
-              <div class="action-row journal-submit-row nc-extra-row"><button id="journalSubmit" class="secondary">Submit Journal</button><button class="secondary" id="journalClear">Clear Journal</button><button id="journalCollapseBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button><label class="sheet-btn secondary file-trigger-btn" for="journalFieldNoteInput">Upload Field Note Photo</label><input id="journalFieldNoteInput" type="file" accept="image/*" class="visually-hidden-file-input"><span class="compact-file-name" id="journalFieldNoteName">No file selected</span></div>
-              <div id="journalFieldNotePreview" class="field-note-preview hidden"></div>
+              <div class="action-row journal-submit-row nc-extra-row"><button id="journalSubmit" class="secondary">Submit Journal</button><button class="secondary" id="journalClear">Clear Journal</button><button id="journalCollapseBtn" class="secondary">${journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}</button></div>
             </div>
           </div>
         </div>
@@ -5838,7 +5840,7 @@ function staffLedgerEvents(staffId) {
                Individual journals also keep their own attached note in the
                Journal Register — this is just a "what did I upload most
                recently" shortcut. -->
-          <button id="openFieldNoteBtn" class="secondary">Field Note (Form)</button></div>
+          </div>
           <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Entry</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Details</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No entries in range</td></tr>'}</tbody></table></div>
         </div>
       </div>`;
