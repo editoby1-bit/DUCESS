@@ -13408,18 +13408,17 @@ html{ scroll-padding-top: 92px; }
 .tool-group-toggle{ pointer-events: none !important; cursor: default !important; }
 .tool-group-toggle .tool-group-caret{ display: none !important; }
 
-/* ===== 2026-10-28 EXPERIMENT: faint centred logo as a page backdrop =====
-   Sits above the page but below the pinned dashboard bar and below every
-   pop-up window, ignores the mouse, and fades out at its edges. To remove,
-   delete this block (or deploy the REVERT-no-logo copy of this file). */
-html::before{
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
-  background: url("logo.png") center center / auto 74vh no-repeat;
-  opacity: 0.07;
-  -webkit-mask-image: radial-gradient(ellipse 34% 42% at 50% 50%, #000 52%, transparent 100%);
-  mask-image: radial-gradient(ellipse 34% 42% at 50% 50%, #000 52%, transparent 100%);
+/* ===== 2026-10-28 EXPERIMENT v2: faint centred logo as the page backdrop =====
+   Painted as part of the page background itself (classic theme only), so it
+   sits BEHIND everything: cards, tables and forms completely cover it, and it
+   only shows on empty screen. It is hidden entirely while a pop-up window is
+   open. To remove, delete this block (or deploy the REVERT-no-logo files). */
+body:not([data-theme]), body[data-theme=""]{
+  background-image: url("logo-watermark.webp") !important;
+  background-repeat: no-repeat !important;
+  background-position: center 58% !important;
+  background-size: auto 74vh !important;
+  background-attachment: fixed !important;
 }
+body:has(#modalBack:not(.hidden)){ background-image: none !important; }
+
