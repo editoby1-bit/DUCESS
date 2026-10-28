@@ -13354,8 +13354,7 @@ input.date-mirror-native {
       Treasury) pinned to the top of the screen, so they are always visible while a
       tool is open and nobody has to scroll back up. The logo hub is hidden here
       (the logo is still on the sign-in screen and in the top bar).
-   2) Every group in the left tool list is always open: all sub-items are shown
-      under their heading at all times; the headings no longer collapse. */
+   2) (Reverted 2026-10-28: the left tool list groups open and close on click again.) */
 #moduleGrid.module-grid{
   position: sticky !important;
   top: 0 !important;
@@ -13403,10 +13402,6 @@ input.date-mirror-native {
 /* Land just under the pinned bar when a section/tool scrolls into view. */
 html{ scroll-padding-top: 92px; }
 
-/* Sidebar groups: always open, headings no longer collapse. */
-.tool-group-body.hidden{ display: flex !important; }
-.tool-group-toggle{ pointer-events: none !important; cursor: default !important; }
-.tool-group-toggle .tool-group-caret{ display: none !important; }
 
 /* ===== 2026-10-28 EXPERIMENT v2: faint centred logo as the page backdrop =====
    Painted as part of the page background itself (classic theme only), so it
@@ -13422,3 +13417,52 @@ body:not([data-theme]), body[data-theme=""]{
 }
 body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 
+
+/* ===== 2026-10-28 client: Customer Service forms in line with the others, and Data Backup locked =====
+   Customer Service forms (Account Opening, Check Balance, Account Maintenance,
+   Reactivation) were noticeably smaller than the Tellering forms; scaled up to match. */
+#workspace .workspace-tool-body .opening-card,
+#workspace .workspace-tool-body .check-balance-card,
+#workspace .workspace-tool-body .maintenance-card,
+#workspace .workspace-tool-body .reactivation-card{ zoom: 1.4; }
+
+/* Data Backup (paid add-on, not yet activated): blurred, locked, nothing works. */
+.backup-locked-wrap{ position: relative; }
+.backup-locked{ filter: blur(5px); opacity: .55; pointer-events: none; user-select: none; }
+.backup-locked-msg{
+  position: absolute; top: 90px; left: 50%; transform: translateX(-50%); z-index: 6;
+  background: #15191f; color: #fff; padding: 14px 26px; border-radius: 10px; text-align: center;
+  font-weight: 700; font-size: 15px; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+.backup-locked-msg span{ font-weight: 400; font-size: 12px; opacity: .85; }
+
+/* ===== 2026-10-28 client: larger label fonts (sidebar + forms), form/box sizes unchanged =====
+   Targets (what you actually see on screen): normal items/labels/write-ups 12px,
+   headers 14px. Forms are drawn at a reduced zoom, so each size below is divided
+   by that zoom (--z) to land on the target. Only text that was smaller than the
+   target is raised; nothing is reduced. If the form zoom above is ever changed,
+   change --z here to the same number. */
+#workspace .workspace-tool-body{ --z: 0.76; }
+#workspace .workspace-tool-body :is(.opening-card,.check-balance-card,.maintenance-card,.reactivation-card){ --z: calc(0.76 * 1.4); }
+
+/* Left tool list: top-level buttons and group headings 14px, the items under them 12px. */
+#workspace .tool-tabs .tool-tab,
+#workspace .tool-tabs .tellering-tools-only > .tool-tab,
+#workspace .tool-tabs .tool-group-toggle,
+#workspace .tool-tabs .tool-column-title{ font-size: 14px !important; }
+#workspace .tool-tabs .tool-group-body .tool-tab{ font-size: 12px !important; }
+
+/* Form labels, values and write-ups: 12px. */
+#workspace .workspace-tool-body :is(.nc-tag, .nc-cell, .display-field, .note, .field label, .nc-cell input, .nc-cell select, .nc-cell textarea, .nc-cell button, .sheet-btn){
+  font-size: calc(12px / var(--z)) !important;
+}
+/* Form and table headings: 14px. */
+#workspace .workspace-tool-body :is(.nc-title, .table-card h3, .form-card h3, .record-card h3){
+  font-size: calc(14px / var(--z)) !important;
+}
+#workspace .workspace-tool-body :is(.nc-label, .nc-till-label, .nc-mini-btn, .nc-post-btn, .acct-status-chip, .nc-head-date){
+  font-size: calc(12px / var(--z)) !important;
+}
+#workspace .workspace-tool-body .nc-head{ font-size: calc(14px / var(--z)) !important; }
+#workspace .workspace-tool-body .nc-grid button.nc-mini-btn,
+#workspace .workspace-tool-body .nc-grid button.nc-post-btn{ font-size: calc(12px / var(--z)) !important; }
