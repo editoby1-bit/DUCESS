@@ -13401,7 +13401,7 @@ input.date-mirror-native {
   margin: 0 !important; font-size: 12px !important; white-space: nowrap !important;
 }
 /* Land just under the pinned bar when a section/tool scrolls into view. */
-.workspace-card, .workspace-tool-body{ scroll-margin-top: 78px; }
+html{ scroll-padding-top: 92px; }
 
 /* Sidebar groups: always open, headings no longer collapse. */
 .tool-group-body.hidden{ display: flex !important; }

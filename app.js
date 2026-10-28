@@ -3110,8 +3110,11 @@ function hideProcessing() {
 }
 
   function smoothScrollToOpenedSegment(selector) {
+    // 2026-10-28: always bring the whole work area (heading + tool list + form)
+    // to just under the pinned dashboard bar, so nothing opens half hidden
+    // and nobody has to scroll back up to see it properly.
     requestAnimationFrame(() => {
-      const target = (selector && q(selector)) || q('.workspace-card');
+      const target = q('.workspace-card') || (selector && q(selector));
       target?.scrollIntoView({ behavior:'smooth', block:'start' });
     });
   }
