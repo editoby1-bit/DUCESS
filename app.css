@@ -13328,7 +13328,7 @@ input.date-mirror-native {
    from stretching to fill the column at the smaller scale. */
 @media (min-width: 901px) {
   #workspace .workspace-tool-body {
-    zoom: 0.84;
+    zoom: 0.76;
     max-width: 945px !important;
     margin: 0 !important;
   }
