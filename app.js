@@ -5248,7 +5248,7 @@ function nextPaint() {
     if (tool === 'ict_backup') {
       const gauge = DATA_BACKUP_ACTIVE ? storageGaugeHtml() : '';
       const backupHtml = `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">Data Backup</div><div class="note">Downloads a snapshot of the data this app holds — staff, customer accounts and balances, transactions, approval requests (photos excluded), journals, income &amp; expense accounts, close-of-day records. Store the file somewhere safe and offline. Supabase's free plan keeps no automatic backups of the database, so download this regularly (weekly is a good habit).</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input" placeholder="e.g. Weekly backup, saved to office drive"></div></div><div class="cs2-button-row"><button id="ictBackupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Download Backup</button></div></div>${gauge}${history}</div>`;
-      return DATA_BACKUP_ACTIVE ? backupHtml : `<div class="backup-locked-wrap"><div class="backup-locked-msg">Data Backup is a premium service.<br><span>It will be available once it is activated for this business.</span></div><div class="backup-locked" aria-disabled="true" inert>${backupHtml}</div></div>`;
+      return DATA_BACKUP_ACTIVE ? backupHtml : `<div class="backup-locked-wrap"><div class="backup-locked-msg" id="backupLockMsg">Data Backup is a premium service.<br><span>It will be available once it is activated for this business.</span></div><div class="backup-locked-overlay" id="backupLockOverlay"></div><div class="backup-locked" aria-disabled="true" inert>${backupHtml}</div></div>`;
     }
     const items = ICT_CHECKLISTS[tool] || [];
     return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">${escapeHtml(TOOL_LABELS[tool])} Check</div><div class="note">Tick what has been checked today and add a note, then Save Check. Each check is recorded with your name and the date.</div><div class="stack" style="gap:6px;margin:8px 0">${items.map((it, i) => `<label class="ict-item"><input type="checkbox" data-ict-item="${i}"><span>${escapeHtml(it)}</span></label>`).join('')}</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input"></div></div><div class="cs2-button-row"><button id="ictSaveBtn" class="sheet-btn cs2-btn cs2-btn-solid">Save Check</button></div></div>${history}</div>`;
@@ -5342,6 +5342,16 @@ function nextPaint() {
     if (tool.startsWith('ict_')) {
       const cat = ictCategory(tool);
       if (!adminSessionLoaded.ict[cat] && !(tool === 'ict_backup' && !DATA_BACKUP_ACTIVE)) loadIctLogs(cat);
+      // Locked page: it shows normally, nothing on it responds, and a click
+      // anywhere on it brings up the "premium service" message instead.
+      if (tool === 'ict_backup' && !DATA_BACKUP_ACTIVE && byId('backupLockOverlay')) {
+        byId('backupLockOverlay').onclick = () => {
+          const msg = byId('backupLockMsg'); if (!msg) return;
+          msg.classList.add('show');
+          clearTimeout(window.__backupLockTimer);
+          window.__backupLockTimer = setTimeout(() => msg.classList.remove('show'), 3500);
+        };
+      }
       if (byId('ictBackupBtn')) byId('ictBackupBtn').onclick = async () => {
         if (!DATA_BACKUP_ACTIVE) return showToast('Data Backup is not activated yet');
         // A backup must hold every record, not the recent part + summaries.

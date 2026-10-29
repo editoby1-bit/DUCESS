@@ -13426,14 +13426,17 @@ body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 #workspace .workspace-tool-body .maintenance-card,
 #workspace .workspace-tool-body .reactivation-card{ zoom: 1.4; }
 
-/* Data Backup (paid add-on, not yet activated): blurred, locked, nothing works. */
+/* Data Backup (paid add-on, not yet activated): shown normally, nothing responds, a click shows the message. */
 .backup-locked-wrap{ position: relative; }
-.backup-locked{ filter: blur(5px); opacity: .55; pointer-events: none; user-select: none; }
+.backup-locked{ opacity: .92; user-select: none; }
+.backup-locked-overlay{ position: absolute; inset: 0; z-index: 5; cursor: not-allowed; background: transparent; }
 .backup-locked-msg{
+  display: none;
   position: absolute; top: 90px; left: 50%; transform: translateX(-50%); z-index: 6;
   background: #15191f; color: #fff; padding: 14px 26px; border-radius: 10px; text-align: center;
   font-weight: 700; font-size: 15px; box-shadow: 0 6px 20px rgba(0,0,0,.25);
 }
+.backup-locked-msg.show{ display: block; }
 .backup-locked-msg span{ font-weight: 400; font-size: 12px; opacity: .85; }
 
 /* ===== 2026-10-28 client: larger label fonts (sidebar + forms), form/box sizes unchanged =====
