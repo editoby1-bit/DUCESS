@@ -251,6 +251,11 @@
     }
   };
 
+  // 2026-10-28: Data Backup is a paid add-on. While this is false the page is
+  // shown blurred and locked (with a lock beside it in the menu), nothing on it
+  // works, and it makes no requests. Set to true when the client activates it.
+  const DATA_BACKUP_ACTIVE = false;
+
   const TOOL_LABELS = {
     check_balance: 'Check Balance',
     my_statement: 'My Statement',
@@ -358,7 +363,7 @@
     aud_types:     { base: 'overall_balance', label: 'Account Types Audit' },
     aud_customers: { base: 'overall_balance', label: 'Customer Accounts Audit' },
     ict_access:    { base: 'staff_roster',    label: 'Staff Access Control' },
-    ict_backup:    { base: 'staff_roster',    label: 'Data Backup' },
+    ict_backup:    { base: 'staff_roster',    label: DATA_BACKUP_ACTIVE ? 'Data Backup' : 'Data Backup 🔒' },
     ict_security:  { base: 'staff_roster',    label: 'Data Security' },
     ict_network:   { base: 'staff_roster',    label: 'Network Management' },
     ict_cyber:     { base: 'staff_roster',    label: 'Cybersecurity' },
@@ -376,6 +381,21 @@
   let bulkWriteTimer = null;
   let bulkStoreInstance = null;
   let bulkReady = Promise.resolve();
+  // 2026-10-29 (client clean slate): every device clears its OLD saved browser
+  // data once, the first time it opens this version, then loads fresh from the
+  // database. Sign-in is kept. To force another one-time clear later, change
+  // the date text in RESET_TOKEN; never leave it changing on every release.
+  (function oneTimeLocalReset() {
+    const RESET_TOKEN = '2026-10-29-clean-slate';
+    const TOKEN_KEY = STORAGE_KEY + '__reset';
+    try {
+      if (localStorage.getItem(TOKEN_KEY) === RESET_TOKEN) return;
+      localStorage.removeItem(STORAGE_KEY);
+      if (typeof indexedDB !== 'undefined') indexedDB.deleteDatabase('ducess_cache');
+      localStorage.setItem(TOKEN_KEY, RESET_TOKEN);
+    } catch (_) { /* storage unavailable: nothing to clear */ }
+  })();
+
   const state = bootstrapState();
   state.ui = state.ui || { module: null, tool: null, selectedCustomerId: null, theme: 'classic', businessFilter: { preset: 'daily', from: '', to: '' }, operationalFilter: { preset: 'daily', from: '', to: '' }, approvalsLimit: 20, businessEntriesLimit: 20, operationalEntriesLimit: 20, tellerEntriesLimit: 20, approvalsSection:'tellering', generatedJournals:{}, customerDirectorySearch: '' };
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
@@ -429,7 +449,6 @@
       dayClosures: [],
       activeStaffId: 'st4'
     };
-    s.operations.expenseAccounts.push({ id:'ea1', name:'Transport Expense', accountNumber:'E1', createdAt:new Date().toISOString() });
     s.staff.forEach(st => ensureStaffAccount(st.id, s));
     s.audit.push({ id: uid('aud'), at: new Date().toISOString(), actorId: 'system', actor: 'System', action: 'seed', details: 'Initial demo data created' });
     return s;
@@ -5227,8 +5246,9 @@ function nextPaint() {
     const logRows = (logs || []).map((l, i) => `<tr><td>${i+1}</td><td>${fmtDate(l.created_at)}</td><td>${escapeHtml(l.staff_name || '—')}</td><td>${tool === 'ict_backup' ? 'Backup downloaded' : `${(l.checked_items || []).length} of ${(ICT_CHECKLISTS[tool] || []).length} checked`}</td><td>${escapeHtml(l.note || '')}</td></tr>`).join('');
     const history = `<div class="table-card"><h3>History</h3>${state.ui.ictSource === 'missing' ? `<div class="note" style="border-left-color:#c00000 !important">ICT records table not set up yet — run the ict_logs SQL script in Supabase. Until then records are kept in this browser only.</div>` : ''}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>By</th><th>Result</th><th>Note</th></tr></thead><tbody>${logs ? (logRows || '<tr><td colspan="5">No records yet</td></tr>') : '<tr><td colspan="5">Loading…</td></tr>'}</tbody></table></div></div>`;
     if (tool === 'ict_backup') {
-      const gauge = storageGaugeHtml();
-      return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">Data Backup</div><div class="note">Downloads a snapshot of the data this app holds — staff, customer accounts and balances, transactions, approval requests (photos excluded), journals, income &amp; expense accounts, close-of-day records. Store the file somewhere safe and offline. Supabase's free plan keeps no automatic backups of the database, so download this regularly (weekly is a good habit).</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input" placeholder="e.g. Weekly backup, saved to office drive"></div></div><div class="cs2-button-row"><button id="ictBackupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Download Backup</button></div></div>${gauge}${history}</div>`;
+      const gauge = DATA_BACKUP_ACTIVE ? storageGaugeHtml() : '';
+      const backupHtml = `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">Data Backup</div><div class="note">Downloads a snapshot of the data this app holds — staff, customer accounts and balances, transactions, approval requests (photos excluded), journals, income &amp; expense accounts, close-of-day records. Store the file somewhere safe and offline. Supabase's free plan keeps no automatic backups of the database, so download this regularly (weekly is a good habit).</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input" placeholder="e.g. Weekly backup, saved to office drive"></div></div><div class="cs2-button-row"><button id="ictBackupBtn" class="sheet-btn cs2-btn cs2-btn-solid">Download Backup</button></div></div>${gauge}${history}</div>`;
+      return DATA_BACKUP_ACTIVE ? backupHtml : `<div class="backup-locked-wrap"><div class="backup-locked-msg">Data Backup is a premium service.<br><span>It will be available once it is activated for this business.</span></div><div class="backup-locked" aria-disabled="true" inert>${backupHtml}</div></div>`;
     }
     const items = ICT_CHECKLISTS[tool] || [];
     return `<div class="stack"><div class="form-card cs2-card"><div class="cs2-title">${escapeHtml(TOOL_LABELS[tool])} Check</div><div class="note">Tick what has been checked today and add a note, then Save Check. Each check is recorded with your name and the date.</div><div class="stack" style="gap:6px;margin:8px 0">${items.map((it, i) => `<label class="ict-item"><input type="checkbox" data-ict-item="${i}"><span>${escapeHtml(it)}</span></label>`).join('')}</div><div class="cs2-row"><div class="cs2-label">Note</div><div class="cs2-input-wrap cs2-wide"><input id="ictNote" class="entry-input"></div></div><div class="cs2-button-row"><button id="ictSaveBtn" class="sheet-btn cs2-btn cs2-btn-solid">Save Check</button></div></div>${history}</div>`;
@@ -5321,8 +5341,9 @@ function nextPaint() {
     }
     if (tool.startsWith('ict_')) {
       const cat = ictCategory(tool);
-      if (!adminSessionLoaded.ict[cat]) loadIctLogs(cat);
+      if (!adminSessionLoaded.ict[cat] && !(tool === 'ict_backup' && !DATA_BACKUP_ACTIVE)) loadIctLogs(cat);
       if (byId('ictBackupBtn')) byId('ictBackupBtn').onclick = async () => {
+        if (!DATA_BACKUP_ACTIVE) return showToast('Data Backup is not activated yet');
         // A backup must hold every record, not the recent part + summaries.
         if (!historyCovers(null)) {
           showProcessing('Loading all records for the backup...');
