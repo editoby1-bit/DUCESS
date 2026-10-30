@@ -2783,6 +2783,15 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       }
       const { data: staffRow, error: staffErr } = await client.from(staffTable).select(staffProfileSelect).eq('id', staffUuid).single();
       if (staffErr || !staffRow) return defaultResult.err('ROLE_ASSIGN_REFRESH_FAILED', 'Role was assigned but the staff record could not be re-read — refresh the page.', staffErr);
+      // 2026-10-30: never report success if the database did not actually keep
+      // the new role (the app used to say "is now Teller" while the staff
+      // record still read Unassigned).
+      {
+        const normRole = (r) => { const v = String(r || '').trim().toLowerCase(); return (!v || v === 'unassigned') ? 'unassigned' : v; };
+        if (normRole(staffRow.role_code) !== normRole(roleCode)) {
+          return defaultResult.err('ROLE_NOT_SAVED', `The database accepted the request but the role is still "${staffRow.role_code || 'unassigned'}". The role was NOT saved — run DIAGNOSE-role-assignment.sql in Supabase and send me the result.`, staffRow);
+        }
+      }
       const summary = normalizeStaffSummary(staffRow);
       if (CASH_ROLES.includes(roleCode)) {
         const prov = await provisionStaffOperationalAccount(staffRow.id, summary.fullName, roleCode);
