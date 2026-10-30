@@ -51,7 +51,10 @@ const ROLE_DEFAULT_TOOLS = {
   // createStaff (legacy role-at-creation path) and assignStaffRole.
   // 2026-10-24: Treasury (cash_officer) no longer gets a personal operational
   // account — Treasury accounts are business accounts opened in Account Opening.
-  const CASH_ROLES = ['teller', 'admin_officer'];
+  // 2026-10-29 (client): a Teller Account is NOT opened automatically when the
+  // Teller role is assigned any more — Customer Service opens it in Account
+  // Opening > Teller Account (so the newly assigned teller appears in that list).
+  const CASH_ROLES = ['admin_officer'];
   function operationalDisplayName(roleCode, fullName) {
     const firstName = String(fullName || '').trim().split(/\s+/)[0] || fullName;
     return roleCode === 'cash_officer' ? `TREASURY ${firstName}` : roleCode === 'admin_officer' ? `ADMIN ${firstName}` : `TELLER ${fullName}`;
