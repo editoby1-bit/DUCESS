@@ -3140,7 +3140,7 @@ function hideProcessing() {
 
   function renderModules() {
     const current = state.ui.module;
-    const moduleOrder = ['customer_service','tellering','approvals','administration','cash_officer'];
+    const moduleOrder = ['customer_service','tellering','cash_officer','approvals','administration'];
     byId('moduleGrid').innerHTML = `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
       const m = MODULES[key];
       const allowed = moduleAllowed(key);
