@@ -10256,7 +10256,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     // no personal operational account is opened for them.
     if (CASH_HANDLING_ROLES.includes(newRole) && newRole !== 'cash_officer') {
       const hasOp = (state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === st.id);
-      infos.push(hasOp ? `${name}'s existing operational account will be re-used (same account number and balance).` : `An operational account will be opened automatically for ${name}.`);
+      if (newRole === 'teller') infos.push(hasOp ? `${name}'s existing Teller Account will be re-used (same account number and balance).` : `${name}'s Teller Account is opened by Customer Service: Account Opening > Teller Account.`);
+      else infos.push(hasOp ? `${name}'s existing operational account will be re-used (same account number and balance).` : `An operational account will be opened automatically for ${name}.`);
     }
     if (newRole === UNASSIGNED_ROLE) warnings.push(`${name} will lose all access until another role is assigned. History and balances are kept.`);
     return { blockers, warnings, infos };
