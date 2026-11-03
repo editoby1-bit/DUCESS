@@ -12,7 +12,7 @@
   const TIME_FMT = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:true });
   const THEMES = ['classic','ducess-sheet','ocean','dark-slate','neutral-stone'];
   const THEME_LABELS = { classic:'Classic', 'ducess-sheet':'Ducess Sheet', ocean:'Ocean', 'dark-slate':'Dark Slate', 'neutral-stone':'Neutral Stone' };
-  const money = (n) => Number(n || 0).toLocaleString();
+  const money = (n) => Number(n || 0).toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 2 });
   // SURGICAL ADDITION 2026-08-19: amount fields were native type="number",
   // which can never display thousand-separator commas (a browser
   // restriction, not something CSS/JS can override on a number input) — so
@@ -35,8 +35,8 @@
       const firstDot = raw.indexOf('.');
       const intPart = (firstDot === -1 ? raw : raw.slice(0, firstDot)).replace(/^0+(?=\d)/, '');
       const decPart = firstDot === -1 ? '' : '.' + raw.slice(firstDot + 1).replace(/\./g, '').slice(0, 2);
-      const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-      el.value = formattedInt + decPart;
+      // 2026-11-02: no thousand-separator commas (client: commas lead to mistakes)
+      el.value = intPart + decPart;
     });
   }
   const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
@@ -2948,7 +2948,7 @@ if (approvalRecord.type === 'float_topup') {
       phone: customer?.phone || '',
       // A teller's T-account balance is the operational balance (Till), not
       // the customer-style balance field (2026-10-22).
-      balance: customer ? balanceHtml(customer.accountType === 'staff_operational' ? getStaffOperationalBalance(customer.linkedStaffId) : customer.balance) : '—',
+      balance: customer ? balanceHtml(customer.accountType === 'staff_operational' ? tellerTillBalance(customer.linkedStaffId) : customer.balance) : '—',
       address: customer?.address || '',
       nin: customer?.nin || '',
       bvn: customer?.bvn || ''
@@ -3639,7 +3639,7 @@ function hideProcessing() {
             <div class="info-item"><div class="k">A/C Name</div><div class="v">${escapeHtml(customer.name || '')}</div></div>
             <div class="info-item"><div class="k">Account Number</div><div class="v">${customer.accountNumber || '—'}</div></div>
             <div class="info-item"><div class="k">Teller</div><div class="v">${escapeHtml(staffById(customer.linkedStaffId)?.name || '—')}</div></div>
-            <div class="info-item"><div class="k">Available Balance</div><div class="v">${money(getStaffOperationalBalance(customer.linkedStaffId))}</div></div>
+            ${(() => { const tb = getTillBreakdown(customer.linkedStaffId, businessDate()); return `<div class="info-item"><div class="k">Opening Cash</div><div class="v">${money(tb.openingCash)}</div></div><div class="info-item"><div class="k">Cash Received</div><div class="v">${money(tb.cashReceived)}</div></div><div class="info-item"><div class="k">Cash Withdrawal</div><div class="v">${money(tb.cashWithdrawal)}</div></div><div class="info-item"><div class="k">Till (Available Balance)</div><div class="v">${money(tb.till)}</div></div>`; })()}
           </div></div></div>
           <div class="table-wrap" style="margin-top:16px"><table class="table">
             <thead><tr><th>S/N</th><th>Date</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead>
@@ -3713,6 +3713,101 @@ function hideProcessing() {
   // gets a permanent, referenceable Journal Number. One global sequence
   // (JN1, JN2, JN3...), never reused, regardless of who created it or
   // whether it's a Credit or Debit journal.
+  // ===== 2026-11-03: journals are stored in the database =====
+  // state.journals stays as the in-memory working copy so every screen keeps
+  // working; the database (public.journals) is the source of truth. If the SQL
+  // script has not been run yet, or the app is in local mode, everything falls
+  // back to the old browser-only behaviour.
+  let journalsDbUnavailable = false;
+  let journalsLastSync = 0;
+  const journalsInDb = () => !journalsDbUnavailable && isSupabaseApprovalMode() && !!gateway.journals?.list;
+
+  async function reserveJournalNumber() {
+    if (!journalsInDb()) return { ok: true, number: nextJournalNumber() };
+    const res = await gateway.journals.nextNumber();
+    if (res?.ok) return { ok: true, number: res.data };
+    if (res?.error?.code === 'TABLE_MISSING') { journalsDbUnavailable = true; return { ok: true, number: nextJournalNumber() }; }
+    return { ok: false, message: res?.error?.message || 'Could not get a Journal Number — check your connection and try again.' };
+  }
+
+  async function persistJournal(record) {
+    if (!record || !journalsInDb()) return;
+    const res = await gateway.journals.save(record);
+    if (res?.ok) return;
+    if (res?.error?.code === 'TABLE_MISSING') { journalsDbUnavailable = true; return; }
+    showToast('Journal kept on this device only — could not save it to the database. Try again shortly.');
+  }
+
+  // The list never carries the field-note photo; fetch it when a journal is opened or sent.
+  async function ensureJournalFull(record) {
+    if (!record || record.fieldNote || !record.hasFieldNote || !journalsInDb()) return record;
+    const res = await gateway.journals.get(record.id);
+    if (res?.ok && res.data) record.fieldNote = res.data.fieldNote || null;
+    return record;
+  }
+
+  async function syncJournalsFromGateway() {
+    if (!journalsInDb()) return false;
+    // A wipe changes the database's data epoch. A browser that sees a different
+    // epoch than the one it last knew drops its saved journals and uploads nothing.
+    try {
+      const ep = await gateway.journals.epoch();
+      if (ep?.ok && ep.data) {
+        if (state.journalsEpoch && state.journalsEpoch !== ep.data) {
+          state.journals = []; state.journalsSyncedAt = ''; state.journalsMigrated = true;
+        }
+        state.journalsEpoch = ep.data;
+      }
+    } catch (_e) {}
+    const since = state.journalsSyncedAt || '';
+    let res = await gateway.journals.list(since ? { since } : { windowDays: 45 });
+    if (!res?.ok) { if (res?.error?.code === 'TABLE_MISSING') journalsDbUnavailable = true; return false; }
+    const local = state.journals || [];
+    // One-time upload of whatever this browser already holds.
+    if (!state.journalsMigrated) {
+      const known = new Set(res.data.map(j => j.id));
+      const toSend = local.filter(j => j && j.id && j.journalNumber && !known.has(j.id));
+      if (toSend.length) {
+        const imp = await gateway.journals.importLocal(toSend);
+        if (imp?.ok) {
+          if (imp.data.imported) showToast(`${imp.data.imported} saved journal(s) from this device moved to the database`);
+          if (imp.data.skipped?.length) showToast(`Not moved (number already used): ${imp.data.skipped.join(', ')}`);
+        } else if (imp?.error?.code === 'TABLE_MISSING') { journalsDbUnavailable = true; return false; }
+      }
+      state.journalsMigrated = true;
+    }
+    // Merge by id: database rows win, a locally held photo is kept.
+    const byId = new Map(local.map(j => [j.id, j]));
+    let newest = since;
+    res.data.forEach(r => {
+      const l = byId.get(r.id);
+      byId.set(r.id, l && l.fieldNote ? { ...r, fieldNote: l.fieldNote } : r);
+      if (r.updatedAt && r.updatedAt > newest) newest = r.updatedAt;
+    });
+    // Anything this browser holds that the database lacks (first load only, when
+    // the list is a window): try to store it. Never deletes anything.
+    if (!since) {
+      const dbIds = new Set(res.data.map(j => j.id));
+      local.forEach(l => { if (l && l.id && l.journalNumber && !dbIds.has(l.id) && l.status === 'draft') persistJournal(l); });
+    }
+    const merged = Array.from(byId.values()).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    const sig = (arr) => arr.map(j => `${j.id}:${j.status}:${j.date}:${(j.rows || []).length}:${j.formAmount}`).join('|');
+    const changed = sig(merged) !== sig(local);
+    state.journals = merged;
+    if (newest && newest !== since) state.journalsSyncedAt = newest;
+    else if (!since) state.journalsSyncedAt = new Date().toISOString();
+    if (changed || state.journalsSyncedAt !== since) save();
+    journalsLastSync = Date.now();
+    return changed;
+  }
+
+  function journalsVisibleToCurrentStaff(list) {
+    const me = currentStaff();
+    const role = me ? staffRoleCode(me) : '';
+    if (!me || ['admin_officer', 'approving_officer', 'report_officer'].includes(role)) return list;
+    return list.filter(j => !j.staffId || j.staffId === me.id);
+  }
+
   function nextJournalNumber() {
     let max = 0;
     (state.journals || []).forEach(j => {
@@ -3726,7 +3821,16 @@ function hideProcessing() {
   // "Send for Approval" action, so a saved draft is sent through the exact
   // same approval path as one typed and submitted in one sitting — no
   // parallel/duplicate logic to keep in sync.
-  async function submitJournalRows(kind, staffId, staffName, formAmount, formPaymentMode, rows, fieldNote, journalNumber, funding) {
+  // 2026-11-02 (client): the journal date is typed by the teller (may be a past
+  // date); the business date is system-set and not editable. Returns an error
+  // message or ''.
+  function validateJournalDate(value) {
+    const v = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return 'Enter the Journal Date';
+    if (v > businessDate()) return 'Journal Date cannot be after the business date';
+    return '';
+  }
+  async function submitJournalRows(kind, staffId, staffName, formAmount, formPaymentMode, rows, fieldNote, journalNumber, funding, meta) {
     const type = kind === 'credit' ? 'customer_credit_journal' : 'customer_debit_journal';
     // SURGICAL PATCH 2026-09-22 (client-confirmed design, cont'd): the
     // performing teller can fund a journal from ANY account, not just a
@@ -3742,6 +3846,7 @@ function hideProcessing() {
     const isFundingStaffAccount = !funding || funding.accountType === 'staff_operational';
     return await submitApprovalThroughGateway(type, {
       staffId, staffName, date: businessDate(), formAmount, formPaymentMode, journalNumber,
+      journalDate: meta?.journalDate || '', confirmedBy: meta?.confirmedBy || '', description: meta?.description || '', counterparty: meta?.counterparty || '',
       fundingStaffId: isFundingStaffAccount ? (funding?.linkedStaffId || staffId) : null,
       fundingLeg: isFundingStaffAccount ? null : { accountId: funding.id, accountNumber: funding.accountNumber, accountType: funding.accountType, name: funding.name },
       rows: (rows || []).map(row => ({
@@ -3750,7 +3855,7 @@ function hideProcessing() {
         amount: row.amount, customerCreditAmount: row.customerCreditAmount, chargeBreakdown: row.chargeBreakdown,
         totalChargeAmount: row.totalChargeAmount, commissionAmount: row.commissionAmount,
         chargeTraceId: row.chargeTraceId || row.commissionTraceId, commissionTraceId: row.commissionTraceId,
-        details: row.details, receivedOrPaidBy: row.receivedOrPaidBy, payoutSource: row.payoutSource, paymentMode: row.paymentMode
+        details: (meta?.description || row.details || ''), receivedOrPaidBy: row.receivedOrPaidBy || meta?.counterparty || '', payoutSource: row.payoutSource, paymentMode: row.paymentMode
       })),
       fieldNote: fieldNote || null
     });
@@ -3789,8 +3894,8 @@ function hideProcessing() {
     const accountPanelTitle = isCredit ? 'Debit Account' : 'Credit Account';
     const journalPanelTitle = isCredit ? 'Credit Journal' : 'Debit Journal';
     const row = (label, value, label2, value2) => `<div class="cs2-row"><div class="cs2-label">${label}</div><div class="display-field">${value}</div>${label2 ? `<div class="cs2-label" style="margin-left:10px">${label2}</div><div class="display-field">${value2}</div>` : ''}</div>`;
-    const accountTypeLabel = (t) => t === 'staff_operational' ? 'Staff Operational' : (t === 'staff_salary' ? 'Staff Salary' : (t === 'expense' ? 'Expense' : (t === 'income' ? 'Income' : (t === 'treasury' ? 'Treasury' : 'Customer'))));
-    const balanceFor = (c) => c ? (c.accountType === 'staff_operational' ? getStaffOperationalBalance(c.linkedStaffId) : (c.balance || 0)) : 0;
+    const accountTypeLabel = (t) => t === 'staff_operational' ? 'Teller' : (t === 'staff_salary' ? 'Staff Salary' : (t === 'expense' ? 'Expense' : (t === 'income' ? 'Income' : (t === 'treasury' ? 'Treasury' : 'Customer'))));
+    const balanceFor = (c) => c ? (c.accountType === 'staff_operational' ? tellerTillBalance(c.linkedStaffId) : (c.balance || 0)) : 0;
     // SURGICAL PATCH 2026-09-22 (client-confirmed design, cont'd 2): the
     // performing teller can fund a journal from ANY account — not
     // restricted to staff operational. Whichever account is chosen still
@@ -3849,14 +3954,16 @@ function hideProcessing() {
             // formAmount as it stood then — re-checking against whatever
             // the balance is NOW would risk rejecting a journal that was
             // already valid when saved, so we send exactly what was saved.
+            await ensureJournalFull(record);
             const funding = { id: fundingAccount.id, accountNumber: fundingAccount.accountNumber, accountType: fundingAccount.accountType, name: fundingAccount.name, linkedStaffId: fundingAccount.linkedStaffId };
-            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber, funding);
+            const result = await submitJournalRows(record.kind, record.staffId, record.staffName, record.formAmount, record.formPaymentMode, record.rows, record.fieldNote, record.journalNumber, funding, { journalDate: record.journalDate || '', confirmedBy: record.confirmedBy || '', description: record.description || '', counterparty: record.counterparty || '' });
             if (!result?.ok) return showToast(result?.error?.message || 'Unable to send journal');
             // Business date is captured here, at actual posting time — not
             // when the draft was merely saved.
             record.date = businessDate();
             record.status = 'sent';
             save();
+            await persistJournal(record);
             showToast(`${record.journalNumber} sent for approval`);
             renderWorkspace();
           } finally { hideProcessing(); }
@@ -3919,11 +4026,57 @@ function hideProcessing() {
   // date and searchable by Journal Number. Replaces the journal-sourced
   // rows that used to blend into Statement of Account (moved because it's
   // the STAFF's own record of what they posted, not the customer's).
+  // 2026-11-02 (client): saved journals live in this browser only, so a journal
+  // sent from another device (or one whose local copy is gone) never showed up
+  // in the Register. Every journal approval request the app can see is now also
+  // listed, built from the request itself, unless the local record exists.
+  function allJournalRecords() {
+    const local = journalsVisibleToCurrentStaff(state.journals || []);
+    const known = new Set((state.journals || []).map(j => String(j.journalNumber || '')));
+    const fromApprovals = [];
+    (state.approvals || []).forEach(req => {
+      if (req.type !== 'customer_credit_journal' && req.type !== 'customer_debit_journal') return;
+      const p = req.payload || {};
+      const jn = String(p.journalNumber || '');
+      if (!jn || known.has(jn)) return;
+      known.add(jn);
+      fromApprovals.push({
+        id: `ap_${req.id}`, fromApproval: true, journalNumber: jn,
+        kind: req.type === 'customer_credit_journal' ? 'credit' : 'debit',
+        date: p.date || '', journalDate: p.journalDate || '', confirmedBy: p.confirmedBy || '',
+        description: p.description || '', counterparty: p.counterparty || '',
+        staffId: p.staffId || '', staffName: p.staffName || req.requestedByName || '',
+        formAmount: Number(p.formAmount || 0), rows: Array.isArray(p.rows) ? p.rows : [],
+        fieldNote: p.fieldNote || null, status: 'sent', createdAt: req.requestedAt || req.createdAt || ''
+      });
+    });
+    return local.concat(fromApprovals);
+  }
+
+  function journalDetailBody(record) {
+    const status = journalEffectiveStatus(record);
+    const statusLabel = { draft: 'Draft', pending: 'Pending Approval', approved: 'Approved', rejected: 'Rejected', sent: 'Pending Approval' }[status] || status;
+    const rowsHtml = (record.rows || []).map((r, i) => `<tr><td>${i+1}</td><td>${escapeHtml(r.accountNumber||'')}</td><td>${escapeHtml(r.customerName||'')}</td><td>${money(r.amount||0)}</td></tr>`).join('');
+    const kv = (k, v) => `<div class="info-item"><div class="k">${k}</div><div class="v">${escapeHtml(v || '—')}</div></div>`;
+    return `<div class="stack">
+        <div class="info-grid">
+          ${kv('Journal Number', record.journalNumber)}${kv('Type', record.kind === 'credit' ? 'Credit Journal' : 'Debit Journal')}
+          ${kv('Business Date', record.date ? fmtDate(record.date) : '')}${kv('Journal Date', record.journalDate ? fmtDate(record.journalDate) : '')}
+          ${kv('Journal Name', record.counterparty)}${kv('Confirmed By', record.confirmedBy)}
+          ${kv('Description', record.description)}${kv('Journal Value', money(record.formAmount || 0))}
+          ${kv('Prepared By', record.staffName)}${kv('Status', statusLabel)}
+        </div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account No.</th><th>Name</th><th>Amount</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="4">No rows</td></tr>'}</tbody></table></div>
+        ${record.fieldNote && record.fieldNote.dataUrl ? (String(record.fieldNote.type||'').startsWith('image/') ? `<img src="${record.fieldNote.dataUrl}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">` : `<a href="${record.fieldNote.dataUrl}" target="_blank" rel="noopener">📄 ${escapeHtml(record.fieldNote.name||'Field note')}</a>`) : ''}
+      </div>`;
+  }
+
   function renderJournalRegister() {
     const filter = state.ui.journalRegisterFilter || { preset: 'all', from: '', to: '' };
     const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['all','All']];
     const searchNumber = (state.ui.journalRegisterSearch || '').trim().toUpperCase();
-    let list = (state.journals || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    // 2026-11-02 (client): oldest first, newest at the bottom.
+    let list = allJournalRecords().slice().sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
     if (searchNumber) {
       // SURGICAL FIX 2026-09-24 (client-reported bug): the search box had no
       // label and only ever matched Journal Number — searching by an
@@ -3936,13 +4089,14 @@ function hideProcessing() {
       list = list.filter(j =>
         String(j.journalNumber || '').toUpperCase().includes(searchNumber) ||
         String(j.staffName || '').toUpperCase().includes(searchNumber) ||
-        (j.rows || []).some(r => String(r.accountNumber || '').toUpperCase().includes(searchNumber))
+        String(j.counterparty || '').toUpperCase().includes(searchNumber) ||
+        (j.rows || []).some(r => String(r.accountNumber || '').toUpperCase().includes(searchNumber) || String(r.customerName || '').toUpperCase().includes(searchNumber))
       );
     }
     list = filterByDate(list, filter);
     // 2026-10-27 (client): pick a teller from a list instead of typing.
     const tellerPick = state.ui.journalRegisterTeller || '';
-    const tellerNames = Array.from(new Set((state.journals || []).map(j => String(j.staffName || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    const tellerNames = Array.from(new Set(allJournalRecords().map(j => String(j.staffName || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
     if (tellerPick) list = list.filter(j => String(j.staffName || '').trim() === tellerPick);
     const rows = list.map((j, i) => {
       const status = journalEffectiveStatus(j);
@@ -3951,7 +4105,8 @@ function hideProcessing() {
       return `<tr>
         <td>${i+1}</td>
         <td><strong>${escapeHtml(j.journalNumber)}</strong></td>
-        <td>${fmtDate(j.date)}</td>
+        <td>${j.date ? fmtDate(j.date) : ''}</td>
+        <td>${j.journalDate ? fmtDate(j.journalDate) : ''}</td>
         <td>${j.kind === 'credit' ? 'Credit' : 'Debit'}</td>
         <td>${escapeHtml(j.staffName || '')}</td>
         <td>${money(j.formAmount || 0)}</td>
@@ -3965,11 +4120,17 @@ function hideProcessing() {
         <div class="note" style="margin:6px 0">Every Journal ever saved or sent, by Journal Number — draft journals here haven't been sent for approval yet.</div>
         <div class="action-inline balance-filters-row">${presets.map(([k,l])=>`<button class="filter-chip ${filter.preset===k?'active':'secondary'}" data-journal-register-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="journalRegisterFrom" type="date" lang="en-GB" value="${filter.from||''}"></label><label class="inline-field"><span>To</span><input id="journalRegisterTo" type="date" lang="en-GB" value="${filter.to||''}"></label><button class="secondary" id="journalRegisterCustomApply">Apply Custom</button></div>
         <div class="action-inline" style="margin-top:8px"><label class="inline-field"><span>Search by Journal Number, Teller Name or Account Number</span><input id="journalRegisterSearch" class="entry-input" value="${escapeHtml(searchNumber)}" placeholder="Type, then press Enter" style="max-width:260px"></label><button id="journalRegisterSearchBtn" class="secondary">Search</button><label class="inline-field"><span>Teller</span><select id="journalRegisterTeller" class="entry-input" style="max-width:220px"><option value="">All Tellers</option>${tellerNames.map(n => `<option value="${escapeHtml(n)}" ${n === tellerPick ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></label></div>
-        <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Journal No.</th><th>Date</th><th>Kind</th><th>Staff</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No journals found</td></tr>'}</tbody></table></div>
+        <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Journal No.</th><th>Business Date</th><th>Journal Date</th><th>Kind</th><th>Staff</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="9">No journals found</td></tr>'}</tbody></table></div>
       </div>`;
   }
 
   function bindJournalRegister() {
+    // 2026-11-03: refresh from the database each time the Register opens
+    // (at most every 4 seconds), re-drawing only if something changed.
+    if (journalsInDb() && Date.now() - journalsLastSync > 4000) {
+      journalsLastSync = Date.now();
+      syncJournalsFromGateway().then(changed => { if (changed && state.ui.tool === 'journal_register') renderWorkspace(); }).catch(() => {});
+    }
     qq('[data-journal-register-preset]').forEach(btn => btn.onclick = () => {
       state.ui.journalRegisterFilter = { preset: btn.dataset.journalRegisterPreset, from: '', to: '' };
       save(); renderWorkspace();
@@ -3979,11 +4140,25 @@ function hideProcessing() {
       save(); renderWorkspace();
     };
     const searchInput = byId('journalRegisterSearch');
-    if (searchInput) searchInput.onkeyup = (e) => {
-      if (e.key !== 'Enter') return;
-      state.ui.journalRegisterSearch = searchInput.value;
-      save(); renderWorkspace();
-    };
+    if (searchInput) {
+      searchInput.onkeyup = (e) => {
+        if (e.key !== 'Enter') return;
+        state.ui.journalRegisterSearch = searchInput.value;
+        save(); renderWorkspace();
+      };
+      // 2026-11-02 (client): search as you type (account number, customer name,
+      // journal number, teller) — Enter/button still work.
+      let regTimer = null;
+      searchInput.oninput = () => {
+        clearTimeout(regTimer);
+        regTimer = setTimeout(() => {
+          state.ui.journalRegisterSearch = searchInput.value;
+          save(); renderWorkspace();
+          const again = byId('journalRegisterSearch');
+          if (again) { again.focus(); const n = again.value.length; try { again.setSelectionRange(n, n); } catch (_e) {} }
+        }, 350);
+      };
+    }
     if (byId('journalRegisterSearchBtn')) byId('journalRegisterSearchBtn').onclick = () => {
       state.ui.journalRegisterSearch = byId('journalRegisterSearch')?.value || '';
       save(); renderWorkspace();
@@ -3992,9 +4167,10 @@ function hideProcessing() {
       state.ui.journalRegisterTeller = e.target.value || '';
       save(); renderWorkspace();
     };
-    qq('[data-journal-resume]').forEach(btn => btn.onclick = () => {
+    qq('[data-journal-resume]').forEach(btn => btn.onclick = async () => {
       const record = (state.journals || []).find(j => j.id === btn.dataset.journalResume);
       if (!record) return showToast('Journal not found');
+      await ensureJournalFull(record);
       const staff = currentStaff();
       // Resuming loads the draft's rows into TODAY's working journal slot
       // for this staff/kind, and remembers the draft's id so Save/Submit
@@ -4014,6 +4190,8 @@ function hideProcessing() {
       resumeDraft.journalFormAmount = record.formAmount ? String(record.formAmount) : '';
       resumeDraft.journalFormMode = record.formPaymentMode || 'cash';
       resumeDraft.journalDescription = record.description || '';
+      resumeDraft.journalConfirmedBy = record.confirmedBy || '';
+      resumeDraft.journalDate = record.journalDate || '';
       state.ui.journalCounterpartyDraft = record.counterparty || '';
       save();
       renderWorkspace();
@@ -4024,16 +4202,11 @@ function hideProcessing() {
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
       openJournalPostModal(record);
     });
-    qq('[data-journal-view]').forEach(btn => btn.onclick = () => {
-      const record = (state.journals || []).find(j => j.id === btn.dataset.journalView);
+    qq('[data-journal-view]').forEach(btn => btn.onclick = async () => {
+      const record = allJournalRecords().find(j => j.id === btn.dataset.journalView);
       if (!record) return showToast('Journal not found');
-      const rowsHtml = (record.rows || []).map((r, i) => `<tr><td>${i+1}</td><td>${escapeHtml(r.accountNumber||'')}</td><td>${escapeHtml(r.customerName||'')}</td><td>${money(r.amount||0)}</td></tr>`).join('');
-      const body = `<div class="stack">
-        <div class="note">${record.kind === 'credit' ? 'Credit' : 'Debit'} Journal • ${fmtDate(record.date)} • by ${escapeHtml(record.staffName || '')} • Form Amount ${money(record.formAmount || 0)}</div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account No.</th><th>Name</th><th>Amount</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="4">No rows</td></tr>'}</tbody></table></div>
-        ${record.fieldNote ? (String(record.fieldNote.type||'').startsWith('image/') ? `<img src="${record.fieldNote.dataUrl}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">` : `<a href="${record.fieldNote.dataUrl}" target="_blank" rel="noopener">📄 ${escapeHtml(record.fieldNote.name||'Field note')}</a>`) : ''}
-      </div>`;
-      openModal(`${record.journalNumber}`, body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+      await ensureJournalFull(record);
+      openModal(`${record.journalNumber}`, journalDetailBody(record), [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
     });
   }
 
@@ -4160,14 +4333,16 @@ function hideProcessing() {
               <div class="nc-head">${isCreditKind ? 'Credit' : 'Debit'} Entries</div>
               <div class="jr-label">Journal Number</div>
               <div class="jr-cell"><div class="display-field" id="journalNumberPreview">${escapeHtml(journalNumberText)}</div></div>
-              <div class="jr-label">Journal Date</div>
-              <div class="jr-cell"><div class="display-field">${fmtDate(businessDate())}</div></div>
+              <div class="jr-label">Business Date</div>
+              <div class="jr-cell"><div class="display-field" id="journalBusinessDate">${fmtDate(businessDate())}</div></div>
 
               <div class="jr-label">Journal Name</div>
               <div class="jr-cell"><input id="journalCounterparty" class="entry-input" placeholder="${isCreditKind ? 'e.g. Received By Daniel' : 'e.g. Paid By Daniel'}" value="${escapeHtml(String(state.ui.journalCounterpartyDraft || ''))}"></div>
               <div class="jr-label">Confirmed By</div>
-              <div class="jr-cell"><div class="display-field" id="journalConfirmedBy">—</div></div>
+              <div class="jr-cell"><input id="journalConfirmedBy" class="entry-input" value="${escapeHtml(String(telleringDraft.journalConfirmedBy || ''))}"></div>
 
+              <div class="jr-label">Journal Date</div>
+              <div class="jr-cell"><input id="journalDate" class="entry-input" type="date" lang="en-GB" max="${escapeHtml(businessDate())}" value="${escapeHtml(String(telleringDraft.journalDate || ''))}"></div>
               <div class="jr-label">Journal Description</div>
               <div class="jr-cell"><input id="journalDescription" class="entry-input" value="${escapeHtml(String(telleringDraft.journalDescription || ''))}"></div>
               <div class="jr-label">Journal Value</div>
@@ -4192,9 +4367,6 @@ function hideProcessing() {
 
                 <div class="nc-label">Account Name</div>
                 <div class="nc-cell nc-span-4"><div class="display-field" id="journalName">—</div></div>
-
-                <div class="nc-label">Description</div>
-                <div class="nc-cell nc-span-4"><input id="journalDetails" class="entry-input"></div>
 
                 <div class="nc-label">Account Balance</div>
                 <div class="nc-cell"><div class="display-field" id="journalAccBalance">—</div></div>
@@ -4616,10 +4788,17 @@ function hideProcessing() {
       </tr>`;
     }).join('');
     const note = p.fieldNote;
-    const noteBlock = note ? `<div class="note">Field note attached: ${esc(note.name || 'Attached file')}</div>` : '';
+    const noteBlock = note ? (note.dataUrl && String(note.type || '').startsWith('image/')
+      ? `<div class="note">Field note: ${esc(note.name || 'Attached file')}</div><img src="${note.dataUrl}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">`
+      : `<div class="note">Field note attached: ${esc(note.name || 'Attached file')}</div>`) : '';
     html = `<div class="stack">
       <div class="form-grid three modal-cs-grid">
+        ${field('Journal Number', p.journalNumber || '—', 'field-account')}
         ${field('Business Date', p.date || p.businessDate || '—', 'field-date')}
+        ${field('Journal Date', p.journalDate || '—', 'field-date')}
+        ${field('Journal Name', p.counterparty || '—', 'field-wide')}
+        ${field('Confirmed By', p.confirmedBy || '—', 'field-wide')}
+        ${field('Description', p.description || '—', 'field-wide')}
         ${field('Items', rows.length, 'field-account')}
         ${field('Total Amount', money(total), 'field-account')}
         ${field('Journal Form Amount', money(p.formAmount || 0), 'field-account')}
@@ -5039,7 +5218,8 @@ function nextPaint() {
     if (def.report === 'overall') {
       const sumGroup = (accts, itemsOf, balOf) => accts.reduce((acc, a) => { const f = periodFigures(balOf(a), itemsOf(a), r); acc.opening += f.opening; acc.debit += f.debit; acc.credit += f.credit; acc.closing += f.closing; return acc; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
       const cats = [
-        ["All Customers' Balance", sumGroup((state.customers || []).filter(c => String(c.accountType || 'customer') !== 'staff_wallet'), txItems, c => c.balance)],
+        ["All Customers' Balance", sumGroup((state.customers || []).filter(c => !['staff_wallet','treasury'].includes(String(c.accountType || 'customer'))), txItems, c => c.balance)],
+        ['Treasury Balance', sumGroup((state.customers || []).filter(c => String(c.accountType || '') === 'treasury'), txItems, c => c.balance)],
         ['All Staff Balance', sumGroup((state.staff || []).map(st => { const acc = ensureStaffAccount(st.id); return { acc, wallet: (state.customers || []).find(c => c.id === acc.linkedCustomerId) }; }), x => txItems(x.wallet), x => x.acc.balance)],
         ['Income Balance', sumGroup(state.operations.incomeAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
         ['Expense Balance', sumGroup(state.operations.expenseAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
@@ -5383,7 +5563,13 @@ function nextPaint() {
     // Overall Balance is a rollup of the OTHER balance categories — not another
     // per-account or staff-balance listing. Each row here is a category total.
     let customerDebit = 0, customerCredit = 0, customerBalance = 0;
-    (state.customers || []).filter(c => String(c.accountType || 'customer') !== 'staff_wallet').forEach(c => {
+    let treasuryDebit = 0, treasuryCredit = 0, treasuryBalance = 0;
+    (state.customers || []).filter(c => String(c.accountType || '') === 'treasury').forEach(c => {
+      treasuryCredit += (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s,tx)=>s+Number(tx.amount||0),0);
+      treasuryDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s,tx)=>s+Number(tx.amount||0),0);
+      treasuryBalance += Number(c.balance||0);
+    });
+    (state.customers || []).filter(c => !['staff_wallet','treasury'].includes(String(c.accountType || 'customer'))).forEach(c => {
       customerCredit += (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s,tx)=>s+Number(tx.amount||0),0);
       customerDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s,tx)=>s+Number(tx.amount||0),0);
       customerBalance += Number(c.balance||0);
@@ -5408,6 +5594,7 @@ function nextPaint() {
     });
     const categories = [
       { name: "All Customers' Balance", totalDebit: customerDebit, totalCredit: customerCredit, balance: customerBalance },
+      { name: 'Treasury Balance', totalDebit: treasuryDebit, totalCredit: treasuryCredit, balance: treasuryBalance },
       { name: 'All Staff Balance', totalDebit: staffDebit, totalCredit: staffCredit, balance: staffBalance },
       { name: 'Income Balance', totalDebit: incomeDebit, totalCredit: incomeCredit, balance: incomeBalance },
       { name: 'Expense Balance', totalDebit: expenseDebit, totalCredit: expenseCredit, balance: expenseBalance }
@@ -5763,7 +5950,7 @@ function staffLedgerEvents(staffId) {
         const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId);
         if (opAccount && (payload.targetAccountId === opAccount.id || payload.operationalAccountId === opAccount.id)) {
           const amount = Number(payload.amount || 0);
-          addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Treasury'}`, runningType: 'form' });
+          addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Treasury'}${(payload.note || payload.details) ? ' • ' + (payload.note || payload.details) : ''}`, runningType: 'form' });
         }
         // SURGICAL ADDITION 2026-09-09: the ACTING staff who issued this
         // funding (via Non Cash, locked to their own account — see
@@ -5779,7 +5966,7 @@ function staffLedgerEvents(staffId) {
         // dropped. It now reduces the balance exactly as the Till does.
         if (opAccount && payload.sourceAccountId === opAccount.id) {
           const amount = Number(payload.amount || 0);
-          addEvent({ key: `${req.id || 'inter-credit'}-out`, date, type: 'Transfer Out', amount, delta: -amount, details: `To ${payload.targetAccountName || payload.targetAccountNumber || 'staff account'}`, runningType: 'form' });
+          addEvent({ key: `${req.id || 'inter-credit'}-out`, date, type: 'Transfer Out', amount, delta: -amount, details: `To ${payload.targetAccountName || payload.targetAccountNumber || 'staff account'}${(payload.note || payload.details) ? ' • ' + (payload.note || payload.details) : ''}`, runningType: 'form' });
         } else if (payload.staffId === staffId) {
           const amount = Number(payload.amount || 0);
           addEvent({ key: `${req.id || 'inter-credit'}-issued`, date, type: 'Non Cash (Issued)', amount, delta: 0, details: `Funded ${payload.targetAccountName || 'staff account'} from ${payload.sourceAccountName || 'your account'}`, runningType: 'other' });
@@ -6864,7 +7051,7 @@ function normalizeStaffLedgerEntryType(row) {
   // the app, not in the Supabase customers table, so a Non Cash to/from
   // one passed submission and then failed at approval. Blocked up front
   // with a clear pointer to the real account to use.
-  const STAFF_WALLET_NON_CASH_MSG = 'That is an internal staff wallet, not a bank account — use the staff member\'s Staff Operational (T) account. Open one via Account Opening if they don\'t have it.';
+  const STAFF_WALLET_NON_CASH_MSG = 'That is an internal staff wallet, not a bank account — use the staff member\'s Teller (T) account. Open one via Account Opening if they don\'t have it.';
   const isLocalOnlyStaffAccount = (c) => !!c && (c.accountType === 'staff_wallet' || c.accountType === 'staff');
 
   function renderIntraTransfer() {
@@ -6874,7 +7061,7 @@ function normalizeStaffLedgerEntryType(row) {
     const st = currentStaff();
     const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational' && (state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id));
     const myTellerId = staffFirstName(st);
-    const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
+    const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Teller' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
     const amountVal = escapeHtml(String(draft.amount || ''));
     // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
     // the client's sheet — the two top-level headings of the form are Debit
@@ -6966,7 +7153,7 @@ function normalizeStaffLedgerEntryType(row) {
       }
       const statusElId = isDest ? 'itrDestStatus' : 'itrSourceStatus';
       const typeElId = isDest ? 'itrDestType' : 'itrSourceType';
-      const typeLabel = (c) => c.accountType === 'staff_operational' ? 'Staff Operational' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
+      const typeLabel = (c) => c.accountType === 'staff_operational' ? 'Teller' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
       if (match) {
         draft[idKey] = match.id;
         draft[nameKey] = match.name || match.full_name || match.display_name || acctNum;
@@ -7089,7 +7276,12 @@ function normalizeStaffLedgerEntryType(row) {
           // the source — this was already role-agnostic, not
           // Treasury-only) — it now gets a Journal Number too, so it's
           // listed and searchable in the Journal Register.
-          const journalNumber = viaStaffFunding ? nextJournalNumber() : '';
+          let journalNumber = '';
+          if (viaStaffFunding) {
+            const reserved = await reserveJournalNumber();
+            if (!reserved.ok) return showToast(reserved.message);
+            journalNumber = reserved.number;
+          }
           const result = viaStaffFunding
             ? await submitApprovalThroughGateway('inter_staff_credit', {
                 staffId: st.id, staffName: st.name,
@@ -7117,6 +7309,7 @@ function normalizeStaffLedgerEntryType(row) {
               ],
               fieldNote: null, status: 'sent', createdAt: new Date().toISOString()
             });
+            await persistJournal(state.journals[state.journals.length - 1]);
           }
           state.ui.intraTransferDraft = {};
           render();
@@ -7522,6 +7715,12 @@ function normalizeStaffLedgerEntryType(row) {
     return { openingCash, cashReceived, cashWithdrawal, till };
   }
 
+  // 2026-11-02 (client): a Teller account's balance IS the Till
+  // (Opening Cash + Cash Received - Cash Withdrawal), same figure everywhere.
+  function tellerTillBalance(staffId) {
+    return getTillBreakdown(staffId, businessDate()).till;
+  }
+
   function getStaffOperationalBalance(staffId, excludeDateStr) {
     return getStaffOperationalBreakdown(staffId, excludeDateStr).variance;
   }
@@ -7642,7 +7841,7 @@ function normalizeStaffLedgerEntryType(row) {
       if (typeEl) typeEl.textContent = '—';
       return;
     }
-    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : (customer.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
+    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Teller' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : (customer.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
   }
 
   function updateJournalAccountMeta(customer) {
@@ -7656,8 +7855,8 @@ function normalizeStaffLedgerEntryType(row) {
       if (byId('journalAccBalance')) byId('journalAccBalance').textContent = '—';
       return;
     }
-    if (byId('journalAccBalance')) byId('journalAccBalance').innerHTML = balanceHtml(customer.accountType === 'staff_operational' ? getStaffOperationalBalance(customer.linkedStaffId) : (customer.balance || 0));
-    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Staff Operational' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : (customer.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
+    if (byId('journalAccBalance')) byId('journalAccBalance').innerHTML = balanceHtml(customer.accountType === 'staff_operational' ? tellerTillBalance(customer.linkedStaffId) : (customer.balance || 0));
+    if (typeEl) typeEl.textContent = customer.accountType === 'staff_operational' ? 'Teller' : (customer.accountType === 'staff_salary' ? 'Staff Salary' : (customer.accountType === 'expense' ? 'Expense' : (customer.accountType === 'income' ? 'Income' : (customer.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
     // SURGICAL ADDITION 2026-09-22 (client-confirmed design): the account
     // being debited/credited for this journal row is looked up here — if
     // that account is itself a staff operational account, its owner's
@@ -7920,7 +8119,7 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.generatedJournals[visibilityKey] = false;
       state.ui.collapsedJournals[visibilityKey] = false;
       if (byId('txName')) byId('txName').textContent = c.name;
-      if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.balance);
+      if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(c.accountType === 'staff_operational' ? tellerTillBalance(c.linkedStaffId) : c.balance);
       updateTxAccountMeta(c);
       // Quiet auto-lookup must not save/repaint while the user is moving from
       // Account Number into Amount. Journal was fixed the same way: keep the
@@ -7940,7 +8139,7 @@ function normalizeStaffLedgerEntryType(row) {
       state.ui.txAccDraft = customer.accountNumber || value;
       if (byId('txAcc') && String(byId('txAcc').value || '').trim() !== String(customer.accountNumber || '')) byId('txAcc').value = customer.accountNumber || value;
       if (byId('txName')) byId('txName').textContent = customer.name || '—';
-      if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(customer.balance);
+      if (byId('txBalance')) byId('txBalance').innerHTML = balanceHtml(customer.accountType === 'staff_operational' ? tellerTillBalance(customer.linkedStaffId) : customer.balance);
       updateTxAccountMeta(customer);
     };
 
@@ -8132,6 +8331,8 @@ function normalizeStaffLedgerEntryType(row) {
       journalAmountInput.onchange = () => { protectJournalAccountDraft(); telleringDraft.journalAmount = journalAmountInput.value || ''; };
     }
     if (byId('journalDescription')) byId('journalDescription').oninput = () => { telleringDraft.journalDescription = byId('journalDescription').value || ''; };
+    if (byId('journalConfirmedBy')) byId('journalConfirmedBy').oninput = () => { telleringDraft.journalConfirmedBy = byId('journalConfirmedBy').value || ''; };
+    if (byId('journalDate')) byId('journalDate').onchange = () => { telleringDraft.journalDate = byId('journalDate').value || ''; };
     if (byId('journalCounterparty')) {
       // SURGICAL FIX 2026-09-03: persist the whole-journal Received By/Paid
       // To value so it survives re-renders across multiple "Add to Journal"
@@ -8310,6 +8511,8 @@ function normalizeStaffLedgerEntryType(row) {
       telleringDraft.journalFormAmount = '';
       telleringDraft.journalFormMode = 'cash';
       telleringDraft.journalDescription = '';
+      telleringDraft.journalConfirmedBy = '';
+      telleringDraft.journalDate = '';
       const input = byId('journalFieldNoteInput');
       if (input) input.value = '';
       save();
@@ -8332,6 +8535,10 @@ function normalizeStaffLedgerEntryType(row) {
       const amount = Number(byId('txAmount').value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (kind === 'debit' && amount > tillNow + 0.01) return showToast(`Debit exceeds your Till (${money(tillNow)})`);
+      // 2026-11-02 (client): an account with no money must not be debited.
+      if (kind === 'debit' && !['expense','income','staff_operational'].includes(String(customer.accountType || 'customer')) && amount > Number(customer.balance || 0) + 0.01) {
+        return showToast(`Insufficient funds — account balance is ${money(customer.balance || 0)}`);
+      }
       const mode = selectedMode();
       const chargeBreakdown = kind === 'credit' ? collectChargeBreakdownFromUi('single', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -8395,12 +8602,18 @@ function normalizeStaffLedgerEntryType(row) {
       });
     };
 
-    if (byId('journalSaveDraft')) byId('journalSaveDraft').onclick = () => {
+    if (byId('journalSaveDraft')) byId('journalSaveDraft').onclick = async () => {
       if (!journal.length) return showToast('Add at least one row before saving');
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       const journalFormAmount = Number(String(byId('journalFormAmount')?.value ?? telleringDraft.journalFormAmount ?? '').replace(/,/g, '')) || 0;
       if (!(journalFormAmount > 0)) return showToast('Enter the Journal Value before saving');
       const journalFormMode = 'cash';
+      const jDate = byId('journalDate')?.value || telleringDraft.journalDate || '';
+      const jDateErr = validateJournalDate(jDate);
+      if (jDateErr) return showToast(jDateErr);
+      const jConfirmed = byId('journalConfirmedBy')?.value.trim() || '';
+      const jDesc = byId('journalDescription')?.value.trim() || '';
+      journal.forEach(r => { r.details = jDesc; });
       const fieldNoteSnapshot = attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null;
       // If this draft was opened from the Journal Register ("Resume"), keep
       // updating THAT record and its Journal Number rather than minting a
@@ -8408,6 +8621,12 @@ function normalizeStaffLedgerEntryType(row) {
       const resumingId = state.ui.resumingJournalId;
       const existing = resumingId ? (state.journals || []).find(j => j.id === resumingId) : null;
       let journalNumber;
+      let reservedNumber = '';
+      if (!existing) {
+        const reserved = await reserveJournalNumber();
+        if (!reserved.ok) return showToast(reserved.message);
+        reservedNumber = reserved.number;
+      }
       // SURGICAL PATCH 2026-09-22 (client-confirmed design): a saved draft
       // has no date yet — the business date is captured by the system only
       // at actual posting time (see openJournalPostModal's Post handler and
@@ -8417,12 +8636,14 @@ function normalizeStaffLedgerEntryType(row) {
         existing.date = existing.date || '';
         existing.counterparty = byId('journalCounterparty')?.value.trim() || '';
         existing.description = byId('journalDescription')?.value.trim() || '';
+        existing.journalDate = jDate;
+        existing.confirmedBy = jConfirmed;
         existing.formAmount = journalFormAmount;
         existing.formPaymentMode = journalFormMode;
         existing.rows = journal.map(row => ({ ...row }));
         existing.fieldNote = fieldNoteSnapshot;
       } else {
-        journalNumber = nextJournalNumber();
+        journalNumber = reservedNumber;
         state.journals.push({
           id: uid('jn'),
           journalNumber,
@@ -8432,6 +8653,8 @@ function normalizeStaffLedgerEntryType(row) {
           staffName: staff.name,
           counterparty: byId('journalCounterparty')?.value.trim() || '',
           description: byId('journalDescription')?.value.trim() || '',
+          journalDate: jDate,
+          confirmedBy: jConfirmed,
           formAmount: journalFormAmount,
           formPaymentMode: journalFormMode,
           rows: journal.map(row => ({ ...row })),
@@ -8440,6 +8663,7 @@ function normalizeStaffLedgerEntryType(row) {
           createdAt: new Date().toISOString()
         });
       }
+      await persistJournal(existing || state.journals[state.journals.length - 1]);
       state.ui.resumingJournalId = '';
       journal.splice(0);
       attachmentState.fieldNote = null;
@@ -8449,6 +8673,8 @@ function normalizeStaffLedgerEntryType(row) {
       telleringDraft.journalFormAmount = '';
       telleringDraft.journalFormMode = 'cash';
       telleringDraft.journalDescription = '';
+      telleringDraft.journalConfirmedBy = '';
+      telleringDraft.journalDate = '';
       const input = byId('journalFieldNoteInput');
       if (input) input.value = '';
       save();
@@ -8475,6 +8701,12 @@ function normalizeStaffLedgerEntryType(row) {
       const rowTotal = journal.reduce((s, r) => s + Number(r.amount || 0), 0);
       if (Math.abs(rowTotal - journalFormAmount) > 0.01) return showToast(`Journal does not balance — row total ${money(rowTotal)} must equal the Journal Value ${money(journalFormAmount)}`);
       const journalFormMode = 'cash';
+      const jDate = byId('journalDate')?.value || telleringDraft.journalDate || '';
+      const jDateErr = validateJournalDate(jDate);
+      if (jDateErr) return showToast(jDateErr);
+      const jConfirmed = byId('journalConfirmedBy')?.value.trim() || '';
+      const jDesc = byId('journalDescription')?.value.trim() || '';
+      journal.forEach(r => { r.details = jDesc; });
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
       confirmAction(`Submit ${kind} journal for approval?`, async () => {
@@ -8485,10 +8717,15 @@ function normalizeStaffLedgerEntryType(row) {
         try {
           const resumingId = state.ui.resumingJournalId;
           const existing = resumingId ? (state.journals || []).find(j => j.id === resumingId) : null;
-          const journalNumber = existing ? existing.journalNumber : nextJournalNumber();
+          let journalNumber = existing ? existing.journalNumber : '';
+          if (!existing) {
+            const reserved = await reserveJournalNumber();
+            if (!reserved.ok) return showToast(reserved.message);
+            journalNumber = reserved.number;
+          }
           const fieldNoteSnapshot = attachmentState.fieldNote ? { name: attachmentState.fieldNote.name, type: attachmentState.fieldNote.type, size: attachmentState.fieldNote.size, dataUrl: attachmentState.fieldNote.dataUrl, uploadedAt: attachmentState.fieldNote.uploadedAt } : null;
           const rowsSnapshot = journal.map(row => ({ ...row }));
-          const result = await submitJournalRows(kind, staff.id, staff.name, journalFormAmount, journalFormMode, rowsSnapshot, fieldNoteSnapshot, journalNumber);
+          const result = await submitJournalRows(kind, staff.id, staff.name, journalFormAmount, journalFormMode, rowsSnapshot, fieldNoteSnapshot, journalNumber, undefined, { journalDate: jDate, confirmedBy: jConfirmed, description: jDesc, counterparty: byId('journalCounterparty')?.value.trim() || '' });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit journal');
           // Every submitted journal is stored and referenceable — see
           // renderJournalRegister(). Status is computed live from
@@ -8496,6 +8733,8 @@ function normalizeStaffLedgerEntryType(row) {
           // is just the initial state right after a successful submit.
           if (existing) {
             existing.date = businessDate();
+            existing.journalDate = jDate;
+            existing.confirmedBy = jConfirmed;
             existing.description = byId('journalDescription')?.value.trim() || existing.description || '';
             existing.formAmount = journalFormAmount;
             existing.formPaymentMode = journalFormMode;
@@ -8508,11 +8747,13 @@ function normalizeStaffLedgerEntryType(row) {
               staffId: staff.id, staffName: staff.name,
               counterparty: byId('journalCounterparty')?.value.trim() || '',
               description: byId('journalDescription')?.value.trim() || '',
+              journalDate: jDate, confirmedBy: jConfirmed,
               formAmount: journalFormAmount, formPaymentMode: journalFormMode,
               rows: rowsSnapshot, fieldNote: fieldNoteSnapshot,
               status: 'sent', createdAt: new Date().toISOString()
             });
           }
+          await persistJournal(existing || state.journals[state.journals.length - 1]);
           state.ui.resumingJournalId = '';
           journal.splice(0);
           attachmentState.fieldNote = null;
@@ -8522,6 +8763,8 @@ function normalizeStaffLedgerEntryType(row) {
           telleringDraft.journalFormAmount = '';
           telleringDraft.journalFormMode = 'cash';
           telleringDraft.journalDescription = '';
+      telleringDraft.journalConfirmedBy = '';
+      telleringDraft.journalDate = '';
           const input = byId('journalFieldNoteInput');
           if (input) input.value = '';
           save();
@@ -10879,7 +11122,22 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       try {
         const result = await gateway.auth.loginWithStaffId({ staffId, password });
         if (!result.ok) {
-          errEl.textContent = result.error?.message || 'Invalid Staff ID or password.';
+          // 2026-11-02: say what actually went wrong — a just-added staff member
+          // hitting a bad password is the common case.
+          const raw = String(result.error?.message || '');
+          errEl.textContent = /invalid login credentials/i.test(raw)
+            ? 'Wrong Staff ID or password. If this staff member was just added, ask the admin to use Reset Password on them in Staff Directory.'
+            : /not confirmed/i.test(raw)
+              ? 'This login has not been confirmed in Supabase Auth yet — ask the admin/IT to confirm the user.'
+              : (raw || 'Invalid Staff ID or password.');
+          errEl.classList.remove('hidden');
+          return;
+        }
+        // Signed in to Supabase Auth but no staff profile is linked to it —
+        // previously this "succeeded" silently and left the person on a blank screen.
+        if (isSupabaseApprovalMode() && !result.data?.staff?.id) {
+          try { await gateway.auth?.logout?.(); } catch (_e) {}
+          errEl.textContent = 'Signed in, but no staff profile is linked to this login. Ask the admin to check this staff member in Staff Directory.';
           errEl.classList.remove('hidden');
           return;
         }
@@ -10907,6 +11165,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         await syncStaffFromGateway();
         await syncApprovalsFromGateway();
         await syncCodFromGateway();
+        await syncJournalsFromGateway().catch(() => {});
         render();
         await enforceAdminRecoveryKeySetup();
         if (staffRoleCode(currentStaff()) === 'admin_officer') {
