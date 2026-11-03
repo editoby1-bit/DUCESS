@@ -1209,11 +1209,28 @@ function subscribeRealtime() {
     }
   }
   const delta = txType === 'credit' ? amount : -amount;
+  // 2026-11-02 (client): an account with no money must never be debited. Checked
+  // against the balance as it stands INCLUDING earlier lines of the same posting
+  // plan, so two debits in one request can't together overdraw. Expense/income
+  // book accounts are not money-holding accounts and are exempt.
+  if (txType === 'debit' && !['expense', 'income'].includes(String(accountSummary.accountType || ''))) {
+    const planKey = String(accountSummary.accountId);
+    const planRunning = options.plan?.runningBalances;
+    const available = planRunning && planRunning.has(planKey) ? planRunning.get(planKey) : currentBalance;
+    if (amount > available + 0.0001) {
+      return defaultResult.err('INSUFFICIENT_FUNDS', `Insufficient funds: account ${accountSummary.accountNumber || ''} has ${available} and cannot be debited ${amount}.`);
+    }
+  }
+  if (options.plan) {
+    options.plan.runningBalances = options.plan.runningBalances || new Map();
+    const k = String(accountSummary.accountId);
+    options.plan.runningBalances.set(k, (options.plan.runningBalances.has(k) ? options.plan.runningBalances.get(k) : currentBalance) + delta);
+  }
   const balanceAfter = currentBalance + delta;
   const chargeText = txType === 'credit' && chargeRows.length
-    ? chargeRows.map(row => `${row?.label || row?.accountName || 'Charge'} ${normalizeNumber(row?.amount).toLocaleString()}`).join(' • ')
+    ? chargeRows.map(row => `${row?.label || row?.accountName || 'Charge'} ${normalizeNumber(row?.amount).toLocaleString('en-US',{useGrouping:false})}`).join(' • ')
     : '';
-  const customerGetsText = txType === 'credit' && totalChargeAmount > 0 ? `To Customer Account ${amount.toLocaleString()}` : '';
+  const customerGetsText = txType === 'credit' && totalChargeAmount > 0 ? `To Customer Account ${amount.toLocaleString('en-US',{useGrouping:false})}` : '';
   const detailPieces = [entry?.details || '', chargeText, customerGetsText].filter(Boolean);
 
   const insertRow = {
@@ -1755,7 +1772,7 @@ if (inserted.error) {
           entryType: type,
           amount: ledgerAmount,
           delta: ledgerAmount ? (txType === 'credit' ? Math.abs(ledgerAmount) : -Math.abs(ledgerAmount)) : 0,
-          note: payload.note || `${type}${isJournal ? ' form' : ''} posted from approval ${requestRow.id}`,
+          note: payload.note || payload.details || payload.description || `${type}${isJournal ? ' form' : ''} posted from approval ${requestRow.id}`,
           floatDate: payload.date || payload.businessDate || null,
           createdByStaffId: requestRow.requested_by_staff_id || null,
           approvedByStaffId: approver?.staffId || null,
@@ -2826,7 +2843,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       // ('unassigned') — a role is granted afterwards via assignStaffRole.
       const roleCode = payload.role || payload.roleCode || 'unassigned';
       const branchId = payload.branchId || null;
-      const temporaryPassword = payload.temporaryPassword || null;
+      const temporaryPassword = payload.temporaryPassword ? String(payload.temporaryPassword).trim() : null;
       const syntheticEmail = `${staffCode}${config?.supabase?.syntheticEmailSuffix || '@ducess.local'}`;
 
       // Step 1: Call Edge Function to create the Supabase Auth user (keeps service key off frontend)
@@ -3374,7 +3391,11 @@ return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
     async function resolveAuthEmailByStaffId(staffId) {
-      const staffResult = await getStaffProfileBySelector({ staff_code: staffId });
+      // 2026-11-02: Staff IDs are stored upper-case at creation; match the typed ID
+      // whatever its case or stray spaces so a newly added staff can log in.
+      const typedId = String(staffId || '').trim();
+      let staffResult = await getStaffProfileBySelector({ staff_code: typedId.toUpperCase() });
+      if (!staffResult.ok && typedId !== typedId.toUpperCase()) staffResult = await getStaffProfileBySelector({ staff_code: typedId });
       if (!staffResult.ok) return staffResult;
 
       const row = staffResult.data;
@@ -3881,6 +3902,91 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           return defaultResult.ok(data);
         },
       },
+      // 2026-11-03: journals live in the database (sql/2026-11-03-journals.sql),
+      // not the browser. Lists never carry the field-note photo (egress);
+      // get() loads one journal in full.
+      journals: (() => {
+        const LIST_COLS = 'id, journal_number, kind, status, staff_id, staff_name, business_date, journal_date, counterparty, confirmed_by, description, form_amount, form_payment_mode, rows, has_field_note, created_at, updated_at';
+        const fromRow = (r) => !r ? null : ({
+          id: r.id, journalNumber: r.journal_number, kind: r.kind || 'credit', status: r.status || 'draft',
+          staffId: r.staff_id || '', staffName: r.staff_name || '',
+          date: r.business_date || '', journalDate: r.journal_date || '',
+          counterparty: r.counterparty || '', confirmedBy: r.confirmed_by || '', description: r.description || '',
+          formAmount: Number(r.form_amount || 0), formPaymentMode: r.form_payment_mode || 'cash',
+          rows: Array.isArray(r.rows) ? r.rows : [],
+          fieldNote: r.field_note || null, hasFieldNote: !!r.has_field_note,
+          createdAt: r.created_at || '', updatedAt: r.updated_at || ''
+        });
+        const toRow = (j) => ({
+          id: String(j.id), journal_number: String(j.journalNumber), kind: j.kind || 'credit', status: j.status || 'draft',
+          staff_id: j.staffId || null, staff_name: j.staffName || '',
+          business_date: j.date || null, journal_date: j.journalDate || null,
+          counterparty: j.counterparty || '', confirmed_by: j.confirmedBy || '', description: j.description || '',
+          form_amount: Number(j.formAmount || 0), form_payment_mode: j.formPaymentMode || 'cash',
+          rows: Array.isArray(j.rows) ? j.rows : [],
+          field_note: j.fieldNote || null, has_field_note: !!j.fieldNote || !!j.hasFieldNote,
+          ...(j.createdAt ? { created_at: j.createdAt } : {}),
+          updated_at: new Date().toISOString()
+        });
+        const missing = (error) => isMissingColumnOrRelationError(error) || isMissingRpcError(error);
+        return {
+          // Egress-safe (same idea as the history window + incremental sync):
+          //  - first load: only the last `windowDays` days, plus every draft;
+          //  - later loads: only journals changed since `since` (usually none).
+          async list(opts = {}) {
+            if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+            let q = client.from('journals').select(LIST_COLS);
+            if (opts.since) {
+              q = q.gt('updated_at', opts.since);
+            } else {
+              const from = new Date(Date.now() - (Number(opts.windowDays) || 45) * 86400000).toISOString();
+              q = q.or(`status.eq.draft,created_at.gte.${from}`);
+            }
+            const { data, error } = await q.order('created_at', { ascending: true }).limit(500);
+            if (error) return defaultResult.err(missing(error) ? 'TABLE_MISSING' : 'JOURNAL_LIST_FAILED', 'Could not load journals.', error);
+            return defaultResult.ok((data || []).map(fromRow));
+          },
+          async epoch() {
+            if (!canUseSupabase()) return defaultResult.ok(null);
+            const { data, error } = await client.from('ducess_meta').select('value').eq('key', 'data_epoch').maybeSingle();
+            if (error) return defaultResult.ok(null);
+            return defaultResult.ok(data?.value || null);
+          },
+          async get(id) {
+            if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+            const { data, error } = await client.from('journals').select(LIST_COLS + ', field_note').eq('id', String(id)).maybeSingle();
+            if (error) return defaultResult.err('JOURNAL_GET_FAILED', 'Could not load the journal.', error);
+            return defaultResult.ok(fromRow(data));
+          },
+          async nextNumber() {
+            if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+            const { data, error } = await client.rpc('ducess_next_journal_number');
+            if (error || !data) return defaultResult.err(missing(error) ? 'TABLE_MISSING' : 'JOURNAL_NUMBER_FAILED', 'Could not get a Journal Number from the database.', error);
+            return defaultResult.ok(String(data));
+          },
+          async save(journal) {
+            if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+            const { error } = await client.from('journals').upsert(toRow(journal), { onConflict: 'id' });
+            if (error) return defaultResult.err(missing(error) ? 'TABLE_MISSING' : 'JOURNAL_SAVE_FAILED', 'Could not save the journal to the database.', error);
+            return defaultResult.ok(true);
+          },
+          // One-time upload of journals a browser already holds. Existing ids are
+          // left alone; a clashing Journal Number is skipped and reported.
+          async importLocal(list = []) {
+            if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+            let imported = 0; const skipped = [];
+            for (const j of list) {
+              if (!j?.id || !j?.journalNumber) continue;
+              const { error } = await client.from('journals').upsert(toRow(j), { onConflict: 'id', ignoreDuplicates: true });
+              if (error) {
+                if (missing(error)) return defaultResult.err('TABLE_MISSING', 'Journals table is not set up yet.', error);
+                skipped.push(j.journalNumber);
+              } else imported += 1;
+            }
+            return defaultResult.ok({ imported, skipped });
+          }
+        };
+      })(),
       __meta: {
         adapter: 'supabase',
         phase: '3E',
