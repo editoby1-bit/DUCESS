@@ -12,7 +12,7 @@
   const TIME_FMT = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:true });
   const THEMES = ['classic','ducess-sheet','ocean','dark-slate','neutral-stone'];
   const THEME_LABELS = { classic:'Classic', 'ducess-sheet':'Ducess Sheet', ocean:'Ocean', 'dark-slate':'Dark Slate', 'neutral-stone':'Neutral Stone' };
-  const money = (n) => Number(n || 0).toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 2 });
+  const money = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
   // SURGICAL ADDITION 2026-08-19: amount fields were native type="number",
   // which can never display thousand-separator commas (a browser
   // restriction, not something CSS/JS can override on a number input) — so
@@ -24,21 +24,58 @@
   function parseAmountInput(id) {
     return Number(String(byId(id)?.value || '').replace(/,/g, '').trim()) || 0;
   }
+  // Amount fields show thousand-separator commas as you type (1,500,000.50).
+  // The box's .value getter hands back the PLAIN number (no commas), so every
+  // existing read such as Number(byId('txAmount').value) keeps working unchanged.
+  const AMOUNT_FIELD_IDS = ['txAmount','oeAmount','floatTopupAmount','cashReceiptAmount','staffCreditAmount','codDebtAmount','codAcceptedPosition','codAdjustment','itrAmount','journalFormAmount','journalAmount'];
+  const AMOUNT_FIELDS_ALLOW_NEGATIVE = ['codAdjustment','codAcceptedPosition'];
+  const formatAmountText = (raw, allowNegative) => {
+    let t = String(raw ?? '');
+    const neg = allowNegative && t.trim().startsWith('-');
+    t = t.replace(/[^\d.]/g, '');
+    const dot = t.indexOf('.');
+    let intPart = (dot === -1 ? t : t.slice(0, dot)).replace(/^0+(?=\d)/, '');
+    const decPart = dot === -1 ? '' : '.' + t.slice(dot + 1).replace(/\./g, '').slice(0, 2);
+    intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return (neg ? '-' : '') + intPart + decPart;
+  };
   function bindAmountCommaFormatting(id) {
-    const el = byId(id);
+    const el = typeof id === 'string' ? byId(id) : id;
     if (!el || el.dataset.commaFormatted) return;
     el.dataset.commaFormatted = '1';
+    const allowNeg = AMOUNT_FIELDS_ALLOW_NEGATIVE.includes(el.id);
+    const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    const initial = nativeValue.get.call(el);
     el.type = 'text';
-    el.inputMode = 'decimal';
+    el.inputMode = allowNeg ? 'text' : 'decimal';
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get() { return nativeValue.get.call(el).replace(/,/g, ''); },
+      set(v) { nativeValue.set.call(el, formatAmountText(v, allowNeg)); }
+    });
+    nativeValue.set.call(el, formatAmountText(initial, allowNeg));
     el.addEventListener('input', () => {
-      const raw = el.value.replace(/[^\d.]/g, '');
-      const firstDot = raw.indexOf('.');
-      const intPart = (firstDot === -1 ? raw : raw.slice(0, firstDot)).replace(/^0+(?=\d)/, '');
-      const decPart = firstDot === -1 ? '' : '.' + raw.slice(firstDot + 1).replace(/\./g, '').slice(0, 2);
-      // 2026-11-02: no thousand-separator commas (client: commas lead to mistakes)
-      el.value = intPart + decPart;
+      const before = nativeValue.get.call(el);
+      const caret = el.selectionStart ?? before.length;
+      const sig = before.slice(0, caret).replace(/[^\d.-]/g, '').length;
+      const after = formatAmountText(before, allowNeg);
+      if (after === before) return;
+      nativeValue.set.call(el, after);
+      let seen = 0, pos = 0;
+      while (pos < after.length && seen < sig) { if (/[\d.-]/.test(after[pos])) seen += 1; pos += 1; }
+      try { el.setSelectionRange(pos, pos); } catch (_e) {}
     });
   }
+  // Bind every amount box the moment it appears on screen (any screen or popup).
+  function bindAllAmountFields(root = document) {
+    AMOUNT_FIELD_IDS.forEach(fid => { const el = root.querySelector ? root.querySelector(`#${fid}`) : null; if (el && el.tagName === 'INPUT') bindAmountCommaFormatting(el); });
+  }
+  let amountBindQueued = false;
+  new MutationObserver(() => {
+    if (amountBindQueued) return;
+    amountBindQueued = true;
+    requestAnimationFrame(() => { amountBindQueued = false; bindAllAmountFields(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
   const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
   const today = () => new Date().toISOString().slice(0,10);
   const byId = (id) => document.getElementById(id);
@@ -3722,6 +3759,20 @@ function hideProcessing() {
   let journalsLastSync = 0;
   const journalsInDb = () => !journalsDbUnavailable && isSupabaseApprovalMode() && !!gateway.journals?.list;
 
+  // Journals must not debit an account that cannot cover it, and the user is told
+  // why. Rows are totalled per account, so two rows can't together overdraw it.
+  const NON_MONEY_ACCOUNT_TYPES = ['expense', 'income', 'staff_operational'];
+  function journalDebitShortfall(rowList) {
+    const need = new Map();
+    (rowList || []).forEach(r => need.set(r.customerId, (need.get(r.customerId) || 0) + Number(r.amount || 0)));
+    for (const [cid, amt] of need) {
+      const c = (state.customers || []).find(x => x.id === cid);
+      if (!c || NON_MONEY_ACCOUNT_TYPES.includes(String(c.accountType || 'customer'))) continue;
+      if (amt > Number(c.balance || 0) + 0.01) return `Insufficient funds — ${c.name} (${c.accountNumber}) balance is ${money(c.balance || 0)}`;
+    }
+    return '';
+  }
+
   async function reserveJournalNumber() {
     if (!journalsInDb()) return { ok: true, number: nextJournalNumber() };
     const res = await gateway.journals.nextNumber();
@@ -3947,6 +3998,13 @@ function hideProcessing() {
           const fundingAccount = typedAcc ? getCustomerByAccountNo(typedAcc) : initialAccount;
           if (!fundingAccount) return showToast('Enter a valid account number to fund this journal');
           if (isCustomerFrozen(fundingAccount) || fundingAccount.active === false) return showToast('That account is frozen');
+          // Debit journal: the rows are debited. Credit journal: the funding account is debited.
+          if (record.kind === 'debit') {
+            const shortfall = journalDebitShortfall(record.rows);
+            if (shortfall) return showToast(shortfall);
+          } else if (!NON_MONEY_ACCOUNT_TYPES.includes(String(fundingAccount.accountType || 'customer')) && Number(record.formAmount || 0) > Number(fundingAccount.balance || 0) + 0.01) {
+            return showToast(`Insufficient funds — ${fundingAccount.name} (${fundingAccount.accountNumber}) balance is ${money(fundingAccount.balance || 0)}`);
+          }
           closeModal();
           showProcessing('Sending journal...'); await nextPaint();
           try {
@@ -7127,7 +7185,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-cell nc-post-cell"><button id="submitIntraTransfer" class="nc-post-btn">Post</button></div>
 
             <div class="nc-label nc-label-grey">Amount Received</div>
-            <div class="nc-cell"><div class="display-field" id="itrAmountReceived">${amountVal}</div></div>
+            <div class="nc-cell"><div class="display-field" id="itrAmountReceived">${escapeHtml(formatAmountText(draft.amount || ''))}</div></div>
             <div class="nc-cell nc-tag">Account Type</div>
             <div class="nc-cell"><div class="display-field" id="itrDestType">${typeOf(destAccount)}</div></div>
           </div>
@@ -7217,7 +7275,7 @@ function normalizeStaffLedgerEntryType(row) {
     };
     // Amount Received on the Credit side is always the same figure as
     // Amount Paid on the Debit side (one transfer), so it just mirrors it.
-    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.addEventListener('input', () => { draft.amount = amtInput.value; if (byId('itrAmountReceived')) byId('itrAmountReceived').textContent = amtInput.value; }); }
+    if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.addEventListener('input', () => { draft.amount = amtInput.value; if (byId('itrAmountReceived')) byId('itrAmountReceived').textContent = formatAmountText(amtInput.value); }); }
     if (detailsInput) detailsInput.oninput = () => { draft.details = detailsInput.value; };
     const destDetailsInput = byId('itrDestDetails');
     if (destDetailsInput) destDetailsInput.oninput = () => { draft.destDetails = destDetailsInput.value; };
@@ -8437,6 +8495,10 @@ function normalizeStaffLedgerEntryType(row) {
       const chargeBreakdown = kind === 'credit' ? collectChargeBreakdownFromUi('journal', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       const customerCreditAmount = kind === 'credit' ? Math.max(0, amount - totalChargeAmount) : amount;
+      if (kind === 'debit') {
+        const shortfall = journalDebitShortfall([{ customerId: resolvedCustomer.id, amount }, ...journal]);
+        if (shortfall) return showToast(shortfall);
+      }
       journal.unshift({
         id: uid('jr'),
         customerId: resolvedCustomer.id,
@@ -8707,6 +8769,7 @@ function normalizeStaffLedgerEntryType(row) {
       const jConfirmed = byId('journalConfirmedBy')?.value.trim() || '';
       const jDesc = byId('journalDescription')?.value.trim() || '';
       journal.forEach(r => { r.details = jDesc; });
+      if (kind === 'debit') { const shortfall = journalDebitShortfall(journal); if (shortfall) return showToast(shortfall); }
       if (attachmentState.loading) return showToast('Please wait for the field note to finish loading');
       if (byId('journalSubmit')?.dataset?.submitting === '1') return;
       confirmAction(`Submit ${kind} journal for approval?`, async () => {
