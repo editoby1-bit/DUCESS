@@ -1218,7 +1218,7 @@ function subscribeRealtime() {
     const planRunning = options.plan?.runningBalances;
     const available = planRunning && planRunning.has(planKey) ? planRunning.get(planKey) : currentBalance;
     if (amount > available + 0.0001) {
-      return defaultResult.err('INSUFFICIENT_FUNDS', `Insufficient funds: account ${accountSummary.accountNumber || ''} has ${available} and cannot be debited ${amount}.`);
+      return defaultResult.err('INSUFFICIENT_FUNDS', `Insufficient funds: account ${accountSummary.accountNumber || ''} has ${Number(available).toLocaleString('en-US')} and cannot be debited ${Number(amount).toLocaleString('en-US')}.`);
     }
   }
   if (options.plan) {
@@ -1228,9 +1228,9 @@ function subscribeRealtime() {
   }
   const balanceAfter = currentBalance + delta;
   const chargeText = txType === 'credit' && chargeRows.length
-    ? chargeRows.map(row => `${row?.label || row?.accountName || 'Charge'} ${normalizeNumber(row?.amount).toLocaleString('en-US',{useGrouping:false})}`).join(' • ')
+    ? chargeRows.map(row => `${row?.label || row?.accountName || 'Charge'} ${normalizeNumber(row?.amount).toLocaleString('en-US')}`).join(' • ')
     : '';
-  const customerGetsText = txType === 'credit' && totalChargeAmount > 0 ? `To Customer Account ${amount.toLocaleString('en-US',{useGrouping:false})}` : '';
+  const customerGetsText = txType === 'credit' && totalChargeAmount > 0 ? `To Customer Account ${amount.toLocaleString('en-US')}` : '';
   const detailPieces = [entry?.details || '', chargeText, customerGetsText].filter(Boolean);
 
   const insertRow = {
@@ -2834,6 +2834,29 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       }
     }
 
+    // 2026-11-04: login self-test. Tries the just-set password on a throwaway
+    // client (nothing is stored, the admin's session is untouched) so the admin
+    // learns IMMEDIATELY whether the new staff member can actually sign in.
+    async function testStaffLogin({ emails = [], password }) {
+      const factory = global.supabase?.createClient;
+      const url = client?.supabaseUrl || config?.supabase?.url;
+      const key = client?.supabaseKey || config?.supabase?.anonKey;
+      if (!factory || !url || !key) return { status: 'skipped', message: 'Login test is not available in this browser.' };
+      const tmp = factory(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'ducess-login-test' } });
+      const tried = [];
+      let lastMessage = '';
+      for (const email of Array.from(new Set(emails.filter(Boolean).map(e => String(e).trim())))) {
+        const { data, error } = await tmp.auth.signInWithPassword({ email, password });
+        if (!error && data?.user) {
+          try { await tmp.auth.signOut(); } catch (_e) {}
+          return { status: 'ok', email, userId: data.user.id, tried };
+        }
+        tried.push(email);
+        lastMessage = error?.message || lastMessage;
+      }
+      return { status: 'failed', message: lastMessage || 'Sign-in failed', tried };
+    }
+
     async function createStaff(payload = {}) {
       if (!canUseSupabase()) return local.staff.createStaff(payload);
 
@@ -2848,6 +2871,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
       // Step 1: Call Edge Function to create the Supabase Auth user (keeps service key off frontend)
       let authUserId = null;
+      let edgeJson = null;
       const edgeFnUrl = config?.supabase?.createStaffEdgeFn
         || `${config?.supabase?.url || ''}/functions/v1/create-staff-user`;
       if (temporaryPassword && edgeFnUrl) {
@@ -2858,6 +2882,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
             body: JSON.stringify({ staffCode, password: temporaryPassword, fullName, roleCode }),
           });
           const json = await resp.json().catch(() => ({}));
+          edgeJson = json;
           if (resp.ok && json.id) {
             authUserId = json.id;
           } else {
@@ -2895,11 +2920,32 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         }
       }
 
+      // Step 1.5 (2026-11-04): prove the new login works; repair it if it does not.
+      let loginCheck = { status: 'skipped' };
+      let rowEmail = syntheticEmail;
+      if (temporaryPassword && edgeFnUrl) {
+        const lower = staffCode.toLowerCase();
+        const candidates = [edgeJson?.email, edgeJson?.user?.email, syntheticEmail, `${lower}${syntheticEmailSuffix}`, `${lower}@ducess.local`];
+        loginCheck = await testStaffLogin({ emails: candidates, password: temporaryPassword });
+        if (loginCheck.status === 'failed') {
+          // Force the account's password to exactly what the admin typed, then test again.
+          const fix = await resetStaffPassword({ staffCode, authUserId, temporaryPassword }).catch(e => ({ ok: false, error: { message: String(e?.message || e) } }));
+          if (fix?.ok) {
+            const again = await testStaffLogin({ emails: candidates, password: temporaryPassword });
+            if (again.status === 'ok') loginCheck = { ...again, status: 'repaired' };
+            else loginCheck = { ...again, message: again.message };
+          } else {
+            loginCheck = { ...loginCheck, message: `${loginCheck.message} (automatic repair failed: ${fix?.error?.message || 'unknown'})` };
+          }
+        }
+        if (loginCheck.email) rowEmail = loginCheck.email;
+      }
+
       // Step 2: Insert staff profile row - build defensively, only add optional cols if they exist
       const insertRow = { staff_code: staffCode, full_name: fullName, role_code: roleCode, is_active: true };
       if (branchId) insertRow.branch_id = branchId;
       if (authUserId) insertRow.auth_user_id = authUserId;
-      if (syntheticEmail) insertRow.auth_email = syntheticEmail;
+      if (rowEmail) insertRow.auth_email = rowEmail;
      
       let data, insertError;
       ({ data, error: insertError } = await client.from(staffTable).insert(insertRow).select(staffProfileSelect).single());
@@ -2954,6 +3000,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const staffSummary = normalizeStaffSummary(data);
       if (operationalAccount) staffSummary.operationalAccount = operationalAccount;
       if (operationalAccountError) staffSummary.operationalAccountError = operationalAccountError;
+      staffSummary.loginCheck = loginCheck;
       return defaultResult.ok(staffSummary);
     }
 
@@ -3483,7 +3530,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       if (!canUseSupabase()) return local.auth.resetStaffPassword(payload);
       const staffCode = String(payload.staffCode || payload.staffId || '').trim().toUpperCase();
       const staffAuthUserId = payload.authUserId || payload.auth_user_id || null;
-      const temporaryPassword = payload.temporaryPassword || payload.password || '';
+      const temporaryPassword = String(payload.temporaryPassword || payload.password || '').trim();
       if (!staffCode && !staffAuthUserId) return defaultResult.err('AUTH_RESET_TARGET_REQUIRED', 'Select staff to reset password.');
       if (!temporaryPassword || String(temporaryPassword).length < 6) return defaultResult.err('AUTH_PASSWORD_TOO_SHORT', 'Temporary password must be at least 6 characters.');
 
@@ -3518,6 +3565,14 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       }
       if (!result.ok) return result;
 
+      // 2026-11-04: prove the new temporary password really signs in.
+      let loginCheck = { status: 'skipped' };
+      try {
+        const emailRes = staffCode ? await resolveAuthEmailByStaffId(staffCode) : { ok: false };
+        const lower = staffCode.toLowerCase();
+        loginCheck = await testStaffLogin({ emails: [emailRes?.data?.email, `${staffCode}${syntheticEmailSuffix}`, `${lower}${syntheticEmailSuffix}`], password: String(temporaryPassword).trim() });
+      } catch (_e) {}
+
       try {
         await insertAuditLogEntry({
           actorStaffId: payload.updatedByStaffId || null,
@@ -3528,7 +3583,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           details: `Admin reset password for ${staffCode || staffAuthUserId}`,
         }).catch(() => {});
       } catch (_) {}
-      return defaultResult.ok({ success: true });
+      return defaultResult.ok({ success: true, loginCheck });
     }
 
 
