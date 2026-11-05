@@ -5135,12 +5135,12 @@ function nextPaint() {
     state.ui.staffDirectorySearch = state.ui.staffDirectorySearch || '';
     const search = String(state.ui.staffDirectorySearch || '').trim().toLowerCase();
     const filtered = state.staff.filter((s) => {
-      const staffCode = String(s.staffCode || s.staff_code || s.id || '').toLowerCase();
+      const staffCode = String(s.staffCode || s.staff_code || s.staffId || s.id || '').toLowerCase();
       const staffName = String(s.name || s.full_name || '').toLowerCase();
       return !search || staffName.includes(search) || staffCode.includes(search);
     }).sort((a,b) => String(a.name || a.full_name || '').localeCompare(String(b.name || b.full_name || '')));
     const bodyRows = filtered.map((s, i) => {
-      const staffCode = s.staffCode || s.staff_code || s.id || '—';
+      const staffCode = s.staffCode || s.staff_code || s.staffId || s.id || '—';
       const staffName = s.name || s.full_name || '—';
       const staffRole = s.role || s.role_code || '';
       const isActive = s.active !== false && s.is_active !== false;
@@ -6612,7 +6612,7 @@ function normalizeStaffLedgerEntryType(row) {
         const cur = staffRoleCode(s);
         const heldBefore = ['teller', 'admin_officer'].filter(r => r !== cur && staffEverHeldRole(s.id, [r]));
         const label = roleLabelOf(cur) + (heldBefore.length && !['teller', 'admin_officer'].includes(cur) ? ` (formerly ${heldBefore.map(roleLabelOf).join(' / ')})` : '');
-        return { id: s.id, name: s.name || '', role: label, ref: s.staffCode || s.staff_code || s.id || '—' };
+        return { id: s.id, name: s.name || '', role: label, ref: s.staffCode || s.staff_code || s.staffId || s.id || '—' };
       });
     const customerSourceIds = new Set();
     (state.approvals || []).forEach(r => {
@@ -10481,7 +10481,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function openEditStaffCodeModal(staffId) {
     const staff = state.staff.find(s => s.id === staffId);
     if (!staff) return showToast('Staff not found');
-    const currentCode = staff.staffCode || staff.staff_code || staff.id || '';
+    const currentCode = staff.staffCode || staff.staff_code || staff.staffId || staff.id || '';
     openModal('Edit Staff ID', `
       <p style="margin:0 0 10px;font-size:0.85em;color:var(--text-muted)">Staff ID is manager-assigned — it must be unique across all staff. Changing it changes their login ID.</p>
       <div class="field"><label>Staff ID <span style="color:red">*</span></label><input id="editStaffCodeInput" class="entry-input" value="${escapeHtml(String(currentCode))}" style="text-transform:uppercase" maxlength="10"></div>
@@ -10493,7 +10493,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         if (!newCode) return showToast('Enter a Staff ID');
         if (newCode.length > 10) return showToast('Staff ID must be 10 characters or fewer');
         if (newCode === currentCode.toUpperCase()) return closeModal();
-        const clash = state.staff.some(s => s.id !== staffId && (s.staffCode || s.staff_code || s.id || '').toUpperCase() === newCode);
+        const clash = state.staff.some(s => s.id !== staffId && (s.staffCode || s.staff_code || s.staffId || s.id || '').toUpperCase() === newCode);
         if (clash) return showToast(`Staff ID "${newCode}" is already in use`);
 
         const submitBtn = document.querySelector('.modal-actions button:last-child');
@@ -10785,7 +10785,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         if (!staffCode) return showToast('Enter a Staff ID / login ID');
         if (staffCode.length > 10) return showToast('Staff ID must be 10 characters or fewer');
         if (!password || password.length < 6) return showToast('Password must be at least 6 characters');
-        if (state.staff.some(s => (s.staffCode || s.staff_code || s.id || '').toUpperCase() === staffCode)) {
+        if (state.staff.some(s => (s.staffCode || s.staff_code || s.staffId || s.id || '').toUpperCase() === staffCode)) {
           return showToast(`Staff ID "${staffCode}" already exists`);
         }
 
