@@ -3568,7 +3568,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
 
       let result = await callResetEndpoint(resetFnUrl);
       if (!result.ok && fallbackFnUrl && fallbackFnUrl !== resetFnUrl) {
+        // 2026-11-05: create-staff-user cannot reset passwords (it only creates, so it always
+        // answers "already registered") and was masking the real error. Keep the primary
+        // function's own error whenever it actually answered.
+        const primary = result;
         result = await callResetEndpoint(fallbackFnUrl);
+        if (!result.ok && primary?.error?.code !== 'AUTH_RESET_UNREACHABLE') result = primary;
       }
       if (!result.ok) return result;
 
