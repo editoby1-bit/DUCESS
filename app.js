@@ -438,6 +438,8 @@
   state.ui.customerDirectorySearch = state.ui.customerDirectorySearch || '';
   ['staffProfiles','staffProfilesLoaded','staffProfilesSource','ictSource','ictLogs','admSelectedStaffId','admProfileDraft'].forEach(k => { delete state.ui[k]; });
   if (state.ui.module && !MODULES[state.ui.module]) state.ui.module = null;
+  // 2026-11-05: a saved/restored module must still be allowed for whoever is signed in now.
+  if (state.ui.module && !moduleAllowed(state.ui.module)) { state.ui.module = null; state.ui.tool = null; }
   if (state.ui.module && state.ui.tool && !hasPermission(state.ui.tool)) state.ui.tool = null;
   ensureState();
   resetJournalUiState();
@@ -1110,6 +1112,9 @@
 
   function moduleAllowed(moduleKey, staff=currentStaff()) {
     if (moduleKey === 'administration' && staff?.role !== 'admin_officer') return false;
+    // 2026-11-05: Treasury's tools (debit/credit/intra_transfer) are the same tools a Teller
+    // already has, so the tool check below let Tellers open the Treasury module. Gate it by role.
+    if (moduleKey === 'cash_officer' && !['cash_officer', 'admin_officer'].includes(staff?.role)) return false;
     return MODULES[moduleKey].tools.some(t => hasPermission(t, staff));
   }
 
