@@ -2879,7 +2879,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           const resp = await fetch(edgeFnUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config?.supabase?.anonKey || ''}` },
-            body: JSON.stringify({ staffCode, password: temporaryPassword, fullName, roleCode }),
+            body: JSON.stringify({ staffCode, staffId: staffCode, email: syntheticEmail, password: temporaryPassword, temporaryPassword, fullName, roleCode }),
           });
           const json = await resp.json().catch(() => ({}));
           edgeJson = json;
