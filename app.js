@@ -10397,7 +10397,11 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
             return;
           }
           closeModal();
-          showToast('✓ Staff password reset successfully');
+          if (result.data?.loginCheck?.status === 'failed') {
+            openModal('Password reset — login test FAILED', `<div class="stack"><p>The reset went through, but signing in with the new temporary password did not work.</p><p><strong>Reason:</strong> ${escapeHtml(result.data.loginCheck.message || 'unknown')}</p><p>Send this message to your developer.</p></div>`, [{ label: 'Close', onClick: closeModal }]);
+            return;
+          }
+          showToast(result.data?.loginCheck?.status === 'ok' ? '✓ Staff password reset — login tested OK' : '✓ Staff password reset successfully');
         } catch (err) {
           showToast('Could not reset password');
           if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Reset Password'; }
@@ -10814,6 +10818,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
             newStaffRecord = { id: uid('st'), staffCode, name, role, active: true };
           }
 
+          const loginCheck = newStaffRecord.loginCheck || null;
+          delete newStaffRecord.loginCheck;
           state.staff.push(newStaffRecord);
           ensureStaffAccount(newStaffRecord.id);
           save();
@@ -10837,7 +10843,14 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           }
           closeModal();
           render();
-          showToast(`✓ Staff "${name}" (${staffCode}) created — now assign a role`);
+          if (loginCheck?.status === 'failed') {
+            // The account exists but the temporary password does NOT sign in. Say so now.
+            openModal('Staff created — login test FAILED', `<div class="stack"><p>${escapeHtml(name)} (${escapeHtml(staffCode)}) was added, but signing in with the temporary password you set did not work, and the automatic repair did not fix it.</p><p><strong>Reason:</strong> ${escapeHtml(loginCheck.message || 'unknown')}</p><p>Open Staff Directory → Reset Password for this person. If the reset also fails, the message above is what to send to your developer.</p></div>`, [{ label: 'Close', onClick: closeModal }]);
+            return;
+          }
+          showToast(loginCheck?.status === 'repaired'
+            ? `✓ Staff "${name}" (${staffCode}) created — login was repaired and tested. Now assign a role`
+            : `✓ Staff "${name}" (${staffCode}) created${loginCheck?.status === 'ok' ? ' — login tested OK' : ''} — now assign a role`);
           // Straight on to step two: give the new staff member a role.
           if (isAdminStaff()) openAssignRoleModal(newStaffRecord.id);
         } catch (err) {
