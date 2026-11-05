@@ -3549,11 +3549,18 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       };
 
       async function callResetEndpoint(url) {
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-          body: JSON.stringify(body),
-        });
+        // 2026-11-05: a blocked/failed preflight (function not deployed or no CORS) makes
+        // fetch THROW, which skipped the fallback and gave a vague toast. Catch it here.
+        let resp;
+        try {
+          resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+            body: JSON.stringify(body),
+          });
+        } catch (netErr) {
+          return defaultResult.err('AUTH_RESET_UNREACHABLE', 'Password reset service is unreachable. The reset-staff-password Edge Function must be deployed with CORS enabled.', netErr);
+        }
         const json = await resp.json().catch(() => ({}));
         if (!resp.ok || json.error) return defaultResult.err('AUTH_RESET_FAILED', json.error || json.message || 'Password reset failed.', json);
         return defaultResult.ok(json);
