@@ -2281,6 +2281,14 @@ if (approvalRecord.type === 'float_topup') {
   return defaultResultOk(null);
 }
 
+  // A request sent to a particular approving officer is visible/actionable only to that
+  // officer (and Admin). Everyone else with approval access is "routed away" from it.
+  function isApprovalRoutedAway(req, viewer = currentStaff()) {
+    if (!viewer || viewer.role === 'admin_officer') return false;
+    const assignedTo = req?.payload?.assignedApproverId;
+    return !!(assignedTo && assignedTo !== viewer.id);
+  }
+
   function activeApprovingOfficers() {
     return (state.staff || []).filter(s => s.role === 'approving_officer' && s.active !== false && s.is_active !== false);
   }
@@ -4570,10 +4578,7 @@ function hideProcessing() {
       if (reqDate !== openDate || isBusinessDateClosed(reqDate)) return false;
       // Officer routing: approving officers only see requests sent to them.
       // Admin always sees everything, regardless of routing.
-      if (viewer?.role === 'approving_officer') {
-        const assignedTo = a.payload?.assignedApproverId;
-        if (assignedTo && assignedTo !== viewer.id) return false;
-      }
+      if (isApprovalRoutedAway(a, viewer)) return false;
       return true;
     });
     const limit = state.ui.approvalsLimit || 20;
@@ -4635,7 +4640,7 @@ function hideProcessing() {
   function renderApprovalHistory() {
     const allTypes = ['account_opening','account_maintenance','account_reactivation','cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'];
     const decided = (state.approvals || [])
-      .filter(a => allTypes.includes(a.type) && a.status !== 'pending')
+      .filter(a => allTypes.includes(a.type) && a.status !== 'pending' && !isApprovalRoutedAway(a))
       .sort((a, b) => new Date(approvalDisplayDate(b) || 0) - new Date(approvalDisplayDate(a) || 0));
     const limit = state.ui.approvalHistoryLimit || 30;
     const rows = decided.slice(0, limit).map((a, i) => {
@@ -8896,7 +8901,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (clearSel) clearSel.onclick = () => { state.ui.selectedApprovalIds = []; save(); renderWorkspace(); };
     const runBulk = (mode) => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
-      const ids = (state.ui.selectedApprovalIds || []).filter(id => !isApprovalLockedByOther(id));
+      const ids = (state.ui.selectedApprovalIds || []).filter(id => !isApprovalLockedByOther(id) && !isApprovalRoutedAway((state.approvals || []).find(a => a.id === id)));
       if (!ids.length) return showToast('Select pending requests first');
       confirmAction(`${mode === 'approve' ? 'Approve' : 'Reject'} ${ids.length} selected request${ids.length === 1 ? '' : 's'}?`, async () => {
         showProcessing(mode === 'approve' ? 'Approving selected requests...' : 'Rejecting selected requests...');
@@ -8918,12 +8923,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (bulkApprove) bulkApprove.onclick = () => runBulk('approve');
     const bulkReject = byId('approvalBulkReject');
     if (bulkReject) bulkReject.onclick = () => runBulk('reject');
-    const isRoutedAway = (req) => {
-      const viewer = currentStaff();
-      if (viewer?.role !== 'approving_officer') return false; // admin always allowed
-      const assignedTo = req?.payload?.assignedApproverId;
-      return !!(assignedTo && assignedTo !== viewer.id);
-    };
+    const isRoutedAway = (req) => isApprovalRoutedAway(req);
     qq('[data-approve]').forEach(btn => btn.onclick = () => {
       if (!hasPermission('approval_queue')) return showToast('No approval rights');
       const reqId = btn.dataset.approve;
