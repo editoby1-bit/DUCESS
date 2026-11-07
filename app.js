@@ -2317,6 +2317,10 @@ if (approvalRecord.type === 'float_topup') {
   }
 
   async function submitApprovalThroughGateway(type, payload, meta = {}) {
+    // Customer Service tools are re-checked at submit time, not just by greying out buttons.
+    if (['account_opening', 'account_maintenance', 'account_reactivation'].includes(type) && !hasPermission(type)) {
+      return defaultResultErr('NO_PERMISSION', 'You do not have permission to use this tool.');
+    }
     reconcileBusinessDateFromClosures();
     const requestDate = approvalBusinessDate(type, payload);
     if (shouldLockApprovalType(type) && isBusinessDateClosed(requestDate)) {
