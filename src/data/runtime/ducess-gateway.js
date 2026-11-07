@@ -25,7 +25,7 @@
 const ROLE_DEFAULT_TOOLS = {
     customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
     teller: ['check_balance','account_statement','credit','debit'],
-    approving_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','credit','debit','approval_queue','business_balance','operational_balance'],
+    approving_officer: ['check_balance','account_statement','credit','debit','approval_queue','business_balance','operational_balance'],
     admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','credit','debit','approval_queue','permissions','operational_accounts','staff_directory','business_balance','operational_balance','teller_balances'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances']
   };
