@@ -6382,7 +6382,7 @@ function staffLedgerEvents(staffId) {
   }
   function reviewRangeOf(f) {
     if (f.mode === 'range') return { from: f.from || '', to: f.to || '' };
-    const d = f.mode === 'day' && f.date ? f.date : today();
+    const d = f.mode === 'day' && f.date ? f.date : businessDate();
     return { from: d, to: d };
   }
   function staffReviewRows(tool, st) {
@@ -6451,7 +6451,7 @@ function staffLedgerEvents(staffId) {
           </div>
           <div class="action-inline balance-filters-row" style="margin-top:10px">
             <button class="filter-chip ${f.mode === 'today' ? 'active' : 'secondary'}" id="reviewToday">Today</button>
-            <label class="inline-field"><span>Date</span><input id="reviewDate" type="date" lang="en-GB" value="${escapeHtml(f.mode === 'day' ? (f.date || '') : '')}"></label>
+            <div class="inline-field review-business-date"><span>Business Date</span><strong>${fmtDate(businessDate())}</strong></div>
             <label class="inline-field"><span>From</span><input id="reviewFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label>
             <label class="inline-field"><span>To</span><input id="reviewTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label>
             <button class="filter-chip ${f.mode === 'range' ? 'active' : 'secondary'}" id="reviewApplyRange">Apply Range</button>
@@ -6465,8 +6465,18 @@ function staffLedgerEvents(staffId) {
     const f = reviewFilterFor(tool);
     const todayBtn = byId('reviewToday');
     if (todayBtn) todayBtn.onclick = () => { f.mode = 'today'; f.date = ''; save(); renderWorkspace(); };
-    const dateEl = byId('reviewDate');
-    if (dateEl) dateEl.onchange = () => { if (!dateEl.value) return; f.mode = 'day'; f.date = dateEl.value; save(); renderWorkspace(); };
+    // Tapping anywhere on a date field opens the calendar (the field itself is an invisible
+    // layer over the dd/mm/yyyy display, so the browser's own tiny icon is not reachable).
+    ['reviewFrom', 'reviewTo'].forEach(id => {
+      const el = byId(id);
+      if (!el) return;
+      el.addEventListener('click', () => { try { el.showPicker && el.showPicker(); } catch (_e) { /* browser without showPicker: native behaviour */ } });
+      el.addEventListener('change', () => {
+        const from = byId('reviewFrom')?.value || '';
+        const to = byId('reviewTo')?.value || '';
+        if (from && to && from <= to) { f.mode = 'range'; f.from = from; f.to = to; save(); renderWorkspace(); }
+      });
+    });
     const applyBtn = byId('reviewApplyRange');
     if (applyBtn) applyBtn.onclick = () => {
       const from = byId('reviewFrom')?.value || '';

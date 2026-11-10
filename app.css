@@ -13476,3 +13476,4 @@ body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 .teller-id-banner { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin: 0 0 10px; padding: 6px 10px; border: 1px solid var(--line, #d8dee9); border-radius: 8px; font-size: .86em; }
 .teller-id-banner .k { opacity: .7; margin-right: 4px; }
 #txTellerId, #itrTellerId, #itrDestTellerId, #journalRowTellerId, #jpmFundTellerId { white-space: normal; line-height: 1.2; word-break: break-word; }
+.review-business-date { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 10px; }
