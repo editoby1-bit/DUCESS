@@ -1141,16 +1141,19 @@
   // 2026-11-09 (client): each section belongs to its own role. Anyone else gets
   // a "No access" message. Admin can open every section. A temporary grant on any
   // tool of a section still opens that section for the person it was granted to.
-  const MODULE_ROLES = {
-    customer_service: ['customer_service', 'report_officer', 'admin_officer'],
-    tellering: ['teller', 'admin_officer'],
-    cash_officer: ['cash_officer', 'admin_officer'],
-    approvals: ['approving_officer', 'admin_officer'],
-    administration: ['admin_officer']
-  };
+  // A function (not a const) so it is available during start-up, before this line runs.
+  function moduleRolesFor(moduleKey) {
+    return ({
+      customer_service: ['customer_service', 'report_officer', 'admin_officer'],
+      tellering: ['teller', 'admin_officer'],
+      cash_officer: ['cash_officer', 'admin_officer'],
+      approvals: ['approving_officer', 'admin_officer'],
+      administration: ['admin_officer']
+    })[moduleKey];
+  }
   function moduleAllowed(moduleKey, staff=currentStaff()) {
     if (!staff) return false;
-    const roles = MODULE_ROLES[moduleKey];
+    const roles = moduleRolesFor(moduleKey);
     if (roles && !roles.includes(staff.role)) {
       const granted = (state.tempGrants || []).some(g => g.staffId === staff.id && g.enabled && MODULES[moduleKey].tools.includes(g.tool));
       if (!granted) return false;
