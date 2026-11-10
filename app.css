@@ -13469,3 +13469,10 @@ body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 #workspace .workspace-tool-body .nc-head{ font-size: calc(14px / var(--z)) !important; }
 #workspace .workspace-tool-body .nc-grid button.nc-mini-btn,
 #workspace .workspace-tool-body .nc-grid button.nc-post-btn{ font-size: calc(12px / var(--z)) !important; }
+
+/* 2026-11-09: sidebar tools that are not yours stay visible but say "No access" when tapped */
+.tool-tab.tool-denied { opacity: .5; cursor: not-allowed; }
+/* Teller + Account number line on forms and modals */
+.teller-id-banner { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin: 0 0 10px; padding: 6px 10px; border: 1px solid var(--line, #d8dee9); border-radius: 8px; font-size: .86em; }
+.teller-id-banner .k { opacity: .7; margin-right: 4px; }
+#txTellerId, #itrTellerId, #itrDestTellerId, #journalRowTellerId, #jpmFundTellerId { white-space: normal; line-height: 1.2; word-break: break-word; }

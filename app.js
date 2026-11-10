@@ -217,7 +217,7 @@
       // universal (see hasPermission's free-tool list) — every staff role
       // needs somewhere to reach it, and this module is already the one
       // every role can open (via check_balance).
-      tools: ['check_balance','account_opening','account_maintenance','account_reactivation']
+      tools: ['check_balance','account_opening','account_maintenance','account_reactivation','work_review']
     },
     cash_officer: {
       title: 'Treasury',
@@ -237,13 +237,13 @@
       // funds itself via Cash Receipt (unchanged). Admin still has
       // staff_credit via the 'administration' module below — this removal
       // is Treasury-only, per client instruction.
-      tools: ['debit','credit','intra_transfer']
+      tools: ['debit','credit','intra_transfer','treasury_review']
     },
     tellering: {
       title: 'Tellering',
       desc: 'Credit and debit customer accounts from your operational balance.',
       icon: '💳',
-      tools: ['check_balance','debit','credit','journal_debit','journal_credit','journal_register','intra_transfer']
+      tools: ['check_balance','debit','credit','journal_debit','journal_credit','journal_register','intra_transfer','teller_review']
     },
     approvals: {
       title: 'Approval',
@@ -253,7 +253,7 @@
       // Approving Officer's own unique totals view (how much they've
       // approved, by date), separate from the cash statement everyone else
       // gets since they never hold a cash account themselves.
-      tools: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals']
+      tools: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','approval_review']
     },
     administration: {
       title: 'Administration',
@@ -297,6 +297,10 @@
     check_balance: 'Check Balance',
     my_statement: 'My Statement',
     my_approvals: 'My Approvals',
+    work_review: 'Work Review',
+    teller_review: 'Tellerng Review',
+    approval_review: 'Approval Review',
+    treasury_review: 'Treasury Review',
     account_opening: 'Account Opening',
     account_maintenance: 'Account Maintenance',
     account_reactivation: 'Account Reactivation',
@@ -332,7 +336,7 @@
   };
 
   const DEFAULT_PERMS = {
-    customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement'],
+    customer_service: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','work_review'],
     // SURGICAL REMOVAL 2026-09-09: 'staff_credit' dropped from Treasury's
     // permission set — see the matching comment on the cash_officer module
     // above. Admin (admin_officer, below) keeps it untouched.
@@ -340,14 +344,14 @@
     // Posting" (journal_register) removed from Treasury entirely — Treasury
     // funds tellers via Non Cash (still role-agnostic), just without a
     // Journal Register view of their own.
-    cash_officer: ['debit','credit','intra_transfer'],
-    teller: ['check_balance','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer'],
+    cash_officer: ['debit','credit','intra_transfer','treasury_review'],
+    teller: ['check_balance','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','teller_review'],
     // SURGICAL FIX 2026-09-07 (client request): Approving Officer gets its
     // own totals view ("my_approvals" — how much they've approved, by date)
     // rather than the cash statement everyone else gets, since they never
     // hold a cash account themselves.
-    approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals'],
-    admin_officer: ['check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary'],
+    approving_officer: ['approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','approval_review'],
+    admin_officer: ['work_review','teller_review','approval_review','treasury_review','check_balance','account_opening','account_maintenance','account_reactivation','account_statement','cash_receipt','staff_credit','credit','debit','journal_debit','journal_credit','journal_register','intra_transfer','central_close_day','approval_queue','approval_customer_service','approval_tellering','approval_non_cash','approval_others','approval_history','my_approvals','permissions','operational_accounts','operational_posting','overall_balance','staff_directory','staff_roster','customer_directory','business_balance','operational_balance','teller_balances','collector_balance','my_close_day','transaction_summary'],
     report_officer: ['check_balance','account_statement','business_balance','operational_balance','teller_balances','collector_balance','operational_accounts','staff_directory']
   };
 
@@ -380,10 +384,13 @@
   const BALANCE_PERIODS = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']];
   const BALANCE_REPORTS = [
     ['overall',   'overall_balance',      'Overall Balance'],
+    ['all',       'overall_balance',      'All Accounts'],
     ['customers', 'customer_directory',   "All Customers' Balance"],
     ['salary',    'staff_directory',      'Staff Salary Balance'],
-    ['tellers',   'teller_balances',      'Teller Balances'],
-    ['incexp',    'operational_accounts', 'Income & Expense Balance'],
+    ['income',    'operational_accounts', 'Income Balance'],
+    ['expense',   'operational_accounts', 'Expense Balance'],
+    ['tellers',   'teller_balances',      'Tellerng Balance'],
+    ['treasury',  'overall_balance',      'Treasury Balance'],
   ];
   const BALANCE_SUB_TOOLS = {};
   BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
@@ -849,10 +856,31 @@
     return true;
   }
   function staffById(id){ return state.staff.find(s=>s.id===id) || null; }
+  // 2026-11-09 (client): accounts are kept in separate segments so each one has
+  // its own totals — Customers, Staff, Income, Expenses, Tellerng, Treasury —
+  // and "All Accounts" is where they are looked at together.
+  function accountSegmentOf(c) {
+    const t = String(c?.accountType || 'customer');
+    return ({ customer: 'customer', staff_salary: 'staff', income: 'income', expense: 'expense', staff_operational: 'tellerng', treasury: 'treasury' })[t] || '';
+  }
+  const accountsInSegment = (seg) => (state.customers || []).filter(c => accountSegmentOf(c) === seg);
   // SURGICAL ADDITION 2026-09-28 (client correction): "Teller ID" is the
   // staff's FIRST NAME, not their T#### operational account number.
   function staffFirstName(st){ return String(st?.name || '').trim().split(/\s+/)[0] || '—'; }
-  function tellerIdForAccount(c){ return c?.accountType === 'staff_operational' ? staffFirstName(staffById(c.linkedStaffId)) : '—'; }
+  // 2026-11-09 (client): "Teller ID" always shows the Teller AND the account
+  // number (e.g. "Mary Daniel • T1001"), never just a first name.
+  function tellerIdLabel(st, acctNo) {
+    if (!st) return '—';
+    const no = acctNo || staffOperationalAccountNumber(st.id);
+    return `${st.name || staffFirstName(st)}${no ? ' • ' + no : ''}`;
+  }
+  function tellerIdForAccount(c){ return c?.accountType === 'staff_operational' ? tellerIdLabel(staffById(c.linkedStaffId), c.accountNumber) : '—'; }
+  function tellerBannerHtml(st = currentStaff()) {
+    if (!st) return '';
+    const no = staffOperationalAccountNumber(st.id);
+    if (!no && !['teller', 'admin_officer'].includes(st.role)) return '';
+    return `<div class="teller-id-banner"><span><span class="k">Teller ID</span><strong>${escapeHtml(st.name || '')}</strong></span><span><span class="k">Account No</span><strong>${escapeHtml(no || 'Not opened yet')}</strong></span></div>`;
+  }
   // SURGICAL ADDITION 2026-09-28 (client correction): Account Status is a
   // small colour-coded box, not a full-size display field.
   function accountStatusOf(c){ return c ? customerStatusLabel(c) : '—'; }
@@ -1110,12 +1138,29 @@
     return base.includes(tool) || grantOn;
   }
 
+  // 2026-11-09 (client): each section belongs to its own role. Anyone else gets
+  // a "No access" message. Admin can open every section. A temporary grant on any
+  // tool of a section still opens that section for the person it was granted to.
+  const MODULE_ROLES = {
+    customer_service: ['customer_service', 'report_officer', 'admin_officer'],
+    tellering: ['teller', 'admin_officer'],
+    cash_officer: ['cash_officer', 'admin_officer'],
+    approvals: ['approving_officer', 'admin_officer'],
+    administration: ['admin_officer']
+  };
   function moduleAllowed(moduleKey, staff=currentStaff()) {
-    if (moduleKey === 'administration' && staff?.role !== 'admin_officer') return false;
-    // 2026-11-05: Treasury's tools (debit/credit/intra_transfer) are the same tools a Teller
-    // already has, so the tool check below let Tellers open the Treasury module. Gate it by role.
-    if (moduleKey === 'cash_officer' && !['cash_officer', 'admin_officer'].includes(staff?.role)) return false;
+    if (!staff) return false;
+    const roles = MODULE_ROLES[moduleKey];
+    if (roles && !roles.includes(staff.role)) {
+      const granted = (state.tempGrants || []).some(g => g.staffId === staff.id && g.enabled && MODULES[moduleKey].tools.includes(g.tool));
+      if (!granted) return false;
+    }
     return MODULES[moduleKey].tools.some(t => hasPermission(t, staff));
+  }
+  function noAccessMessage(label) {
+    const st = currentStaff();
+    const role = st ? (ROLE_LABELS[st.role] || st.role || 'your role') : 'your role';
+    return `No access — ${label ? label + ' is not' : 'this is not'} available for ${role}`;
   }
 
   function showToast(msg) {
@@ -1127,6 +1172,10 @@
   }
 
   function openModal(title, bodyHtml, actions=[]) {
+    // 2026-11-09 (client): cash modals always show the Teller and Account number.
+    if (/^(Cash Receipt|My Close of Day|Resolve Close of Day|Central Close of Day|Assign Float Top-Up)$|^JN\d/.test(String(title || '')) && !/Teller ID|teller-id-banner/.test(String(bodyHtml || ''))) {
+      bodyHtml = tellerBannerHtml() + bodyHtml;
+    }
     byId('modalTitle').textContent = title;
     const modalEl = document.querySelector('#modalBack .modal');
     if (modalEl) modalEl.setAttribute('data-modal-title', title);
@@ -3206,7 +3255,7 @@ function hideProcessing() {
     qq('.module-card').forEach(card => {
       card.onclick = () => {
         const key = card.dataset.module;
-        if (!moduleAllowed(key)) return showToast('No access for this section');
+        if (!moduleAllowed(key)) return showToast(noAccessMessage(MODULES[key]?.title));
         if (state.ui.module === key) {
           state.ui.module = null;
           state.ui.tool = null;
@@ -3252,6 +3301,7 @@ function hideProcessing() {
           <div class="tool-column-title tellering-tools-only-title">Tellering Tools</div>
           ${toolBtn('check_balance')}
           ${groupHtml}
+          ${toolBtn('teller_review')}
         </div>`;
       }
       if (state.ui.module === 'administration') {
@@ -3290,6 +3340,7 @@ function hideProcessing() {
           }).join('')}
           ${toolBtn('approval_history')}
           ${toolBtn('my_approvals')}
+          ${toolBtn('approval_review')}
         </div>`;
       }
       if (state.ui.module === 'cash_officer') {
@@ -3311,6 +3362,7 @@ function hideProcessing() {
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
           <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
           ${groupHtml}
+          ${toolBtn('treasury_review')}
         </div>`;
       }
       if (state.ui.module === 'customer_service') {
@@ -3330,6 +3382,7 @@ function hideProcessing() {
           ${openingGroup}
           ${toolBtn('account_maintenance')}
           ${toolBtn('account_reactivation')}
+          ${toolBtn('work_review')}
         </div>`;
       }
       // SURGICAL CHANGE 2026-10-16 (client: uniform design across the
@@ -3339,6 +3392,19 @@ function hideProcessing() {
     };
     const tabs = `<div class="workspace-switcher"><div class="tool-tabs vertical-tool-tabs tellering-tool-tabs">${renderToolButtons()}</div><div class="workspace-tool-body spec-color-scheme sheet-uniform">${state.ui.tool ? renderTool(state.ui.tool) : `<div class="tool-empty-state"><div class="tool-empty-title">${module.title}</div><div class="tool-empty-note">Select a heading to open that work area.</div></div>`}</div></div>`;
     byId('workspace').innerHTML = tabs;
+    // 2026-11-09 (client): a tool that is not yours says "No access" when tapped
+    // instead of doing nothing.
+    qq('#workspace .tool-tabs .tool-tab[disabled]').forEach(btn => { btn.removeAttribute('disabled'); btn.setAttribute('aria-disabled', 'true'); btn.classList.add('tool-denied'); });
+    const wsEl = byId('workspace');
+    if (wsEl && !wsEl.dataset.noAccessBound) {
+      wsEl.dataset.noAccessBound = '1';
+      wsEl.addEventListener('click', (e) => {
+        const b = e.target && e.target.closest ? e.target.closest('.tool-denied') : null;
+        if (!b) return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        showToast(noAccessMessage(String(b.textContent || '').replace(/[▾▸🔒]/g, '').trim()));
+      }, true);
+    }
     qq('[data-posting-group]').forEach(btn => btn.onclick = () => {
       const key = btn.dataset.postingGroup;
       state.ui.tellerGroupOpen ||= {};
@@ -3445,6 +3511,7 @@ function hideProcessing() {
       case 'check_balance': return renderCheckBalance();
       case 'my_statement': return renderMyStatement();
       case 'my_approvals': return renderMyApprovals();
+      case 'work_review': case 'teller_review': case 'approval_review': case 'treasury_review': return renderStaffReview(tool);
       case 'account_opening': return renderAccountOpening();
       case 'account_maintenance': return renderAccountMaintenance();
       case 'account_reactivation': return renderAccountReactivation();
@@ -3669,6 +3736,15 @@ function hideProcessing() {
   // (3) "Print Statement" is no longer a standalone always-visible button —
   // it only appears once a statement has actually been generated, inside
   // the generated statement block itself.
+  // The person who handed in / collected the money is saved on the entry either as
+  // receivedOrPaidBy or, when it comes from the database, as its counterparty.
+  function statementReceivedBy(tx) {
+    const direct = String(tx?.receivedOrPaidBy || '').trim();
+    if (direct) return direct;
+    const cp = String(tx?.counterparty || '').trim();
+    return ['', 'customer', 'staff_wallet', 'staff'].includes(cp.toLowerCase()) ? '' : cp;
+  }
+
   function renderAccountStatement() {
     const customer = getSelectedCustomer();
     const filter = state.ui.accountStatementFilter ||= { from: '', to: '' };
@@ -3686,7 +3762,7 @@ function hideProcessing() {
         if (filter.to && d > filter.to) return false;
         return true;
       });
-      const rows = events.map((ev, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td>${tellerStatementCells(ev)}<td>—</td><td>${escapeHtml(ev.staffName || '—')}</td><td>—</td></tr>`).join('');
+      const rows = events.map((ev, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td>${tellerStatementCells(ev)}<td>${escapeHtml(ev.receivedOrPaidBy || '—')}</td><td>${escapeHtml(ev.postedBy || ev.staffName || '—')}</td><td>${escapeHtml(ev.approvedBy || '—')}</td></tr>`).join('');
       statementHtml = `
         <div class="record-card statement-record-minimal" id="statementPrintArea">
           <div class="lookup-card statement-lookup-minimal"><div class="stack"><div class="info-grid">
@@ -3714,7 +3790,7 @@ function hideProcessing() {
         <td>${tx.type==='debit'?money(tx.amount):''}</td>
         <td>${tx.type==='credit'?money(tx.amount):''}</td>
         <td>${money(tx.balanceAfter)}</td>
-        <td>${escapeHtml(tx.receivedOrPaidBy || '—')}</td>
+        <td>${escapeHtml(statementReceivedBy(tx) || '—')}</td>
         <td>${escapeHtml(tx.postedBy || tx.postedById || '—')}</td>
         <td>${escapeHtml(tx.approvedBy || '—')}</td>
       </tr>`).join('');
@@ -4331,7 +4407,7 @@ function hideProcessing() {
               <div class="nc-cell"><input id="txAcc" class="entry-input" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" autocomplete="off"></div>
               <div class="nc-cell"><button id="txSearch" class="nc-mini-btn">Search</button></div>
               <div class="nc-cell nc-tag">Teller ID</div>
-              <div class="nc-cell"><div class="display-field" id="txTellerId">${escapeHtml(staffFirstName(st))}</div></div>
+              <div class="nc-cell"><div class="display-field" id="txTellerId">${escapeHtml(tellerIdLabel(st))}</div></div>
 
               <div class="nc-label">Account Name</div>
               <div class="nc-cell nc-span-4"><div class="display-field" id="txName">—</div></div>
@@ -5110,8 +5186,7 @@ function nextPaint() {
 
   function renderCustomerDirectory() {
     const search = String(state.ui.customerDirectorySearch || '').trim().toLowerCase();
-    const customers = [...(state.customers || [])]
-      .filter(c => String(c.accountType || 'customer') !== 'staff_wallet')
+    const customers = [...accountsInSegment('customer')]
       .sort((a,b)=> String(a.accountNumber||'').localeCompare(String(b.accountNumber||''), undefined, {numeric:true}));
     const filteredCustomers = search
       ? customers.filter(c => [c.name, c.accountNumber, c.phone, c.email].some(value => String(value || '').toLowerCase().includes(search)))
@@ -5284,26 +5359,66 @@ function nextPaint() {
   }
   const dayBefore = (iso) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 
+  // One teller's period figures — the same rules the Teller Balances report uses.
+  function tellerFigures(staffId, r) {
+    const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(staffId)) : 0;
+    const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(staffId));
+    const mine = (state.approvals || []).filter(a => a.status === 'approved' && a.payload?.staffId === staffId && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
+    const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
+    const credit = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
+    const debit = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
+    return { opening, debit, credit, closing };
+  }
+
   function renderPeriodBalance(def) {
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: def.preset });
     const head = renderPeriodBar();
     if (def.report === 'overall') {
       const sumGroup = (accts, itemsOf, balOf) => accts.reduce((acc, a) => { const f = periodFigures(balOf(a), itemsOf(a), r); acc.opening += f.opening; acc.debit += f.debit; acc.credit += f.credit; acc.closing += f.closing; return acc; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+      const addFig = (x, y) => ({ opening: x.opening + y.opening, debit: x.debit + y.debit, credit: x.credit + y.credit, closing: x.closing + y.closing });
+      const staffWallets = sumGroup((state.staff || []).map(st => { const acc = ensureStaffAccount(st.id); return { acc, wallet: (state.customers || []).find(c => c.id === acc.linkedCustomerId) }; }), x => txItems(x.wallet), x => x.acc.balance);
+      const tellerSeg = accountsInSegment('tellerng').reduce((t, c) => addFig(t, tellerFigures(c.linkedStaffId, r)), { opening: 0, debit: 0, credit: 0, closing: 0 });
       const cats = [
-        ["All Customers' Balance", sumGroup((state.customers || []).filter(c => !['staff_wallet','treasury'].includes(String(c.accountType || 'customer'))), txItems, c => c.balance)],
-        ['Treasury Balance', sumGroup((state.customers || []).filter(c => String(c.accountType || '') === 'treasury'), txItems, c => c.balance)],
-        ['All Staff Balance', sumGroup((state.staff || []).map(st => { const acc = ensureStaffAccount(st.id); return { acc, wallet: (state.customers || []).find(c => c.id === acc.linkedCustomerId) }; }), x => txItems(x.wallet), x => x.acc.balance)],
+        ["All Customers' Balance", sumGroup(accountsInSegment('customer'), txItems, c => c.balance)],
+        ['All Staff Balance', addFig(staffWallets, sumGroup(accountsInSegment('staff'), txItems, c => c.balance))],
         ['Income Balance', sumGroup(state.operations.incomeAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
         ['Expense Balance', sumGroup(state.operations.expenseAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
+        ['Tellerng Balance', tellerSeg],
+        ['Treasury Balance', sumGroup(accountsInSegment('treasury'), txItems, c => c.balance)],
       ];
       const g = cats.reduce((t, [, f]) => ({ opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { opening: 0, debit: 0, credit: 0, closing: 0 });
       const rows = cats.map(([n, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(n)}</td><td>${money(f.opening)}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`).join('');
       return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">The company's entire truth — every balance category rolled up into one business total, for the selected period.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Opening Balance</th><th>Total Debit</th><th>Total Credit</th><th>Closing Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(g.opening)}</strong></td><td><strong>${money(g.debit)}</strong></td><td><strong>${money(g.credit)}</strong></td><td><strong>${money(g.closing)}</strong></td></tr></tbody></table></div></div></div>`;
     }
+    const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
+    const opFigSeg = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
+    if (def.report === 'income' || def.report === 'expense') {
+      const isInc = def.report === 'income';
+      return `<div class="stack">${head}${periodAccountsTable(isInc ? 'All Income Balance' : 'All Expense Balance', sortAccSeg(isInc ? state.operations.incomeAccounts : state.operations.expenseAccounts), r, { figures: opFigSeg, empty: isInc ? 'No income accounts' : 'No expense accounts' })}</div>`;
+    }
+    if (def.report === 'treasury') {
+      return `<div class="stack">${head}${periodAccountsTable('All Treasury Balance', sortAccSeg(accountsInSegment('treasury')), r, { empty: 'No treasury accounts' })}</div>`;
+    }
+    if (def.report === 'all') {
+      const segs = [
+        ['Customers', sortAccSeg(accountsInSegment('customer')), undefined, 'No customer accounts'],
+        ['Staff', sortAccSeg(accountsInSegment('staff')), undefined, 'No staff accounts'],
+        ['Income', sortAccSeg(state.operations.incomeAccounts), opFigSeg, 'No income accounts'],
+        ['Expenses', sortAccSeg(state.operations.expenseAccounts), opFigSeg, 'No expense accounts'],
+        ['Tellerng', sortAccSeg(accountsInSegment('tellerng')), (c) => tellerFigures(c.linkedStaffId, r), 'No teller accounts'],
+        ['Treasury', sortAccSeg(accountsInSegment('treasury')), undefined, 'No treasury accounts'],
+      ];
+      const figOf = (list, fn) => list.reduce((t, a) => { const f = fn ? fn(a) : periodFigures(a.balance, txItems(a), r); return { opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+      const totals = segs.map(([n, list, fn]) => [n, list.length, figOf(list, fn)]);
+      const grand = totals.reduce((t, [, c, f]) => ({ count: t.count + c, opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { count: 0, opening: 0, debit: 0, credit: 0, closing: 0 });
+      const sumRows = totals.map(([n, c, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(n)}</td><td>${c}</td><td>${money(f.opening)}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td class="${f.closing<0?'balance-negative':''}">${money(f.closing)}</td></tr>`).join('');
+      const summary = `<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">Every account in its own segment, each with its own total, and all of them together below.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Segment</th><th>Accounts</th><th>Opening Balance</th><th>Total Debit</th><th>Total Credit</th><th>Closing Balance</th></tr></thead><tbody>${sumRows}<tr class="total-row"><td colspan="2"><strong>All Accounts</strong></td><td><strong>${grand.count}</strong></td><td><strong>${money(grand.opening)}</strong></td><td><strong>${money(grand.debit)}</strong></td><td><strong>${money(grand.credit)}</strong></td><td><strong>${money(grand.closing)}</strong></td></tr></tbody></table></div></div>`;
+      return `<div class="stack">${head}${summary}${segs.map(([n, list, fn, empty]) => periodAccountsTable(n, list, r, { figures: fn, empty })).join('')}</div>`;
+    }
     if (def.report === 'customers' || def.report === 'salary') {
       const search = String(state.ui.periodBalanceSearch || '').trim().toLowerCase();
       const accounts = (state.customers || [])
-        .filter(c => def.report === 'salary' ? c.accountType === 'staff_salary' : String(c.accountType || 'customer') !== 'staff_wallet')
+        .filter(c => def.report === 'salary' ? c.accountType === 'staff_salary' : accountSegmentOf(c) === 'customer')
         .filter(c => !search || [c.name, c.accountNumber, c.phone].some(v => String(v || '').toLowerCase().includes(search)))
         .sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
       const extra = `<div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div>`;
@@ -5641,7 +5756,7 @@ function nextPaint() {
       treasuryDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s,tx)=>s+Number(tx.amount||0),0);
       treasuryBalance += Number(c.balance||0);
     });
-    (state.customers || []).filter(c => !['staff_wallet','treasury'].includes(String(c.accountType || 'customer'))).forEach(c => {
+    accountsInSegment('customer').forEach(c => {
       customerCredit += (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s,tx)=>s+Number(tx.amount||0),0);
       customerDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s,tx)=>s+Number(tx.amount||0),0);
       customerBalance += Number(c.balance||0);
@@ -5653,6 +5768,16 @@ function nextPaint() {
       staffCredit += (wallet?.transactions || []).filter(tx => tx.type === 'credit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
       staffDebit += (wallet?.transactions || []).filter(tx => tx.type === 'debit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
       staffBalance += Number(acc.balance||0);
+    });
+    accountsInSegment('staff').forEach(c => {
+      staffCredit += (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
+      staffDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
+      staffBalance += Number(c.balance||0);
+    });
+    let tellerDebit = 0, tellerCredit = 0, tellerBalance = 0;
+    accountsInSegment('tellerng').forEach(c => {
+      const f = tellerFigures(c.linkedStaffId, { start: '', end: '' });
+      tellerDebit += f.debit; tellerCredit += f.credit; tellerBalance += f.closing;
     });
     let incomeDebit = 0, incomeCredit = 0, incomeBalance = 0;
     (state.operations.incomeAccounts || []).forEach(a => {
@@ -5669,7 +5794,8 @@ function nextPaint() {
       { name: 'Treasury Balance', totalDebit: treasuryDebit, totalCredit: treasuryCredit, balance: treasuryBalance },
       { name: 'All Staff Balance', totalDebit: staffDebit, totalCredit: staffCredit, balance: staffBalance },
       { name: 'Income Balance', totalDebit: incomeDebit, totalCredit: incomeCredit, balance: incomeBalance },
-      { name: 'Expense Balance', totalDebit: expenseDebit, totalCredit: expenseCredit, balance: expenseBalance }
+      { name: 'Expense Balance', totalDebit: expenseDebit, totalCredit: expenseCredit, balance: expenseBalance },
+      { name: 'Tellerng Balance', totalDebit: tellerDebit, totalCredit: tellerCredit, balance: tellerBalance }
     ];
     const grandDebit = categories.reduce((s,c)=>s+c.totalDebit,0);
     const grandCredit = categories.reduce((s,c)=>s+c.totalCredit,0);
@@ -5984,9 +6110,16 @@ function staffLedgerEvents(staffId) {
     const acc = ensureStaffAccount(staffId);
     const events = [];
     const seen = new Set();
+    let ctxReq = null;
     const addEvent = (event) => {
       const key = event.key || `${event.date}|${event.type}|${event.amount}|${event.details}`;
       if (seen.has(key)) return;
+      if (ctxReq) {
+        const rp = ctxReq.payload || {};
+        event.receivedOrPaidBy = event.receivedOrPaidBy || rp.receivedOrPaidBy || rp.receivedBy || rp.paidBy || rp.paidTo || rp.receivedFromName || rp.collectorName || '';
+        event.postedBy = event.postedBy || ctxReq.requestedByName || staffName(ctxReq.requestedBy) || '';
+        event.approvedBy = event.approvedBy || ctxReq.approvedBy || ctxReq.approvedByName || '';
+      }
       seen.add(key);
       events.push(event);
     };
@@ -6007,6 +6140,7 @@ function staffLedgerEvents(staffId) {
     });
     (state.approvals || []).filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
       const payload = req.payload || {};
+      ctxReq = req;
       const date = payload.date || payload.float_date || String(req.approvedAt || req.requestedAt || '').slice(0,10) || businessDate();
       // Cash receipt: Cash Officer funded their own operational account.
       // 2026-10-24: receipts now go into a business Treasury account, which
@@ -6078,6 +6212,7 @@ function staffLedgerEvents(staffId) {
         addEvent({ key: req.id || `debit-journal-${date}`, date, type: 'Debit Journal', amount: formAmount, delta: -formAmount, details: `Debit journal (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'debit' });
       }
     });
+    ctxReq = null;
     (state.cod || []).filter(cod => cod.staffId === staffId).forEach(cod => {
       const date = cod.date || String(cod.submittedAt || cod.resolvedAt || '').slice(0,10) || businessDate();
       addEvent({ key: cod.id || `cod-${date}`, date, type: `COD ${String(cod.status || 'Submitted').toUpperCase()}`, amount: Number(cod.remainingBalance ?? cod.runningFloat ?? cod.actualCash ?? 0), delta: 0, details: `Op. Balance ${money(getStaffOperationalBalance(staffId))} • Remaining ${money(cod.remainingBalance ?? cod.runningFloat ?? 0)} • Variance ${money(cod.variance || 0)}`, runningType: 'cod' });
@@ -6227,6 +6362,118 @@ function staffLedgerEvents(staffId) {
     if (byId('myApprovalsCustomApply')) byId('myApprovalsCustomApply').onclick = () => {
       state.ui.myApprovalsFilter = { preset: 'custom', from: byId('myApprovalsFrom')?.value || '', to: byId('myApprovalsTo')?.value || '' };
       save(); renderWorkspace();
+    };
+  }
+
+  // ===== 2026-11-09 (client): Work / Tellerng / Approval / Treasury Review =====
+  // A personal activity log: each person sees ONLY what they did themselves,
+  // for one day (date picker) or for a past range (From / To). Read-only —
+  // it reads the same requests, close-of-day records and audit trail the rest
+  // of the app already keeps, and changes nothing.
+  const STAFF_REVIEW_DEFS = {
+    work_review:     { title: 'Work Review',     mode: 'submitted', cod: false },
+    teller_review:   { title: 'Tellerng Review', mode: 'submitted', cod: true },
+    treasury_review: { title: 'Treasury Review', mode: 'submitted', cod: true },
+    approval_review: { title: 'Approval Review', mode: 'decided',   cod: false }
+  };
+  function reviewFilterFor(tool) {
+    state.ui.reviewFilters ||= {};
+    return (state.ui.reviewFilters[tool] ||= { mode: 'today', date: '', from: '', to: '' });
+  }
+  function reviewRangeOf(f) {
+    if (f.mode === 'range') return { from: f.from || '', to: f.to || '' };
+    const d = f.mode === 'day' && f.date ? f.date : today();
+    return { from: d, to: d };
+  }
+  function staffReviewRows(tool, st) {
+    const def = STAFF_REVIEW_DEFS[tool];
+    const backendId = getStaffBackendId(st);
+    const isMe = (id) => !!id && (id === st.id || id === backendId);
+    const rows = [];
+    const reqDetail = (r) => {
+      try {
+        return ['account_opening','account_maintenance','account_reactivation'].includes(r.type) ? approvalAccountHeadingsInline(r) : approvalDetails(r);
+      } catch (_e) { return '—'; }
+    };
+    const reqAmount = (r) => { const p = r.payload || {}; return Number(p.amount || p.formAmount || 0); };
+    (state.approvals || []).forEach(r => {
+      if (def.mode === 'submitted') {
+        const mine = isMe(r.requestedBy) || isMe(r.requestedByStaffId) || (!r.requestedBy && r.requestedByName && r.requestedByName === st.name);
+        if (!mine) return;
+        const at = r.requestedAt || '';
+        rows.push({ at, date: dateOnly(at), activity: prettyApprovalType(r.type), details: reqDetail(r), amount: reqAmount(r), status: r.status || 'pending', other: r.status === 'pending' ? '—' : (r.approvedBy || r.approvedByName || '—') });
+      } else {
+        if (!['approved', 'rejected'].includes(String(r.status || ''))) return;
+        const mine = (r.approvedBy && r.approvedBy === st.name) || isMe(r.approvedByStaffId);
+        if (!mine) return;
+        const at = r.approvedAt || r.requestedAt || '';
+        rows.push({ at, date: dateOnly(at), activity: prettyApprovalType(r.type), details: reqDetail(r), amount: reqAmount(r), status: r.status, other: r.requestedByName || staffName(r.requestedBy) || '—' });
+      }
+    });
+    if (def.cod) {
+      (state.cod || []).filter(c => isMe(c.staffId)).forEach(c => {
+        const at = c.submittedAt || c.resolvedAt || c.createdAt || '';
+        rows.push({ at: at || `${c.date}T23:59:00`, date: String(c.date || dateOnly(at) || '').slice(0, 10), activity: 'Close of Day', details: `Remaining ${money(c.remainingBalance ?? c.runningFloat ?? 0)} • Variance ${money(c.variance || 0)}`, amount: Number(c.remainingBalance ?? c.runningFloat ?? c.actualCash ?? 0), status: String(c.status || 'submitted').toLowerCase(), other: '—' });
+      });
+    }
+    (state.audit || []).filter(a => isMe(a.actorId) && !['request_created', 'request_approved', 'request_rejected'].includes(a.action)).forEach(a => {
+      rows.push({ at: a.at || '', date: dateOnly(a.at), activity: String(a.action || 'activity').replace(/_/g, ' ').replace(/^./, ch => ch.toUpperCase()), details: escapeHtml(String(a.details || '').replace(/<[^>]*>/g, '')) || '—', amount: 0, status: 'done', other: '—' });
+    });
+    return rows.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+  }
+  function renderStaffReview(tool) {
+    const st = currentStaff();
+    const def = STAFF_REVIEW_DEFS[tool];
+    if (!st || !def) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
+    const f = reviewFilterFor(tool);
+    const range = reviewRangeOf(f);
+    historyCovers(range.from || null);
+    const inRange = staffReviewRows(tool, st).filter(r => r.date && (!range.from || r.date >= range.from) && (!range.to || r.date <= range.to));
+    const count = (k) => inRange.filter(r => r.status === k).length;
+    const value = inRange.filter(r => r.status === 'approved').reduce((t, r) => t + r.amount, 0);
+    const decided = def.mode === 'decided';
+    const body = inRange.map((r, i) => `<tr><td>${i + 1}</td><td>${r.date ? fmtDate(`${r.date}T12:00:00.000Z`) : '—'}</td><td>${r.at ? TIME_FMT.format(new Date(r.at)) : '—'}</td><td>${escapeHtml(r.activity)}</td><td>${r.details || '—'}</td><td>${r.amount ? money(r.amount) : ''}</td><td><span class="badge ${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td><td>${escapeHtml(r.other)}</td></tr>`).join('');
+    const label = f.mode === 'range' ? `${range.from ? fmtDate(`${range.from}T12:00:00.000Z`) : 'Start'} – ${range.to ? fmtDate(`${range.to}T12:00:00.000Z`) : 'Today'}` : fmtDate(`${range.from}T12:00:00.000Z`);
+    const showTeller = def.cod || tool === 'teller_review';
+    return `
+      <div class="stack">
+        <div class="form-card">
+          <h3>${def.title}</h3>
+          ${showTeller ? tellerBannerHtml(st) : ''}
+          <div class="kpi-row wrap">
+            <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(st.name || '')}</div></div>
+            <div class="kpi"><div class="label">Period</div><div class="number">${label}</div></div>
+            <div class="kpi"><div class="label">${decided ? 'Decisions' : 'Activities'}</div><div class="number">${inRange.length}</div></div>
+            <div class="kpi"><div class="label">Approved</div><div class="number">${count('approved')}</div></div>
+            ${decided ? '' : `<div class="kpi"><div class="label">Pending</div><div class="number">${count('pending')}</div></div>`}
+            <div class="kpi"><div class="label">Rejected</div><div class="number">${count('rejected')}</div></div>
+            <div class="kpi"><div class="label">Approved Value</div><div class="number">${money(value)}</div></div>
+          </div>
+          <div class="action-inline balance-filters-row" style="margin-top:10px">
+            <button class="filter-chip ${f.mode === 'today' ? 'active' : 'secondary'}" id="reviewToday">Today</button>
+            <label class="inline-field"><span>Date</span><input id="reviewDate" type="date" lang="en-GB" value="${escapeHtml(f.mode === 'day' ? (f.date || '') : '')}"></label>
+            <label class="inline-field"><span>From</span><input id="reviewFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label>
+            <label class="inline-field"><span>To</span><input id="reviewTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label>
+            <button class="filter-chip ${f.mode === 'range' ? 'active' : 'secondary'}" id="reviewApplyRange">Apply Range</button>
+          </div>
+          <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Time</th><th>Activity</th><th>Details</th><th>Amount</th><th>Status</th><th>${decided ? 'Submitted By' : 'Decided By'}</th></tr></thead><tbody>${body || '<tr><td colspan="8" class="muted">No activity in this period</td></tr>'}</tbody></table></div>
+        </div>
+      </div>`;
+  }
+  function bindStaffReview() {
+    const tool = state.ui.tool;
+    const f = reviewFilterFor(tool);
+    const todayBtn = byId('reviewToday');
+    if (todayBtn) todayBtn.onclick = () => { f.mode = 'today'; f.date = ''; save(); renderWorkspace(); };
+    const dateEl = byId('reviewDate');
+    if (dateEl) dateEl.onchange = () => { if (!dateEl.value) return; f.mode = 'day'; f.date = dateEl.value; save(); renderWorkspace(); };
+    const applyBtn = byId('reviewApplyRange');
+    if (applyBtn) applyBtn.onclick = () => {
+      const from = byId('reviewFrom')?.value || '';
+      const to = byId('reviewTo')?.value || '';
+      if (!from && !to) return showToast('Pick a From or To date');
+      if (from && to && from > to) return showToast('From date must not be after To date');
+      f.mode = 'range'; f.from = from; f.to = to; save(); renderWorkspace();
     };
   }
 
@@ -6555,6 +6802,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'check_balance': bindCheckBalance(); break;
       case 'my_statement': bindMyStatement(); break;
       case 'my_approvals': bindMyApprovals(); break;
+      case 'work_review': case 'teller_review': case 'approval_review': case 'treasury_review': bindStaffReview(); break;
       case 'account_opening': bindAccountOpening(); break;
       case 'account_maintenance': bindMaintenance('maintenance'); break;
       case 'account_reactivation': bindMaintenance('reactivation'); break;
@@ -7132,7 +7380,7 @@ function normalizeStaffLedgerEntryType(row) {
     const destAccount = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
     const st = currentStaff();
     const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational' && (state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id));
-    const myTellerId = staffFirstName(st);
+    const myTellerId = tellerIdLabel(st);
     const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Teller' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
     const amountVal = escapeHtml(String(draft.amount || ''));
     // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
@@ -9264,6 +9512,7 @@ function normalizeStaffLedgerEntryType(row) {
     return `
       <div class="form-card cs2-card opening-card">
         <div class="cs2-title">Fund Account</div>
+        ${tellerBannerHtml()}
         <div class="cs2-stack">
           <div class="cs2-row">
             <div class="cs2-label">Staff Account</div>
@@ -11252,6 +11501,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         await syncCodFromGateway();
         await syncJournalsFromGateway().catch(() => {});
         render();
+        ensureAdminTellerAccount();
         await enforceAdminRecoveryKeySetup();
         if (staffRoleCode(currentStaff()) === 'admin_officer') {
           loadStorageUsage().then(u => {
@@ -11274,6 +11524,30 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     staffInput.onkeydown = (e) => { if (e.key === 'Enter') passInput?.focus(); };
   }
   // ===== END LOGIN SCREEN =====
+
+  // 2026-11-09 (client): the Admin has a Teller account by default. If the signed-in
+  // Admin has none yet, one is opened automatically (once per session).
+  let adminTellerEnsured = false;
+  async function ensureAdminTellerAccount() {
+    const st = currentStaff();
+    if (!st || adminTellerEnsured || staffRoleCode(st) !== 'admin_officer') return;
+    if (staffOperationalAccountNumber(st.id)) { adminTellerEnsured = true; return; }
+    adminTellerEnsured = true;
+    try {
+      if (isSupabaseApprovalMode()) {
+        if (!gateway?.staff?.backfillTreasuryOperationalAccounts) return;
+        const res = await gateway.staff.backfillTreasuryOperationalAccounts();
+        if (res?.ok && (res.data?.created || []).length) { await syncCustomersListFromGateway(); render(); }
+      } else {
+        const num = await gateway?.customers?.generateSystemAccountNumber?.('staff_operational');
+        const accountNumber = num?.ok ? num.data : '';
+        if (!accountNumber) return;
+        const first = String(st.name || '').trim().split(/\s+/)[0] || st.name || 'Admin';
+        state.customers.push({ id: uid('c'), accountNumber, name: `ADMIN ${first}`, accountType: 'staff_operational', linkedStaffId: st.id, balance: 0, phone: '', active: true, createdAt: new Date().toISOString(), transactions: [], systemAssigned: true });
+        save(); render();
+      }
+    } catch (_e) { /* non-blocking: Staff Directory > Backfill Operational Accounts still works */ }
+  }
 
   function startApp() {
     try {
@@ -11307,6 +11581,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     } else {
       // Local mode — skip login
       render();
+      ensureAdminTellerAccount();
     }
   }
 

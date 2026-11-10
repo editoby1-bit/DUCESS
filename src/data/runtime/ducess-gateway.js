@@ -138,6 +138,8 @@ const ROLE_DEFAULT_TOOLS = {
       postedById: rawTx.postedById || rawTx.posted_by_id || '',
       approvedBy: rawTx.approvedBy || rawTx.approved_by || null,
       counterparty: rawTx.counterparty || rawTx.channel || '',
+      // 2026-11-09: keep who received/paid the money so the statement can show it.
+      ...(rawTx.receivedOrPaidBy || rawTx.received_or_paid_by ? { receivedOrPaidBy: rawTx.receivedOrPaidBy || rawTx.received_or_paid_by } : {}),
       date: rawTx.date || rawTx.effective_at || rawTx.created_at || new Date().toISOString(),
       balanceAfter: rawTx.balanceAfter ?? rawTx.balance_after ?? null,
       // Fix B 2026-10-22: summary ("brought forward") rows keep their markers.
