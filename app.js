@@ -1897,7 +1897,7 @@
     const name = st.name || st.full_name || '';
     const main = staffRoleCode(st);
     const current = new Set(staffExtraRoleCodes(st));
-    const boxes = ASSIGNABLE_ROLE_KEYS.filter(k => k !== main).map(k => `<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" data-extra-role="${k}" ${current.has(k) ? 'checked' : ''}> ${escapeHtml(ROLE_LABELS[k])}</label>`).join('');
+    const boxes = ASSIGNABLE_ROLE_KEYS.filter(k => k !== main).map(k => `<label style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;margin:0;padding:8px 4px;text-align:left;font-size:14px;cursor:pointer;border-bottom:1px solid rgba(0,0,0,.08)"><input type="checkbox" data-extra-role="${k}" ${current.has(k) ? 'checked' : ''} style="width:18px;height:18px;min-width:18px;max-width:18px;flex:0 0 18px;margin:0;padding:0;appearance:auto;-webkit-appearance:checkbox"><span style="flex:1;text-align:left">${escapeHtml(ROLE_LABELS[k])}</span></label>`).join('');
     openModal('Additional Roles', `
       <p style="margin:0 0 10px"><strong>${escapeHtml(name)}</strong><br><span style="font-size:0.85em;color:var(--text-muted)">Main role: ${escapeHtml(roleLabelOf(main))}</span></p>
       <div class="note" style="margin-bottom:8px">${escapeHtml(name)} can use everything each ticked role allows, on top of the main role. Change the main role with Assign Role.</div>
@@ -3675,10 +3675,10 @@ function hideProcessing() {
     // customer account.
     const opKind = 'teller';
     const staffOptions = (state.staff || [])
-      .filter(s => s.is_active !== false)
+      .filter(s => s.is_active !== false && s.active !== false)
       .filter(s => !isStaffOp || isEligibleForOperationalAccount(s, opKind))
       .map(s =>
-      `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${roleLabelOf(staffRoleCode(s))})</option>`
+      `<option value="${s.id}" ${openingDraft.linkedStaffId === s.id ? 'selected' : ''}>${escapeHtml(s.name || '')} (${escapeHtml(staffRoleLabels(s))})</option>`
     ).join('');
     return `
       <div class="form-card cs2-card opening-card">
@@ -7232,7 +7232,7 @@ function normalizeStaffLedgerEntryType(row) {
         const linkedStaff = (state.staff || []).find(s => s.id === linkedStaffId);
         const kind = 'teller';
         if (!linkedStaff || !isEligibleForOperationalAccount(linkedStaff, kind)) {
-          return showToast(`${linkedStaff?.name || 'This staff member'} is not eligible — they must currently hold the Teller role and have no operational account yet`);
+          return showToast(`${linkedStaff?.name || 'This staff member'} is not eligible — they are inactive, already have an operational account, or one is already pending`);
         }
         payload = {
           accountType: 'staff_operational', opKind: kind, name,
@@ -10921,8 +10921,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   // role, no account yet and no account-opening request already pending.
   function isEligibleForOperationalAccount(staff, kind) {
     if (!staff || staff.active === false || staff.is_active === false) return false;
-    const need = kind === 'treasury' ? 'cash_officer' : 'teller';
-    if (!staffHasRole(staff, need)) return false;
+    // 2026-11-11 (client): any active staff member can be given a Teller account — the
+    // list is no longer limited to people whose role is Teller. (The account is still
+    // one per person, for life.)
     if ((state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === staff.id)) return false;
     const pendingOpen = (state.approvals || []).some(a => a.status === 'pending' && a.type === 'account_opening' && a.payload?.accountType === 'staff_operational' && a.payload?.linkedStaffId === staff.id);
     return !pendingOpen;
