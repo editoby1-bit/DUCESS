@@ -3950,6 +3950,32 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'PROFILE_SAVE_FAILED', 'Could not save the staff profile.', error);
           return defaultResult.ok(data);
         },
+        // 2026-11-10: extra roles — a staff member can hold more than one role. The main
+        // role stays on staff.role_code; any others live in staff_extra_roles.
+        async listExtraRoles() {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const { data, error } = await client.from('staff_extra_roles').select('staff_id, role_code');
+          if (error) return defaultResult.err(isMissingColumnOrRelationError(error) ? 'TABLE_MISSING' : 'EXTRA_ROLES_LIST_FAILED', 'Could not load extra roles.', error);
+          return defaultResult.ok(data || []);
+        },
+        async setExtraRoles(staffId, roleCodes = [], grantedBy = '') {
+          if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
+          const want = [...new Set((roleCodes || []).map(String).filter(Boolean))];
+          const cur = await client.from('staff_extra_roles').select('role_code').eq('staff_id', String(staffId));
+          if (cur.error) return defaultResult.err(isMissingColumnOrRelationError(cur.error) ? 'TABLE_MISSING' : 'EXTRA_ROLES_SAVE_FAILED', 'Could not read current extra roles.', cur.error);
+          const have = (cur.data || []).map(r => r.role_code);
+          const remove = have.filter(r => !want.includes(r));
+          const add = want.filter(r => !have.includes(r));
+          if (remove.length) {
+            const del = await client.from('staff_extra_roles').delete().eq('staff_id', String(staffId)).in('role_code', remove);
+            if (del.error) return defaultResult.err('EXTRA_ROLES_SAVE_FAILED', 'Could not remove roles.', del.error);
+          }
+          if (add.length) {
+            const ins = await client.from('staff_extra_roles').insert(add.map(r => ({ staff_id: String(staffId), role_code: r, granted_by_name: grantedBy || null })));
+            if (ins.error) return defaultResult.err('EXTRA_ROLES_SAVE_FAILED', 'Could not add roles.', ins.error);
+          }
+          return defaultResult.ok({ staffId, roles: want });
+        },
         async storageUsage() {
           if (!canUseSupabase()) return defaultResult.err('LOCAL_ONLY', 'Supabase is not available.');
           const { data, error } = await client.rpc('ducess_storage_usage');

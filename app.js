@@ -878,7 +878,7 @@
   function tellerBannerHtml(st = currentStaff()) {
     if (!st) return '';
     const no = staffOperationalAccountNumber(st.id);
-    if (!no && !['teller', 'admin_officer'].includes(st.role)) return '';
+    if (!no && !(staffHasRole(st, 'teller') || staffHasRole(st, 'admin_officer'))) return '';
     return `<div class="teller-id-banner"><span><span class="k">Teller ID</span><strong>${escapeHtml(st.name || '')}</strong></span><span><span class="k">Account No</span><strong>${escapeHtml(no || 'Not opened yet')}</strong></span></div>`;
   }
   // SURGICAL ADDITION 2026-09-28 (client correction): Account Status is a
@@ -915,9 +915,9 @@
   function isAdminStaff(staff=currentStaff()) {
     const role = String(staff?.role || staff?.roleCode || '').trim().toLowerCase();
     const label = String(staff?.roleLabel || staff?.title || '').trim().toLowerCase();
-    return role === 'admin_officer' || role === 'admin' || label.includes('admin');
+    return role === 'admin_officer' || role === 'admin' || label.includes('admin') || staffHasRole(staff, 'admin_officer');
   }
-  function canCloseBusinessDay(staff=currentStaff()){ return !!staff && (isAdminStaff(staff) || ['approving_officer'].includes(staff.role)); }
+  function canCloseBusinessDay(staff=currentStaff()){ return !!staff && (isAdminStaff(staff) || staffHasRole(staff, 'approving_officer')); }
 
   // ===== ROLE / STAFF SEPARATION (2026-10-11, client request) =====
   // A staff member is a person (id, login, operational account, ledger,
@@ -932,7 +932,18 @@
     const r = String(s?.role || s?.role_code || s?.roleCode || '').trim();
     return r || UNASSIGNED_ROLE;
   }
-  function hasAssignedRole(s) { return !!s && staffRoleCode(s) !== UNASSIGNED_ROLE; }
+  // 2026-11-10 (client): one staff member can hold MORE THAN ONE role. staff.role stays
+  // the main role (what the database keeps); staff.extraRoles holds the others.
+  // Access is the combination of every role the person holds.
+  function staffExtraRoleCodes(s) {
+    const main = String(s?.role || s?.role_code || s?.roleCode || '').trim();
+    return [...new Set((Array.isArray(s?.extraRoles) ? s.extraRoles : []).map(x => String(x || '').trim()).filter(x => x && x !== UNASSIGNED_ROLE && x !== main && ROLE_LABELS[x]))];
+  }
+  function staffRoleCodes(s) { const main = staffRoleCode(s); return [...(main !== UNASSIGNED_ROLE ? [main] : []), ...staffExtraRoleCodes(s)]; }
+  function staffHasRole(s, code) { return staffRoleCodes(s).includes(code); }
+  function staffRoleLabels(s) { const c = staffRoleCodes(s); return c.length ? c.map(roleLabelOf).join(' + ') : roleLabelOf(UNASSIGNED_ROLE); }
+  function staffPermsOf(s) { return staffRoleCodes(s).flatMap(r => DEFAULT_PERMS[r] || []); }
+  function hasAssignedRole(s) { return !!s && staffRoleCodes(s).length > 0; }
   function roleLabelOf(code) { return ROLE_LABELS[code] || (code ? String(code) : 'Unassigned'); }
   function getStaffRoleHistory(staffId) {
     return (state.roleAssignments || [])
@@ -1118,7 +1129,7 @@
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
     if (APPROVAL_SUB_TOOLS[tool]) return hasPermission(APPROVAL_SUB_TOOLS[tool].base, staff);
-    if (ADMIN_SUB_TOOLS[tool]) return staff.role === 'admin_officer' || hasPermission(ADMIN_SUB_TOOLS[tool].base, staff);
+    if (ADMIN_SUB_TOOLS[tool]) return staffHasRole(staff, 'admin_officer') || hasPermission(ADMIN_SUB_TOOLS[tool].base, staff);
     // Balances now live on the Approval side (client sheet), so anyone who
     // can work the approval queue can view them, as well as anyone who
     // already had the underlying balance report.
@@ -1133,7 +1144,7 @@
     // Customer Service and Report Officer don't get it; Approving Officer
     // gets its own separate "My Approvals" totals view instead.
     if (['check_balance','account_statement','operational_accounts','my_close_day'].includes(tool)) return true;
-    const base = DEFAULT_PERMS[staff.role] || [];
+    const base = staffPermsOf(staff);
     const grantOn = (state.tempGrants || []).some(g => g.staffId === staff.id && g.tool === tool && g.enabled);
     return base.includes(tool) || grantOn;
   }
@@ -1154,7 +1165,7 @@
   function moduleAllowed(moduleKey, staff=currentStaff()) {
     if (!staff) return false;
     const roles = moduleRolesFor(moduleKey);
-    if (roles && !roles.includes(staff.role)) {
+    if (roles && !staffRoleCodes(staff).some(r => roles.includes(r))) {
       const granted = (state.tempGrants || []).some(g => g.staffId === staff.id && g.enabled && MODULES[moduleKey].tools.includes(g.tool));
       if (!granted) return false;
     }
@@ -1162,7 +1173,7 @@
   }
   function noAccessMessage(label) {
     const st = currentStaff();
-    const role = st ? (ROLE_LABELS[st.role] || st.role || 'your role') : 'your role';
+    const role = st ? staffRoleLabels(st) : 'your role';
     return `No access — ${label ? label + ' is not' : 'this is not'} available for ${role}`;
   }
 
@@ -1859,8 +1870,67 @@
       syncAllStaffWallets();
       save();
     }
+    await syncExtraRolesFromGateway();
     await syncRoleAssignmentsFromGateway();
     return result;
+  }
+  // Extra roles live in their own small table so a person's main role (and everything the
+  // database checks on it) is untouched. If the table isn't there yet, nobody gets extras.
+  async function syncExtraRolesFromGateway() {
+    if (!isSupabaseApprovalMode() || !gateway.adminx?.listExtraRoles) return;
+    const res = await gateway.adminx.listExtraRoles();
+    if (!res?.ok) return;
+    const map = {};
+    (res.data || []).forEach(r => { (map[String(r.staff_id)] ||= []).push(r.role_code); });
+    let changed = false;
+    (state.staff || []).forEach(st => {
+      const next = (map[String(st.id)] || []).slice().sort();
+      if (JSON.stringify(next) !== JSON.stringify((st.extraRoles || []).slice().sort())) { st.extraRoles = next; changed = true; }
+    });
+    if (changed) save();
+  }
+
+  function openExtraRolesModal(staffId) {
+    const st = (state.staff || []).find(x => x.id === staffId);
+    if (!st) return showToast('Staff not found');
+    if (!isAdminStaff()) return showToast('Only an Administrative Officer can change roles');
+    const name = st.name || st.full_name || '';
+    const main = staffRoleCode(st);
+    const current = new Set(staffExtraRoleCodes(st));
+    const boxes = ASSIGNABLE_ROLE_KEYS.filter(k => k !== main).map(k => `<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" data-extra-role="${k}" ${current.has(k) ? 'checked' : ''}> ${escapeHtml(ROLE_LABELS[k])}</label>`).join('');
+    openModal('Additional Roles', `
+      <p style="margin:0 0 10px"><strong>${escapeHtml(name)}</strong><br><span style="font-size:0.85em;color:var(--text-muted)">Main role: ${escapeHtml(roleLabelOf(main))}</span></p>
+      <div class="note" style="margin-bottom:8px">${escapeHtml(name)} can use everything each ticked role allows, on top of the main role. Change the main role with Assign Role.</div>
+      ${main === UNASSIGNED_ROLE ? '<div class="note" style="border-left-color:#c00000 !important">Give this person a main role first.</div>' : boxes}
+    `, [
+      { label: 'Cancel', className: 'secondary', onClick: closeModal },
+      { label: 'Save Roles', onClick: async () => {
+        if (main === UNASSIGNED_ROLE) return showToast('Assign a main role first');
+        const picked = qq('[data-extra-role]').filter(el => el.checked).map(el => el.dataset.extraRole);
+        const actor = currentStaff();
+        const btn = document.querySelector('.modal-actions button:last-child');
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+        try {
+          if (isSupabaseApprovalMode()) {
+            const res = await gateway.adminx?.setExtraRoles?.(st.id, picked, actor?.name || '');
+            if (!res?.ok) {
+              showToast(res?.error?.code === 'TABLE_MISSING' ? 'Run the staff-extra-roles SQL script in Supabase first' : `Error: ${res?.error?.message || 'Could not save roles'}`);
+              if (btn) { btn.disabled = false; btn.textContent = 'Save Roles'; }
+              return;
+            }
+          }
+          const before = staffRoleLabels(st);
+          st.extraRoles = picked;
+          save();
+          pushAudit('staff_extra_roles_changed', `${name}: ${before} → ${staffRoleLabels(st)}`);
+          closeModal(); render();
+          showToast(`✓ ${name}: ${staffRoleLabels(st)}`);
+        } catch (_e) {
+          showToast('Unexpected error saving roles');
+          if (btn) { btn.disabled = false; btn.textContent = 'Save Roles'; }
+        }
+      } }
+    ]);
   }
 
   const nonWalletCustomers = () => (state.customers || []).filter(c => c.accountType !== 'staff_wallet');
@@ -2336,13 +2406,13 @@ if (approvalRecord.type === 'float_topup') {
   // A request sent to a particular approving officer is visible/actionable only to that
   // officer (and Admin). Everyone else with approval access is "routed away" from it.
   function isApprovalRoutedAway(req, viewer = currentStaff()) {
-    if (!viewer || viewer.role === 'admin_officer') return false;
+    if (!viewer || staffHasRole(viewer, 'admin_officer')) return false;
     const assignedTo = req?.payload?.assignedApproverId;
     return !!(assignedTo && assignedTo !== viewer.id);
   }
 
   function activeApprovingOfficers() {
-    return (state.staff || []).filter(s => s.role === 'approving_officer' && s.active !== false && s.is_active !== false);
+    return (state.staff || []).filter(s => staffHasRole(s, 'approving_officer') && s.active !== false && s.is_active !== false);
   }
 
   function promptForApprovingOfficer() {
@@ -3152,7 +3222,7 @@ if (approvalRecord.type === 'float_topup') {
     const nameEl = byId('staffNameDisplay');
     const roleEl = byId('staffRoleDisplay');
     if (nameEl) nameEl.textContent = activeStaff?.name || '';
-    if (roleEl) roleEl.textContent = ROLE_LABELS[activeStaff?.role] || activeStaff?.role || '';
+    if (roleEl) roleEl.textContent = staffRoleLabels(activeStaff);
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
     if (byId('btnLogout') && isSupabaseApprovalMode()) {
@@ -4713,7 +4783,7 @@ function hideProcessing() {
       return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.staffName || '')}</td><td>${money(formAmount)}</td><td>${money(creditCash + creditTransfer)}</td><td>${money(debitCash + debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${escapeHtml(c.resolutionNote || c.note || '—')}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
     const selected = state.ui.codAdminDate;
-    const codStatusRows = state.staff.filter(s => (DEFAULT_PERMS[s.role]||[]).includes('credit') || (DEFAULT_PERMS[s.role]||[]).includes('debit') || (state.cod||[]).some(c=>c.staffId===s.id && c.date===selected)).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role]||s.role}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
+    const codStatusRows = state.staff.filter(s => (staffPermsOf(s)).includes('credit') || (staffPermsOf(s)).includes('debit') || (state.cod||[]).some(c=>c.staffId===s.id && c.date===selected)).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${staffRoleLabels(s)}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
@@ -4740,7 +4810,7 @@ function hideProcessing() {
     const p = a.payload || {};
     const staffId = p.staffId || a.requestedBy;
     const staff = (state.staff || []).find(s => s.id === staffId) || {};
-    const roleLabel = ROLE_LABELS[staff.role] || staff.role || '';
+    const roleLabel = staffRoleLabels(staff);
     const name = a.requestedByName || staffName(staffId);
     const routedNote = p.assignedApproverName ? `<div class="muted" style="font-size:0.85em">→ ${escapeHtml(p.assignedApproverName)}</div>` : '';
     if (a.type === 'customer_credit_journal' || a.type === 'customer_debit_journal') return `${escapeHtml(name)} • ${roleLabel || 'Staff'} • Journal${routedNote}`;
@@ -5100,7 +5170,7 @@ function nextPaint() {
         <div class="table-card">
           <h3>Administrative Working Tools</h3>
           <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th>${tools.map(t=>`<th>${TOOL_LABELS[t]}</th>`).join('')}</tr></thead>
-          <tbody>${state.staff.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role] || s.role}</td>${tools.map(t=>`<td>${hasPermission(t,s)?'YES':'NO'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+          <tbody>${state.staff.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${staffRoleLabels(s)}</td>${tools.map(t=>`<td>${hasPermission(t,s)?'YES':'NO'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
         </div>
         <div class="form-card">
           <h3>Temporary Access Grant</h3>
@@ -5161,7 +5231,7 @@ function nextPaint() {
     return `
       <div class="stack">
         <div class="layout-grid two">
-          ${currentStaff()?.role === 'admin_officer' ? `<div class="form-card">
+          ${staffHasRole(currentStaff(), 'admin_officer') ? `<div class="form-card">
             <h3>Create Account</h3>
             <div class="form-grid three">
               <div class="field"><label>Category</label><select id="oaCategory" class="entry-input"><option value="income">Income</option><option value="expense">Expense</option></select></div>
@@ -5436,7 +5506,7 @@ function nextPaint() {
         const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
         const credits = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
         const debits = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
-        return `<tr><td>${escapeHtml(st.name || '')}</td><td>${ROLE_LABELS[st.role] || st.role || ''}</td><td>${escapeHtml(opAcc?.accountNumber || '—')}</td><td>${money(opening)}</td><td>${money(credits)}</td><td>${money(debits)}</td><td class="${closing<0?'balance-negative':''}">${money(closing)}</td><td><button class="secondary" data-staff-ledger="${st.id}">Ledger</button></td></tr>`;
+        return `<tr><td>${escapeHtml(st.name || '')}</td><td>${staffRoleLabels(st)}</td><td>${escapeHtml(opAcc?.accountNumber || '—')}</td><td>${money(opening)}</td><td>${money(credits)}</td><td>${money(debits)}</td><td class="${closing<0?'balance-negative':''}">${money(closing)}</td><td><button class="secondary" data-staff-ledger="${st.id}">Ledger</button></td></tr>`;
       }).join('');
       return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Op. Account</th><th>Opening Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Closing Balance</th><th>Ledger</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No staff</td></tr>'}</tbody></table></div></div></div>`;
     }
@@ -5492,7 +5562,7 @@ function nextPaint() {
     const selId = state.ui.admSelectedStaffId && staffList.some(s => s.id === state.ui.admSelectedStaffId) ? state.ui.admSelectedStaffId : '';
     const sel = staffList.find(s => s.id === selId);
     const prof = { ...(profileOf(selId) || {}), ...(state.ui.admProfileDraft?.staffId === selId ? state.ui.admProfileDraft.data : {}) };
-    const rows = staffList.map((s, i) => `<tr class="${s.id === selId ? 'adm-selected' : ''}"><td>${i+1}</td><td>${escapeHtml(s.name || '—')}</td><td>${escapeHtml(ROLE_LABELS[s.role] || s.role || '—')}</td><td>${escapeHtml(profileOf(s.id)?.job_title || '—')}</td><td><code>${escapeHtml(String(s.staffId || s.staffCode || '—'))}</code></td><td>${s.active === false ? 'Blocked' : 'Active'}</td><td><button class="secondary tiny-btn" data-adm-staff="${s.id}">Open</button></td></tr>`).join('');
+    const rows = staffList.map((s, i) => `<tr class="${s.id === selId ? 'adm-selected' : ''}"><td>${i+1}</td><td>${escapeHtml(s.name || '—')}</td><td>${escapeHtml(staffRoleLabels(s))}</td><td>${escapeHtml(profileOf(s.id)?.job_title || '—')}</td><td><code>${escapeHtml(String(s.staffId || s.staffCode || '—'))}</code></td><td>${s.active === false ? 'Blocked' : 'Active'}</td><td><button class="secondary tiny-btn" data-adm-staff="${s.id}">Open</button> <button class="secondary tiny-btn" data-adm-extra-roles="${s.id}">Extra Roles</button></td></tr>`).join('');
     const opAcc = sel ? staffOperationalAccountNumber(sel.id) : '';
     const fieldHtml = ([key, label, kind]) => {
       const v = escapeHtml(String(prof[key] || ''));
@@ -5515,7 +5585,7 @@ function nextPaint() {
       ${sel ? `<div class="form-card cs2-card">
         <div class="cs2-title">Staff Information — ${escapeHtml(sel.name || '')}</div>
         <div class="cs2-stack">
-          <div class="cs2-row"><div class="cs2-label">App Role</div><div class="display-field cs2-wide">${escapeHtml(ROLE_LABELS[sel.role] || sel.role || '—')}</div></div>
+          <div class="cs2-row"><div class="cs2-label">App Role</div><div class="display-field cs2-wide">${escapeHtml(staffRoleLabels(sel))}</div></div>
           <div class="cs2-row"><div class="cs2-label">Full Name</div><div class="display-field cs2-wide">${escapeHtml(sel.name || '—')}</div></div>
           <div class="cs2-row"><div class="cs2-label">Login ID</div><div class="display-field cs2-wide">${escapeHtml(String(sel.staffId || sel.staffCode || '—'))}</div></div>
           <div class="cs2-row"><div class="cs2-label">Operational A/C No</div><div class="display-field cs2-wide">${escapeHtml(opAcc || '—')}</div></div>
@@ -5676,6 +5746,7 @@ function nextPaint() {
     if (tool === 'adm_staff') {
       if (!adminSessionLoaded.profiles) { loadStaffProfiles(); }
       bindStaffDirectory();
+      qq('[data-adm-extra-roles]').forEach(btn => btn.onclick = () => openExtraRolesModal(btn.dataset.admExtraRoles));
       qq('[data-adm-staff]').forEach(btn => btn.onclick = async () => {
         state.ui.admSelectedStaffId = btn.dataset.admStaff; state.ui.admProfileDraft = null; save(); renderWorkspace();
         requestAnimationFrame(() => q('.adm-staff-layout .cs2-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -6263,7 +6334,7 @@ function staffLedgerEvents(staffId) {
           <h3>My Statement</h3>
           <div class="kpi-row wrap">
             <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(st.name || '')}</div></div>
-            <div class="kpi"><div class="label">Office</div><div class="number">${ROLE_LABELS[st.role] || st.role}</div></div>
+            <div class="kpi"><div class="label">Office</div><div class="number">${staffRoleLabels(st)}</div></div>
             <div class="kpi"><div class="label">Account No.</div><div class="number">${escapeHtml(staffOperationalAccountNumber(st.id) || acc.accountNumber || '—')}</div></div>
             <div class="kpi"><div class="label">Op. Balance</div><div class="number">${money(getStaffOperationalBalance(st.id))}</div></div>
           </div>
@@ -6495,7 +6566,7 @@ function staffLedgerEvents(staffId) {
     if (!staff) return showToast('Staff not found');
     const acc = ensureStaffAccount(staffId);
     const staffName = staff.name || staff.full_name || staffId;
-    const staffRole = ROLE_LABELS[staff.role] || staff.role || '';
+    const staffRole = staffRoleLabels(staff);
     // SURGICAL ADDITION 2026-09-04 (client request): admins asked to be
     // able to see/filter every staff's statement from here. One shared
     // filter (Daily/Weekly/Monthly/All/Custom, same pattern as My
@@ -6724,7 +6795,7 @@ function normalizeStaffLedgerEntryType(row) {
       // getCollectorTotal only ever matches inter_staff_credit rows tagged
       // with this staffId as collectorId.
       const totalCollected = getCollectorTotal(s.id);
-      return `<tr><td>${escapeHtml(s.name || '')}</td><td>${ROLE_LABELS[s.role] || s.role}</td><td>${escapeHtml(acc.accountNumber || '')}</td><td>${money(balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td>${money(totalCollected)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
+      return `<tr><td>${escapeHtml(s.name || '')}</td><td>${staffRoleLabels(s)}</td><td>${escapeHtml(acc.accountNumber || '')}</td><td>${money(balance)}</td><td class="balance-negative">${debtBalance < 0 ? "-" + money(Math.abs(debtBalance)) : money(0)}</td><td>${money(totalCreditReceived)}</td><td>${money(totalDebitsPaid)}</td><td>${money(totalCollected)}</td><td><button class="secondary" data-staff-ledger="${s.id}">Ledger</button></td></tr>`;
     }).join('');
     return `<div class="table-card"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>Teller and Posting Accounts</h3><div class="note" style="margin:0">Business Date: <strong>${businessDate()}</strong></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Account Number</th><th>Balance</th><th>Debt Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Total Collected</th><th>Ledger</th></tr></thead><tbody>${rows}</tbody></table></div><div class="action-row">${state.staff.length > (state.ui.tellerEntriesLimit || 20) ? `<button id="tellerMore" class="secondary">Show More</button>` : ''}${(state.ui.tellerEntriesLimit || 20) > 20 ? `<button id="tellerLess" class="secondary">Show Less</button>` : ''}</div></div>`;
   }
@@ -6849,7 +6920,7 @@ function normalizeStaffLedgerEntryType(row) {
   }
 
   function canAssignFloatTopUp(staff=currentStaff()) {
-    return ['admin_officer','approving_officer'].includes(staff?.role);
+    return staffHasRole(staff, 'admin_officer') || staffHasRole(staff, 'approving_officer');
   }
 
   function bindTellerBalances() {
@@ -6933,7 +7004,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (!defaultStaff) return showToast('No eligible staff found');
     openModal('Assign Float Top-Up', `
       <div class="form-grid three">
-        <div class="field"><label>Staff</label><select id="floatTopupStaff" class="entry-input">${postingStaff.map(st => `<option value="${st.id}" ${st.id===defaultStaff.id?'selected':''}>${escapeHtml(st.name || '')} — ${ROLE_LABELS[st.role] || st.role}</option>`).join('')}</select></div>
+        <div class="field"><label>Staff</label><select id="floatTopupStaff" class="entry-input">${postingStaff.map(st => `<option value="${st.id}" ${st.id===defaultStaff.id?'selected':''}>${escapeHtml(st.name || '')} — ${staffRoleLabels(st)}</option>`).join('')}</select></div>
         <div class="field"><label>Date</label><div class="display-field">${businessDate()}</div></div>
         <div class="field"><label>Amount</label><input id="floatTopupAmount" class="entry-input" type="number"></div>
       </div>
@@ -7295,7 +7366,7 @@ function normalizeStaffLedgerEntryType(row) {
       // Teller is now ALWAYS a real debit against the acting officer's own
       // Treasury balance — no injection option, no arbitrary source account,
       // enforced here, not left to whatever radio the person left checked.
-      if (targetStaff?.role === 'teller') {
+      if (staffHasRole(targetStaff, 'teller')) {
         sourceAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st.id);
         if (!sourceAccount) return showToast('You have no Treasury account — ask Admin to open one before funding a Teller');
         if (sourceAccount.id === targetAccount.id) return showToast('Source and destination cannot be the same account');
@@ -7306,7 +7377,7 @@ function normalizeStaffLedgerEntryType(row) {
         // Funding Treasury's own account: Admin injection (unlimited) or a
         // real debit from any other account.
         fundingSource = draft.source === 'account' ? 'account' : 'admin_injection';
-        if (fundingSource === 'admin_injection' && st.role !== 'admin_officer') {
+        if (fundingSource === 'admin_injection' && !staffHasRole(st, 'admin_officer')) {
           return showToast('Only Admin can inject cash — otherwise use Debit an Account');
         }
         if (fundingSource === 'account') {
@@ -7826,7 +7897,7 @@ function normalizeStaffLedgerEntryType(row) {
           <div class="cs2-label" style="margin:0">Staff Statements</div>
           <select id="txSummaryStaffPicker" class="entry-input" style="max-width:260px">
             <option value="">— Select a staff member —</option>
-            ${(state.staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.name || '')} (${ROLE_LABELS[s.role] || s.role})</option>`).join('')}
+            ${(state.staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.name || '')} (${staffRoleLabels(s)})</option>`).join('')}
           </select>
           <button id="txSummaryViewStatement" class="secondary">View Statement</button>
         </div>
@@ -9299,7 +9370,7 @@ function normalizeStaffLedgerEntryType(row) {
     };
     if (byId('oaCategory')) { updatePreview(); byId('oaCategory').onchange = updatePreview; }
     if (byId('oaCreate')) byId('oaCreate').onclick = async () => {
-      if (currentStaff()?.role !== 'admin_officer') return showToast('Only admin can create operational accounts');
+      if (!staffHasRole(currentStaff(), 'admin_officer')) return showToast('Only admin can create operational accounts');
       const category = byId('oaCategory').value;
       const name = byId('oaName').value.trim();
       if (!name) return showToast('Enter account name');
@@ -9516,8 +9587,8 @@ function normalizeStaffLedgerEntryType(row) {
     const draft = state.ui.staffCreditDraft ||= {};
     const targetAccount = staffOpAccounts.find(a => a.id === draft.accountId);
     const targetStaff = targetAccount ? (state.staff || []).find(s => s.id === targetAccount.linkedStaffId) : null;
-    const targetIsTeller = targetStaff?.role === 'teller';
-    const targetIsTreasury = targetStaff?.role === 'cash_officer';
+    const targetIsTeller = staffHasRole(targetStaff, 'teller');
+    const targetIsTreasury = staffHasRole(targetStaff, 'cash_officer');
     const actingStaff = currentStaff();
     const myOpAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === actingStaff?.id);
     const myBalance = myOpAccount ? getStaffOperationalBalance(actingStaff.id) : 0;
@@ -9699,7 +9770,7 @@ function normalizeStaffLedgerEntryType(row) {
     const baseAudit = adminView ? audits.slice() : audits.filter(isOwnAudit);
     const uniqueActions = Array.from(new Set(baseAudit.map(a => String(a.action || a.actionType || a.action_type || '').trim()).filter(Boolean))).sort();
     const roleOptions = Object.entries(ROLE_LABELS).map(([value,label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('');
-    const staffOptions = staffList.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)} — ${escapeHtml(ROLE_LABELS[x.role] || x.role || '')}</option>`).join('');
+    const staffOptions = staffList.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)} — ${escapeHtml(staffRoleLabels(x))}</option>`).join('');
     const actionOptions = uniqueActions.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
     const filterHtml = `<div class="audit-filter-row" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;align-items:center;">
       ${adminView ? `<select id="auditRoleFilter" class="entry-input" style="width:auto;min-width:140px;"><option value="">All roles</option>${roleOptions}</select><select id="auditStaffFilter" class="entry-input" style="width:auto;min-width:170px;"><option value="">All staff</option>${staffOptions}</select>` : ''}
@@ -10105,7 +10176,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const currentVariance = Math.abs(currentRemainingBalance);
     const currentOverdraw = Math.max(0, -currentRemainingBalance);
     const defaultDebt = Math.max(currentOverdraw, Number(cod.debtAmount || 0));
-    const isAdminOfficer = currentStaff()?.role === 'admin_officer';
+    const isAdminOfficer = staffHasRole(currentStaff(), 'admin_officer');
     const savedAcceptedPosition = Number(cod.acceptedPosition ?? currentNetBookBalance);
     const savedAdjustment = Number(cod.adjustment ?? (savedAcceptedPosition - currentNetBookBalance));
     const savedCreateDebt = cod.createDebt ?? (defaultDebt > 0 || (cod.debtAmount || 0) > 0);
@@ -10851,7 +10922,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function isEligibleForOperationalAccount(staff, kind) {
     if (!staff || staff.active === false || staff.is_active === false) return false;
     const need = kind === 'treasury' ? 'cash_officer' : 'teller';
-    if (staffRoleCode(staff) !== need) return false;
+    if (!staffHasRole(staff, need)) return false;
     if ((state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === staff.id)) return false;
     const pendingOpen = (state.approvals || []).some(a => a.status === 'pending' && a.type === 'account_opening' && a.payload?.accountType === 'staff_operational' && a.payload?.linkedStaffId === staff.id);
     return !pendingOpen;
