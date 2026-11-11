@@ -383,14 +383,15 @@
   // usual date buttons + From/To pickers to change it.
   const BALANCE_PERIODS = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']];
   const BALANCE_REPORTS = [
-    ['overall',   'overall_balance',      'Overall Balance'],
-    ['all',       'overall_balance',      'All Accounts'],
     ['customers', 'customer_directory',   "All Customers' Balance"],
     ['salary',    'staff_directory',      'Staff Salary Balance'],
     ['income',    'operational_accounts', 'Income Balance'],
     ['expense',   'operational_accounts', 'Expense Balance'],
     ['tellers',   'teller_balances',      'Tellerng Balance'],
     ['treasury',  'overall_balance',      'Treasury Balance'],
+    // 2026-11-11 (client): the two roll-ups come last.
+    ['all',       'overall_balance',      'All Accounts'],
+    ['overall',   'overall_balance',      'Overall Balance'],
   ];
   const BALANCE_SUB_TOOLS = {};
   BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
