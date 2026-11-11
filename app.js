@@ -10954,6 +10954,9 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         <div class="field"><label>New Role <span style="color:red">*</span></label>
           <select id="assignRoleSelect" class="entry-input"><option value="">— Select role —</option>${options}</select></div>
         <div class="field"><label>Reason${assigned ? ' <span style="color:red">*</span>' : ' (optional)'}</label><input id="assignRoleNote" class="entry-input" placeholder="e.g. Moved from Teller to Treasury"></div>
+        <div class="field"><label>Additional Roles (optional)</label>
+          <div id="assignExtraRoles" style="border:1px solid rgba(0,0,0,.12);border-radius:6px;padding:2px 8px">${ASSIGNABLE_ROLE_KEYS.map(k2 => `<label data-assign-extra-row="${k2}" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;margin:0;padding:7px 2px;text-align:left;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(0,0,0,.06)"><input type="checkbox" data-assign-extra="${k2}" ${staffExtraRoleCodes(st).includes(k2) ? 'checked' : ''} style="width:18px;height:18px;min-width:18px;max-width:18px;flex:0 0 18px;margin:0;padding:0;appearance:auto;-webkit-appearance:checkbox"><span style="flex:1;text-align:left">${escapeHtml(ROLE_LABELS[k2])}</span></label>`).join('')}</div>
+          <div style="font-size:0.78em;color:var(--text-muted);margin-top:4px">Tick any other roles this person should also hold. The role chosen above is the main role.</div></div>
       </div>
       <div id="assignRoleIssues" style="margin-top:10px;font-size:0.85em"></div>
       <p style="margin:10px 0 0;font-size:0.8em;color:var(--text-muted)">Access follows the role. Everything ${escapeHtml(name)} has already done stays recorded against ${escapeHtml(name)} under the role held at the time.</p>
@@ -10983,8 +10986,17 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
               return;
             }
           }
+          // 2026-11-11 (client): extra roles can be chosen at the same time as the main role.
+          const extras = newRole === UNASSIGNED_ROLE ? [] : qq('[data-assign-extra]').filter(el => el.checked && el.dataset.assignExtra !== newRole).map(el => el.dataset.assignExtra);
+          let extrasSaved = true;
+          let extrasWarn = '';
+          if (isSupabaseApprovalMode() && (extras.length || staffExtraRoleCodes(st).length)) {
+            const er = await gateway.adminx?.setExtraRoles?.(st.id, extras, actor?.name || '');
+            if (!er?.ok) { extrasSaved = false; extrasWarn = er?.error?.code === 'TABLE_MISSING' ? 'Run the staff-extra-roles SQL script in Supabase to save additional roles' : (er?.error?.message || 'Additional roles were not saved'); }
+          }
           const fromLabel = roleLabelOf(curRole);
           applyLocalRoleChange(st, newRole, note, actor);
+          if (extrasSaved) st.extraRoles = extras;
           save();
           if (isSupabaseApprovalMode()) await syncStaffFromGateway(); // pull server truth (staff + history)
           const action = newRole === UNASSIGNED_ROLE ? 'staff_role_removed' : (assigned ? 'staff_role_changed' : 'staff_role_assigned');
@@ -10998,7 +11010,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
           }
           closeModal();
           render();
-          showToast(`✓ ${name} is now ${roleLabelOf(newRole)}`);
+          showToast(extrasWarn ? `${name} is now ${roleLabelOf(newRole)}, but: ${extrasWarn}` : `✓ ${name} is now ${staffRoleLabels(st)}`);
         } catch (err) {
           showToast('Unexpected error assigning role');
           if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = assigned ? 'Reassign' : 'Assign Role'; }
@@ -11009,6 +11021,13 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     const box = byId('assignRoleIssues');
     const paint = () => {
       const v = sel?.value || '';
+      qq('[data-assign-extra]').forEach(cb => {
+        const same = cb.dataset.assignExtra === v;
+        if (same) cb.checked = false;
+        cb.disabled = same || v === UNASSIGNED_ROLE;
+        if (v === UNASSIGNED_ROLE) cb.checked = false;
+        const row = cb.closest('label'); if (row) row.style.opacity = cb.disabled ? '.4' : '1';
+      });
       if (!box) return;
       if (!v) { box.innerHTML = ''; return; }
       const iss = getRoleChangeIssues(st, v);
