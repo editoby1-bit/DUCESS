@@ -5842,7 +5842,7 @@ function nextPaint() {
       qq('[data-staff-work-review]').forEach(btn => btn.onclick = () => {
         if (!isAdminStaff()) return;
         state.ui.reviewStaffId = btn.dataset.staffWorkReview;
-        state.ui.tool = reviewLandingTool(staffById(state.ui.reviewStaffId)); save(); renderWorkspace();
+        state.ui.tool = reviewLandingTool(staffById(state.ui.reviewStaffId)); save(); renderWorkspace(); openReviewSheetModal(state.ui.tool);
       });
       qq('[data-adm-staff]').forEach(btn => btn.onclick = async () => {
         state.ui.admSelectedStaffId = btn.dataset.admStaff; state.ui.admProfileDraft = null; save(); renderWorkspace();
@@ -6669,14 +6669,20 @@ function staffLedgerEvents(staffId) {
   // sheet per role with every work area on it, numbered slots 1/2/3 and Reverse / Edit
   // on each row. Sidebar sub-items open this sheet in a modal, scrolled to their section.
   const RV_CUSTOMER_WORK_TYPES = ['account_opening', 'account_maintenance', 'account_reactivation', 'account_block', 'account_closure'];
-  function reviewSheetHtml(baseTool, inRange) {
+  function reviewSheetHtml(baseTool, inRange, subKey) {
     const def = STAFF_REVIEW_DEFS[baseTool];
     const itemType = (row) => row.request.reviewOriginalType || row.request.type;
     const keys = reviewSubKeys(baseTool);
-    const secs = keys.flatMap(k => REVIEW_SUB_TOOLS[k].sections.map((x, i) => [x[0], x[1], i === 0 ? k : '']));
+    let secs = keys.flatMap(k => REVIEW_SUB_TOOLS[k].sections.map((x, i) => [x[0], x[1], i === 0 ? k : '']));
     const known = new Set(secs.flatMap(x => x[1]));
-    [...new Set(inRange.map(itemType).filter(t => !known.has(t)))].forEach(t => secs.push([prettyApprovalType(t), [t], '']));
-    const isCs = baseTool === 'work_review';
+    const extras = [...new Set(inRange.map(itemType).filter(t => !known.has(t)))].map(t => [prettyApprovalType(t), [t], '']);
+    if (subKey) {
+      // A sub-item shows only its own work: its first section always, its other sections only when
+      // they actually have entries. Nothing belonging to another item is shown here.
+      const has = (types) => inRange.some(r => types.includes(itemType(r)));
+      secs = REVIEW_SUB_TOOLS[subKey].sections.map((x, i) => [x[0], x[1], '']).filter((x, i) => i === 0 || has(x[1]));
+    } else secs.push(...extras);
+    const isCs = baseTool === 'work_review' || (subKey ? RV_CUSTOMER_WORK_TYPES.includes(secs[0]?.[1]?.[0]) : false);
     const cols = 9;
     const heads = isCs ? ['S/N','A/C No','A/C Name','Address','Phone No','NIN','BVN','Approved By','Action'] : ['S/N','Transaction Type','A/C No','A/C Name','Description','Received/Paid By','Amount','Approved By','Action'];
     const staticAct = '<td class="wr-act-cell"><div class="wr-actions"><span class="wr-off">Reverse</span><span class="wr-off">Edit</span></div></td>';
@@ -6724,12 +6730,32 @@ function staffLedgerEvents(staffId) {
     const baseTool = sub ? sub.base : tool;
     const def = STAFF_REVIEW_DEFS[baseTool];
     if (!st || !def) return;
-    const range = reviewRangeOf(reviewFilterFor(tool));
+    const f = reviewFilterFor(tool);
+    const range = reviewRangeOf(f);
     historyCovers(range.from || null);
     const inRange = staffReviewRows(baseTool, st).filter(r => r.date && (!range.from || r.date >= range.from) && (!range.to || r.date <= range.to));
-    openModal(def.sheet || def.title, reviewSheetHtml(baseTool, inRange), [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+    const count = (k) => inRange.filter(r => r.status === k).length;
+    const label = f.mode === 'range' ? `${range.from ? fmtDate(`${range.from}T12:00:00.000Z`) : 'Start'} – ${range.to ? fmtDate(`${range.to}T12:00:00.000Z`) : 'Today'}` : fmtDate(`${range.from}T12:00:00.000Z`);
+    const bar = `<div class="action-inline balance-filters-row wr-filters">
+      ${isAdminStaff(viewer) ? `<label class="inline-field"><span>Review Staff</span><select id="rvmStaff">${state.staff.map(x => `<option value="${escapeHtml(x.id)}" ${x.id === st.id ? 'selected' : ''}>${escapeHtml(x.name)} — ${escapeHtml(tellerIdLabel(x))}</option>`).join('')}</select></label>` : ''}
+      <button class="filter-chip ${f.mode === 'today' ? 'active' : 'secondary'}" id="rvmToday">Today</button>
+      <label class="inline-field"><span>From</span><input id="rvmFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label>
+      <label class="inline-field"><span>To</span><input id="rvmTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label>
+      <button class="filter-chip ${f.mode === 'range' ? 'active' : 'secondary'}" id="rvmApply">Apply Range</button>
+    </div>
+    <div class="note wr-summary">${escapeHtml(st.name || '')} • ${label} • ${inRange.length} item${inRange.length === 1 ? '' : 's'} • ${count('approved')} approved • ${count('pending')} pending • ${count('rejected')} rejected</div>`;
+    openModal(def.sheet || def.title, bar + reviewSheetHtml(baseTool, inRange, sub ? tool : null), [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
     bindReviewSheetActions();
-    if (sub) { const row = q(`#modalBody [data-wr-sec="${tool}"]`); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'start' }); }
+    const again = () => openReviewSheetModal(state.ui.tool && (REVIEW_SUB_TOOLS[state.ui.tool] || STAFF_REVIEW_DEFS[state.ui.tool]) ? state.ui.tool : tool);
+    if (byId('rvmStaff')) byId('rvmStaff').onchange = e => { state.ui.reviewStaffId = e.target.value; state.ui.tool = reviewLandingTool(staffById(e.target.value)); save(); renderWorkspace(); again(); };
+    if (byId('rvmToday')) byId('rvmToday').onclick = () => { f.mode = 'today'; f.date = ''; save(); again(); };
+    ['rvmFrom', 'rvmTo'].forEach(id => { const el = byId(id); if (el) el.addEventListener('click', () => { try { el.showPicker && el.showPicker(); } catch (_e) { /* native behaviour */ } }); });
+    if (byId('rvmApply')) byId('rvmApply').onclick = () => {
+      const from = byId('rvmFrom')?.value || '', to = byId('rvmTo')?.value || '';
+      if (!from && !to) return showToast('Pick a From or To date');
+      if (from && to && from > to) return showToast('From date must not be after To date');
+      f.mode = 'range'; f.from = from; f.to = to; save(); again();
+    };
   }
   function bindReviewSheetActions() {
     qq('[data-review-request]').forEach(btn => btn.onclick = () => openRequestDetailModal(btn.dataset.reviewRequest, { readOnly: true }));
@@ -6744,6 +6770,7 @@ function staffLedgerEvents(staffId) {
     const baseTool = sub ? sub.base : tool;
     const def = STAFF_REVIEW_DEFS[baseTool];
     if (!st || !def) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
+    if (sub) return `<div class="tool-empty-state"><div class="tool-empty-title">${escapeHtml(sub.short)}</div><div class="tool-empty-note">${escapeHtml(def.sheet || def.title)} opens in a modal.</div><button type="button" id="reviewOpenSheet">Open ${escapeHtml(sub.short)}</button></div>`;
     const f = reviewFilterFor(tool);
     const range = reviewRangeOf(f);
     historyCovers(range.from || null);
@@ -6751,12 +6778,8 @@ function staffLedgerEvents(staffId) {
     const count = (k) => inRange.filter(r => r.status === k).length;
     const value = inRange.filter(r => r.status === 'approved').reduce((t, r) => t + r.amount, 0);
     const decided = def.mode === 'decided';
-    const subKeys = reviewSubKeys(baseTool);
-    // The Administration sidebar has no review groups, so an admin reviewing someone gets the sub-items here.
-    const subChips = (isAdminStaff(viewer) && state.ui.module === 'administration' && subKeys.length > 1)
-      ? `<div class="action-inline wr-subchips">${subKeys.map(k => `<button class="filter-chip ${k === tool ? 'active' : 'secondary'}" data-review-sub="${k}">${escapeHtml(REVIEW_SUB_TOOLS[k].short)}</button>`).join('')}</div>` : '';
-    const body = `<div class="action-inline" style="margin-top:12px"><button type="button" id="reviewOpenSheet">Open ${escapeHtml(def.sheet || def.title)}</button></div>
-      <div class="note">${escapeHtml(sub ? sub.short : def.title)} opens in the work review sheet. Use the dates above to choose the period.</div>`;
+    const subChips = '';
+    const body = reviewSheetHtml(baseTool, inRange, null);
     const label = f.mode === 'range' ? `${range.from ? fmtDate(`${range.from}T12:00:00.000Z`) : 'Start'} – ${range.to ? fmtDate(`${range.to}T12:00:00.000Z`) : 'Today'}` : fmtDate(`${range.from}T12:00:00.000Z`);
     const showTeller = def.cod || baseTool === 'teller_review';
     return `
