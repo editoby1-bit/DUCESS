@@ -3593,6 +3593,7 @@ function hideProcessing() {
       save();
       renderWorkspace();
       if (nextTool === 'cash_receipt' && state.ui.tool === 'cash_receipt') openCashReceiptModal();
+      if (REVIEW_SUB_TOOLS[nextTool] && state.ui.tool === nextTool) openReviewSheetModal(nextTool);
       if (nextTool === 'my_close_day' && state.ui.tool === 'my_close_day') openMyCODModal();
       if (nextTool === 'central_close_day' && state.ui.tool === 'central_close_day') openCODModal();
       if (['my_close_day','central_close_day'].includes(nextTool)) return;
@@ -6664,35 +6665,26 @@ function staffLedgerEvents(staffId) {
     ]);
   }
 
-  function renderStaffReview(tool) {
-    const viewer = currentStaff();
-    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? staffById(state.ui.reviewStaffId) : viewer;
-    const sub = REVIEW_SUB_TOOLS[tool] || null;
-    const baseTool = sub ? sub.base : tool;
+  // 2026-11-15 (client): the review is the client's "Work Review Format" sheet - one
+  // sheet per role with every work area on it, numbered slots 1/2/3 and Reverse / Edit
+  // on each row. Sidebar sub-items open this sheet in a modal, scrolled to their section.
+  const RV_CUSTOMER_WORK_TYPES = ['account_opening', 'account_maintenance', 'account_reactivation', 'account_block', 'account_closure'];
+  function reviewSheetHtml(baseTool, inRange) {
     const def = STAFF_REVIEW_DEFS[baseTool];
-    if (!st || !def) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
-    const f = reviewFilterFor(tool);
-    const range = reviewRangeOf(f);
-    historyCovers(range.from || null);
-    const inRange = staffReviewRows(baseTool, st).filter(r => r.date && (!range.from || r.date >= range.from) && (!range.to || r.date <= range.to));
-    const count = (k) => inRange.filter(r => r.status === k).length;
-    const value = inRange.filter(r => r.status === 'approved').reduce((t, r) => t + r.amount, 0);
-    const decided = def.mode === 'decided';
-    const CUSTOMER_WORK_TYPES = ['account_opening', 'account_maintenance', 'account_reactivation', 'account_block', 'account_closure'];
     const itemType = (row) => row.request.reviewOriginalType || row.request.type;
-    const subKeys = reviewSubKeys(baseTool);
-    // A sub-item shows its own section(s); the old base key (restored sessions) shows all of them.
-    const sections = (sub ? sub.sections : subKeys.flatMap(k => REVIEW_SUB_TOOLS[k].sections)).map(x => [...x]);
-    // Work of a kind that has no sub-item of its own is never hidden: it is added under the first sub-item.
-    const knownTypes = new Set(subKeys.flatMap(k => REVIEW_SUB_TOOLS[k].sections.flatMap(x => x[1])));
-    if (!sub || subKeys[0] === tool) {
-      [...new Set(inRange.map(itemType).filter(t => !knownTypes.has(t)))].forEach(t => sections.push([prettyApprovalType(t), [t]]));
-    }
-    const body = `<div class="wr-sheet"><div class="wr-sheet-title">${escapeHtml(def.sheet || def.title)}</div>${sections.map(([heading, types]) => {
+    const keys = reviewSubKeys(baseTool);
+    const secs = keys.flatMap(k => REVIEW_SUB_TOOLS[k].sections.map((x, i) => [x[0], x[1], i === 0 ? k : '']));
+    const known = new Set(secs.flatMap(x => x[1]));
+    [...new Set(inRange.map(itemType).filter(t => !known.has(t)))].forEach(t => secs.push([prettyApprovalType(t), [t], '']));
+    const isCs = baseTool === 'work_review';
+    const cols = 9;
+    const heads = isCs ? ['S/N','A/C No','A/C Name','Address','Phone No','NIN','BVN','Approved By','Action'] : ['S/N','Transaction Type','A/C No','A/C Name','Description','Received/Paid By','Amount','Approved By','Action'];
+    const staticAct = '<td class="wr-act-cell"><div class="wr-actions"><span class="wr-off">Reverse</span><span class="wr-off">Edit</span></div></td>';
+    const blankRow = (n, show) => `<tr class="wr-row wr-blank"><th scope="row" class="wr-sn">${show ? n : ''}</th>${'<td></td>'.repeat(cols - 2)}${staticAct}</tr>`;
+    const body = secs.map(([heading, types, key]) => {
+      const customerWork = types.every(t => RV_CUSTOMER_WORK_TYPES.includes(t));
       const items = inRange.filter(r => types.includes(itemType(r)));
-      const customerWork = types.every(t => CUSTOMER_WORK_TYPES.includes(t));
-      const headings = customerWork ? ['S/N','A/C No','A/C Name','Address','Phone No','NIN','BVN','Approved By','Action'] : ['S/N','Transaction Type','A/C No','A/C Name','Description','Received/Paid By','Amount','Approved By','Action'];
-      const rows = items.map((r, i) => {
+      let rows = items.map((r, i) => {
         const req = r.request, p = req.payload || {};
         const type = itemType(r);
         let entries = Array.isArray(p.rows) && p.rows.length ? p.rows : [p];
@@ -6712,17 +6704,59 @@ function staffLedgerEvents(staffId) {
           const changeable = canChangeReviewWork(req);
           const editable = changeable && (['account_opening','account_maintenance','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','operational_entry'].includes(req.type) || (req.status === 'pending' && ['cash_receipt','inter_staff_credit'].includes(req.type)));
           const reversible = changeable && (req.status === 'pending' || (['account_opening','account_maintenance','account_reactivation','account_block','account_closure','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','cash_receipt','inter_staff_credit','operational_entry'].includes(req.type) && (req.type !== 'account_maintenance' || req.payload?.__reviewBefore)));
-          const action = `<td class="wr-act-cell"><div class="wr-actions"><button type="button" class="wr-act" data-review-reverse="${escapeHtml(req.id)}" ${reversible ? '' : 'disabled title="Previous values or a supported database posting are required for reversal"'}>Reverse</button><button type="button" class="wr-act" data-review-edit="${escapeHtml(req.id)}" ${editable ? '' : 'disabled title="Use Reverse followed by a new request for this work"'}>Edit</button><button type="button" class="wr-act" data-review-request="${escapeHtml(req.id)}">View</button></div>${req.reviewAction ? `<span class="wr-note">${escapeHtml(req.reviewAction)} ${req.status === 'approved' ? 'approved' : 'requested'}</span>` : ''}${req.payload?.__reviewResolved ? '<span class="wr-note">Correction completed</span>' : ''}</td>`;
-          if (customerWork) return `<tr class="wr-row"><td class="wr-sn">${n ? '' : i+1}</td><td>${escapeHtml(data.accountNumber || data.generatedAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.fullName || data.name || '—')}</td><td>${escapeHtml(data.address || '—')}</td><td>${escapeHtml(data.phone || '—')}</td><td>${escapeHtml(data.nin || '—')}</td><td>${escapeHtml(data.bvn || '—')}</td><td>${approvedCell}</td>${action}</tr>`;
-          return `<tr class="wr-row"><td class="wr-sn">${n ? '' : i+1}</td><td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—')}</td><td class="wr-amt">${money(entry.amount || p.formAmount || 0)}</td><td>${approvedCell}</td>${action}</tr>`;
+          const action = `<td class="wr-act-cell"><div class="wr-actions"><button type="button" class="wr-act danger tiny-btn" data-review-reverse="${escapeHtml(req.id)}" ${reversible ? '' : 'disabled title="Previous values or a supported database posting are required for reversal"'}>Reverse</button><button type="button" class="wr-act secondary tiny-btn" data-review-edit="${escapeHtml(req.id)}" ${editable ? '' : 'disabled title="Use Reverse followed by a new request for this work"'}>Edit</button></div>${req.reviewAction ? `<span class="wr-note">${escapeHtml(req.reviewAction)} ${req.status === 'approved' ? 'approved' : 'requested'}</span>` : ''}${req.payload?.__reviewResolved ? '<span class="wr-note">Correction completed</span>' : ''}</td>`;
+          const sn = `<th scope="row" class="wr-sn">${n ? '' : `<button type="button" class="wr-sn-btn" data-review-request="${escapeHtml(req.id)}" title="View">${i + 1}</button>`}</th>`;
+          if (customerWork) return `<tr class="wr-row">${sn}<td>${escapeHtml(data.accountNumber || data.generatedAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.fullName || data.name || '—')}</td><td>${escapeHtml(data.address || '—')}</td><td>${escapeHtml(data.phone || '—')}</td><td>${escapeHtml(data.nin || '—')}</td><td>${escapeHtml(data.bvn || '—')}</td><td>${approvedCell}</td>${action}</tr>`;
+          return `<tr class="wr-row">${sn}<td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—')}</td><td class="wr-amt">${money(entry.amount || p.formAmount || 0)}</td><td>${approvedCell}</td>${action}</tr>`;
         }).join('');
       }).join('');
-      const cols = headings.length;
-      return `<div class="table-wrap wr-wrap"><table class="wr-table"><thead><tr>${headings.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody><tr class="wr-section"><td colspan="2">${escapeHtml(heading)}</td><td colspan="${cols - 2}"></td></tr>${rows || `<tr class="wr-empty"><td class="wr-sn"></td><td colspan="${cols - 1}">No work in this period</td></tr>`}</tbody></table></div>`;
-    }).join('')}</div>`;
+      // Like the sheet, every section always shows at least slots 1, 2 and 3.
+      const per = isCs ? 1 : 2;
+      for (let n = items.length + 1; n <= Math.max(3, items.length); n++) rows += blankRow(n, true) + (per > 1 ? blankRow(n, false) : '');
+      return `<tr class="wr-section" ${key ? `data-wr-sec="${key}"` : ''}><th colspan="2">${escapeHtml(heading)}</th><td colspan="${cols - 2}"></td></tr>${rows}`;
+    }).join('');
+    return `<div class="wr-sheet"><div class="table-wrap wr-wrap"><table class="table wr-table"><caption class="wr-title">${escapeHtml(def.sheet || def.title)}</caption><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+  }
+  function openReviewSheetModal(tool) {
+    const viewer = currentStaff();
+    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? staffById(state.ui.reviewStaffId) : viewer;
+    const sub = REVIEW_SUB_TOOLS[tool] || null;
+    const baseTool = sub ? sub.base : tool;
+    const def = STAFF_REVIEW_DEFS[baseTool];
+    if (!st || !def) return;
+    const range = reviewRangeOf(reviewFilterFor(tool));
+    historyCovers(range.from || null);
+    const inRange = staffReviewRows(baseTool, st).filter(r => r.date && (!range.from || r.date >= range.from) && (!range.to || r.date <= range.to));
+    openModal(def.sheet || def.title, reviewSheetHtml(baseTool, inRange), [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+    bindReviewSheetActions();
+    if (sub) { const row = q(`#modalBody [data-wr-sec="${tool}"]`); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'start' }); }
+  }
+  function bindReviewSheetActions() {
+    qq('[data-review-request]').forEach(btn => btn.onclick = () => openRequestDetailModal(btn.dataset.reviewRequest, { readOnly: true }));
+    qq('[data-review-edit]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewEdit, 'edit'));
+    qq('[data-review-reverse]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewReverse, 'reverse'));
+  }
+
+  function renderStaffReview(tool) {
+    const viewer = currentStaff();
+    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? staffById(state.ui.reviewStaffId) : viewer;
+    const sub = REVIEW_SUB_TOOLS[tool] || null;
+    const baseTool = sub ? sub.base : tool;
+    const def = STAFF_REVIEW_DEFS[baseTool];
+    if (!st || !def) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
+    const f = reviewFilterFor(tool);
+    const range = reviewRangeOf(f);
+    historyCovers(range.from || null);
+    const inRange = staffReviewRows(baseTool, st).filter(r => r.date && (!range.from || r.date >= range.from) && (!range.to || r.date <= range.to));
+    const count = (k) => inRange.filter(r => r.status === k).length;
+    const value = inRange.filter(r => r.status === 'approved').reduce((t, r) => t + r.amount, 0);
+    const decided = def.mode === 'decided';
+    const subKeys = reviewSubKeys(baseTool);
     // The Administration sidebar has no review groups, so an admin reviewing someone gets the sub-items here.
     const subChips = (isAdminStaff(viewer) && state.ui.module === 'administration' && subKeys.length > 1)
       ? `<div class="action-inline wr-subchips">${subKeys.map(k => `<button class="filter-chip ${k === tool ? 'active' : 'secondary'}" data-review-sub="${k}">${escapeHtml(REVIEW_SUB_TOOLS[k].short)}</button>`).join('')}</div>` : '';
+    const body = `<div class="action-inline" style="margin-top:12px"><button type="button" id="reviewOpenSheet">Open ${escapeHtml(def.sheet || def.title)}</button></div>
+      <div class="note">${escapeHtml(sub ? sub.short : def.title)} opens in the work review sheet. Use the dates above to choose the period.</div>`;
     const label = f.mode === 'range' ? `${range.from ? fmtDate(`${range.from}T12:00:00.000Z`) : 'Start'} – ${range.to ? fmtDate(`${range.to}T12:00:00.000Z`) : 'Today'}` : fmtDate(`${range.from}T12:00:00.000Z`);
     const showTeller = def.cod || baseTool === 'teller_review';
     return `
@@ -6756,10 +6790,8 @@ function staffLedgerEvents(staffId) {
     if (byId('reviewStaffSelect') && isAdminStaff()) byId('reviewStaffSelect').onchange = e => {
       state.ui.reviewStaffId = e.target.value; state.ui.tool = reviewLandingTool(staffById(e.target.value)); save(); renderWorkspace();
     };
-    qq('[data-review-sub]').forEach(btn => btn.onclick = () => { state.ui.tool = btn.dataset.reviewSub; save(); renderWorkspace(); });
-    qq('[data-review-request]').forEach(btn => btn.onclick = () => openRequestDetailModal(btn.dataset.reviewRequest, { readOnly: true }));
-    qq('[data-review-edit]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewEdit, 'edit'));
-    qq('[data-review-reverse]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewReverse, 'reverse'));
+    qq('[data-review-sub]').forEach(btn => btn.onclick = () => { state.ui.tool = btn.dataset.reviewSub; save(); renderWorkspace(); openReviewSheetModal(state.ui.tool); });
+    if (byId('reviewOpenSheet')) byId('reviewOpenSheet').onclick = () => openReviewSheetModal(state.ui.tool);
     const tool = state.ui.tool;
     const f = reviewFilterFor(tool);
     const todayBtn = byId('reviewToday');

@@ -13484,28 +13484,23 @@ body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 .dashboard-staff-id strong { font-size:14px; overflow-wrap:anywhere; }
 
 /* ===== 2026-11-15 (client): Work Review Format sheet =====
-   Each role's Work Review sub-item is drawn like the client's review sheet:
-   black column headings, a black section label, black S/N cells, grey rows and
-   plain-text Reverse / Edit actions. Scoped to .wr-sheet so nothing else changes. */
-.wr-sheet { margin-top: 12px; }
-.wr-sheet-title { text-align: center; font-weight: 700; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; padding: 6px 0; color: #111; }
-.wr-wrap { margin-bottom: 14px; overflow-x: auto; }
-.wr-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 11px; background: #fff; }
-.wr-table th { background: #000 !important; color: #fff !important; font-weight: 700; text-align: left; padding: 4px 6px; border: 1px solid #000; white-space: nowrap; }
-.wr-table td { padding: 4px 6px; border: 1px solid #cfcfcf; color: #111 !important; vertical-align: middle; }
-.wr-table tr.wr-section td { background: #fff !important; border-color: #fff; padding: 0; }
-.wr-table tr.wr-section td:first-child { background: #000 !important; color: #fff !important; font-weight: 700; padding: 4px 6px; border-color: #000; }
-.wr-table td.wr-sn { background: #000 !important; color: #fff !important; font-weight: 700; text-align: center; width: 34px; border-color: #000; }
-.wr-table tr.wr-row:nth-child(odd) td:not(.wr-sn) { background: #d9d9d9; }
-.wr-table tr.wr-row:nth-child(even) td:not(.wr-sn) { background: #efefef; }
-.wr-table tr.wr-empty td:not(.wr-sn) { background: #efefef; color: #555 !important; font-style: italic; }
-.wr-table td.wr-amt { text-align: right; white-space: nowrap; }
-.wr-table td.wr-act-cell { white-space: nowrap; }
-.wr-actions { display: flex; gap: 8px; }
-.wr-state { text-transform: capitalize; font-style: italic; color: #555; }
-.wr-note { display: block; font-size: 10px; color: #555; }
-.spec-color-scheme .wr-sheet button.wr-act:not(:disabled),
-.wr-sheet button.wr-act:not(:disabled) { background: transparent !important; color: #111 !important; border: none !important; padding: 0 !important; min-height: 0; font-size: 11px; font-weight: 600; text-decoration: underline; cursor: pointer; }
-.spec-color-scheme .wr-sheet button.wr-act:disabled,
-.wr-sheet button.wr-act:disabled { background: transparent !important; color: #9a9a9a !important; border: none !important; padding: 0 !important; min-height: 0; font-size: 11px; text-decoration: none; cursor: not-allowed; }
+   Layout only - title, heading row, section labels, numbered slots, Reverse / Edit
+   on each row. Every colour comes from the app's own table and button styles, so the
+   sheet follows the current theme like every other screen. */
+#modalBack .modal[data-modal-title$="Work Review Format"] { width: min(1100px, 96vw); max-width: 96vw; }
+.wr-wrap { max-height: 70vh; overflow: auto; }
+.wr-table { min-width: 820px; }
+.wr-table caption.wr-title { caption-side: top; text-align: center; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; padding: 8px 0; }
+.wr-table th, .wr-table td { padding: 4px 8px; font-size: 12px; height: 26px; white-space: nowrap; }
+.wr-table thead th:last-child { text-align: center; }
+.wr-table tr.wr-section th { text-align: left; }
+.wr-table tr.wr-section td { border-bottom: none; }
+.wr-table th.wr-sn { width: 40px; text-align: center; padding: 0; text-transform: none; letter-spacing: 0; }
+.wr-table td.wr-amt { text-align: right; }
+.wr-table td.wr-act-cell { text-align: center; }
+.wr-actions { display: flex; gap: 6px; justify-content: center; }
+.wr-off { font-size: 12px; opacity: .55; }
+.wr-state { text-transform: capitalize; font-style: italic; }
+.wr-note { display: block; font-size: 10px; opacity: .75; }
+.wr-sheet button.wr-sn-btn { background: transparent; border: none; color: inherit; font: inherit; font-weight: 700; padding: 0; width: 100%; height: 100%; cursor: pointer; }
 .wr-subchips { margin: 10px 0 0; flex-wrap: wrap; }
