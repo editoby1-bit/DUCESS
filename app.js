@@ -414,7 +414,36 @@
     ict_network:   { base: 'staff_roster',    label: 'Network Management' },
     ict_cyber:     { base: 'staff_roster',    label: 'Cybersecurity' },
   };
-  Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS, ...ADMIN_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
+  // 2026-11-15 (client): every role's Work Review becomes a sidebar group whose
+  // sub-items are that role's own work areas (Teller: Direct Posting, Non Cash
+  // Posting, Journal Posting, ...). Each sub-item is a view onto the SAME review
+  // data the old single page showed, narrowed to its own request types and drawn
+  // in the client's Work Review Format sheet. `base` is the original review tool
+  // (permissions, date filters and the old keys all still work through it).
+  const RV_DIRECT_TYPES = ['customer_credit','customer_debit','cash_receipt','operational_entry'];
+  const RV_NONCASH_TYPES = ['intra_bank_transfer','inter_staff_credit'];
+  const RV_JOURNAL_TYPES = ['customer_credit_journal','customer_debit_journal'];
+  const REVIEW_SUB_TOOLS = {
+    rv_cs_opening:     { base: 'work_review',     short: 'Account Opening',      sections: [['Account Opening', ['account_opening']]] },
+    rv_cs_maintenance: { base: 'work_review',     short: 'Account Maintenance',  sections: [['Account Maintenance', ['account_maintenance']], ['Account Block', ['account_block']], ['Account Closure', ['account_closure']]] },
+    rv_cs_reactivation:{ base: 'work_review',     short: 'Account Reactivation', sections: [['Account Reactivation', ['account_reactivation']]] },
+    rv_teller_direct:  { base: 'teller_review',   short: 'Direct Posting',       sections: [['Direct Posting', RV_DIRECT_TYPES]] },
+    rv_teller_noncash: { base: 'teller_review',   short: 'Non Cash Posting',     sections: [['Non Cash Posting', RV_NONCASH_TYPES]] },
+    rv_teller_journal: { base: 'teller_review',   short: 'Journal Posting',      sections: [['Journal Posting', RV_JOURNAL_TYPES]] },
+    rv_treas_direct:   { base: 'treasury_review', short: 'Direct Posting',       sections: [['Direct Posting', RV_DIRECT_TYPES]] },
+    rv_treas_noncash:  { base: 'treasury_review', short: 'Non Cash Posting',     sections: [['Non Cash Posting', RV_NONCASH_TYPES]] },
+    rv_appr_opening:   { base: 'approval_review', short: 'Account Opening',      sections: [['Account Opening', ['account_opening','create_operational_account']]] },
+    rv_appr_update:    { base: 'approval_review', short: 'Account Update',       sections: [['Account Update', ['account_maintenance']]] },
+    rv_appr_reactivate:{ base: 'approval_review', short: 'Account Reactivation', sections: [['Account Reactivation', ['account_reactivation']]] },
+    rv_appr_block:     { base: 'approval_review', short: 'Account Block',        sections: [['Account Block', ['account_block']]] },
+    rv_appr_close:     { base: 'approval_review', short: 'Account Closure',      sections: [['Account Closure', ['account_closure']]] },
+    rv_appr_direct:    { base: 'approval_review', short: 'Direct Postings',      sections: [['Direct Postings', RV_DIRECT_TYPES]] },
+    rv_appr_noncash:   { base: 'approval_review', short: 'Non Cash Postings',    sections: [['Non Cash Postings', RV_NONCASH_TYPES]] },
+    rv_appr_journal:   { base: 'approval_review', short: 'Journals',             sections: [['Journals', RV_JOURNAL_TYPES]] },
+  };
+  Object.values(REVIEW_SUB_TOOLS).forEach(v => { v.label = `${TOOL_LABELS[v.base]} – ${v.short}`; });
+  const reviewSubKeys = (base) => Object.keys(REVIEW_SUB_TOOLS).filter(k => REVIEW_SUB_TOOLS[k].base === base);
+  Object.entries({ ...APPROVAL_SUB_TOOLS, ...BALANCE_SUB_TOOLS, ...ADMIN_SUB_TOOLS, ...REVIEW_SUB_TOOLS }).forEach(([k, v]) => { TOOL_LABELS[k] = v.label; });
 
   let realtimeBound = false;
   let realtimeUnsub = null;
@@ -1127,6 +1156,7 @@
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
     if (APPROVAL_SUB_TOOLS[tool]) return hasPermission(APPROVAL_SUB_TOOLS[tool].base, staff);
+    if (REVIEW_SUB_TOOLS[tool]) return hasPermission(REVIEW_SUB_TOOLS[tool].base, staff);
     if (ADMIN_SUB_TOOLS[tool]) return staffHasRole(staff, 'admin_officer') || hasPermission(ADMIN_SUB_TOOLS[tool].base, staff);
     // Balances now live on the Approval side (client sheet), so anyone who
     // can work the approval queue can view them, as well as anyone who
@@ -3404,7 +3434,7 @@ function hideProcessing() {
           <div class="tool-column-title tellering-tools-only-title">Tellering Tools</div>
           ${toolBtn('check_balance')}
           ${groupHtml}
-          ${toolBtn('teller_review')}
+          ${module.tools.includes('teller_review') ? reviewGroupHtml('teller_review') : ''}
         </div>`;
       }
       if (state.ui.module === 'administration') {
@@ -3443,7 +3473,7 @@ function hideProcessing() {
           }).join('')}
           ${toolBtn('approval_history')}
           ${toolBtn('my_approvals')}
-          ${toolBtn('approval_review')}
+          ${module.tools.includes('approval_review') ? reviewGroupHtml('approval_review') : ''}
         </div>`;
       }
       if (state.ui.module === 'cash_officer') {
@@ -3465,7 +3495,7 @@ function hideProcessing() {
           <div class="tool-column-title tellering-tools-only-title">Treasury Tools</div>
           <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
           ${groupHtml}
-          ${toolBtn('treasury_review')}
+          ${module.tools.includes('treasury_review') ? reviewGroupHtml('treasury_review') : ''}
         </div>`;
       }
       if (state.ui.module === 'customer_service') {
@@ -3485,7 +3515,7 @@ function hideProcessing() {
           ${openingGroup}
           ${toolBtn('account_maintenance')}
           ${toolBtn('account_reactivation')}
-          ${toolBtn('work_review')}
+          ${module.tools.includes('work_review') ? reviewGroupHtml('work_review') : ''}
         </div>`;
       }
       // SURGICAL CHANGE 2026-10-16 (client: uniform design across the
@@ -3609,6 +3639,7 @@ function hideProcessing() {
   function renderToolContent(tool) {
     if (APPROVAL_SUB_TOOLS[tool]) return renderApprovals();
     if (ADMIN_SUB_TOOLS[tool]) return renderAdminSub(tool);
+    if (REVIEW_SUB_TOOLS[tool]) return renderStaffReview(tool);
     if (BALANCE_SUB_TOOLS[tool]) return renderPeriodBalance(BALANCE_SUB_TOOLS[tool]);
     switch(tool) {
       case 'check_balance': return renderCheckBalance();
@@ -5810,7 +5841,7 @@ function nextPaint() {
       qq('[data-staff-work-review]').forEach(btn => btn.onclick = () => {
         if (!isAdminStaff()) return;
         state.ui.reviewStaffId = btn.dataset.staffWorkReview;
-        state.ui.tool = reviewToolFor(staffById(state.ui.reviewStaffId)); save(); renderWorkspace();
+        state.ui.tool = reviewLandingTool(staffById(state.ui.reviewStaffId)); save(); renderWorkspace();
       });
       qq('[data-adm-staff]').forEach(btn => btn.onclick = async () => {
         state.ui.admSelectedStaffId = btn.dataset.admStaff; state.ui.admProfileDraft = null; save(); renderWorkspace();
@@ -6514,10 +6545,10 @@ function staffLedgerEvents(staffId) {
   // it reads the same cached requests the rest
   // of the app already keeps, and changes nothing.
   const STAFF_REVIEW_DEFS = {
-    work_review:     { title: 'Work Review',     mode: 'submitted', cod: false },
-    teller_review:   { title: 'Tellerng Review', mode: 'submitted', cod: true },
-    treasury_review: { title: 'Treasury Review', mode: 'submitted', cod: true },
-    approval_review: { title: 'Approval Review', mode: 'decided',   cod: false }
+    work_review:     { title: 'Work Review',     sheet: 'Customer Service Work Review Format', mode: 'submitted', cod: false },
+    teller_review:   { title: 'Tellerng Review', sheet: 'Teller Work Review Format',           mode: 'submitted', cod: true },
+    treasury_review: { title: 'Treasury Review', sheet: 'Treasury Work Review Format',         mode: 'submitted', cod: true },
+    approval_review: { title: 'Approval Review', sheet: 'Approval Work Review Format',         mode: 'decided',   cod: false }
   };
   function reviewToolFor(st) {
     if (staffHasRole(st, 'customer_service')) return 'work_review';
@@ -6526,9 +6557,25 @@ function staffLedgerEvents(staffId) {
     if (staffHasRole(st, 'approving_officer')) return 'approval_review';
     return 'work_review';
   }
+  // A staff member's review opens on the first sub-item of their role's review.
+  function reviewLandingTool(st) {
+    const base = reviewToolFor(st);
+    return reviewSubKeys(base)[0] || base;
+  }
+  // Sidebar group: "<Role> Review" with that role's work areas underneath.
+  function reviewGroupHtml(baseTool) {
+    const keys = reviewSubKeys(baseTool);
+    if (!keys.length) return '';
+    state.ui.tellerGroupOpen ||= {};
+    const gk = `rv_${baseTool}`;
+    const isOpen = !!state.ui.tellerGroupOpen[gk] || keys.includes(state.ui.tool) || state.ui.tool === baseTool;
+    return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="${gk}">${TOOL_LABELS[baseTool]} <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
+      <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${keys.map(k => `<button class="tool-tab ${state.ui.tool === k ? 'active' : ''}" data-tool="${k}" ${hasPermission(k) ? '' : 'disabled'}>${escapeHtml(REVIEW_SUB_TOOLS[k].short)}</button>`).join('')}</div>`;
+  }
   function reviewFilterFor(tool) {
     state.ui.reviewFilters ||= {};
-    return (state.ui.reviewFilters[tool] ||= { mode: 'today', date: '', from: '', to: '' });
+    const key = REVIEW_SUB_TOOLS[tool]?.base || tool; // one date filter per review, shared by its sub-items
+    return (state.ui.reviewFilters[key] ||= { mode: 'today', date: '', from: '', to: '' });
   }
   function reviewRangeOf(f) {
     if (f.mode === 'range') return { from: f.from || '', to: f.to || '' };
@@ -6536,7 +6583,7 @@ function staffLedgerEvents(staffId) {
     return { from: d, to: d };
   }
   function staffReviewRows(tool, st) {
-    const def = STAFF_REVIEW_DEFS[tool];
+    const def = STAFF_REVIEW_DEFS[REVIEW_SUB_TOOLS[tool]?.base || tool];
     const backendId = getStaffBackendId(st);
     const isMe = (id) => !!id && (id === st.id || id === backendId);
     const rows = [];
@@ -6620,25 +6667,34 @@ function staffLedgerEvents(staffId) {
   function renderStaffReview(tool) {
     const viewer = currentStaff();
     const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? staffById(state.ui.reviewStaffId) : viewer;
-    const def = STAFF_REVIEW_DEFS[tool];
+    const sub = REVIEW_SUB_TOOLS[tool] || null;
+    const baseTool = sub ? sub.base : tool;
+    const def = STAFF_REVIEW_DEFS[baseTool];
     if (!st || !def) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
     const f = reviewFilterFor(tool);
     const range = reviewRangeOf(f);
     historyCovers(range.from || null);
-    const inRange = staffReviewRows(tool, st).filter(r => r.date && (!range.from || r.date >= range.from) && (!range.to || r.date <= range.to));
+    const inRange = staffReviewRows(baseTool, st).filter(r => r.date && (!range.from || r.date >= range.from) && (!range.to || r.date <= range.to));
     const count = (k) => inRange.filter(r => r.status === k).length;
     const value = inRange.filter(r => r.status === 'approved').reduce((t, r) => t + r.amount, 0);
     const decided = def.mode === 'decided';
-    const groups = new Map();
-    inRange.forEach(row => {
-      const type = row.request.reviewOriginalType || row.request.type;
-      if (!groups.has(type)) groups.set(type, []);
-      groups.get(type).push(row);
-    });
-    const body = [...groups].map(([type, items]) => {
-      const customerWork = ['account_opening', 'account_maintenance', 'account_reactivation', 'account_block', 'account_closure'].includes(type);
+    const CUSTOMER_WORK_TYPES = ['account_opening', 'account_maintenance', 'account_reactivation', 'account_block', 'account_closure'];
+    const itemType = (row) => row.request.reviewOriginalType || row.request.type;
+    const subKeys = reviewSubKeys(baseTool);
+    // A sub-item shows its own section(s); the old base key (restored sessions) shows all of them.
+    const sections = (sub ? sub.sections : subKeys.flatMap(k => REVIEW_SUB_TOOLS[k].sections)).map(x => [...x]);
+    // Work of a kind that has no sub-item of its own is never hidden: it is added under the first sub-item.
+    const knownTypes = new Set(subKeys.flatMap(k => REVIEW_SUB_TOOLS[k].sections.flatMap(x => x[1])));
+    if (!sub || subKeys[0] === tool) {
+      [...new Set(inRange.map(itemType).filter(t => !knownTypes.has(t)))].forEach(t => sections.push([prettyApprovalType(t), [t]]));
+    }
+    const body = `<div class="wr-sheet"><div class="wr-sheet-title">${escapeHtml(def.sheet || def.title)}</div>${sections.map(([heading, types]) => {
+      const items = inRange.filter(r => types.includes(itemType(r)));
+      const customerWork = types.every(t => CUSTOMER_WORK_TYPES.includes(t));
+      const headings = customerWork ? ['S/N','A/C No','A/C Name','Address','Phone No','NIN','BVN','Approved By','Action'] : ['S/N','Transaction Type','A/C No','A/C Name','Description','Received/Paid By','Amount','Approved By','Action'];
       const rows = items.map((r, i) => {
         const req = r.request, p = req.payload || {};
+        const type = itemType(r);
         let entries = Array.isArray(p.rows) && p.rows.length ? p.rows : [p];
         if (type === 'intra_bank_transfer') entries = [
           { ...p, type: 'debit', customerId: p.fromCustomerId || p.sourceCustomerId, accountNumber: p.fromAccountNumber || p.sourceAccountNumber, customerName: p.fromCustomerName || p.sourceAccountName, receivedOrPaidBy: p.paidBy },
@@ -6651,20 +6707,24 @@ function staffLedgerEvents(staffId) {
         return entries.map((entry, n) => {
           const c = state.customers.find(c => c.id === (entry.customerId || p.customerId)) || {};
           const data = { ...c, ...p, ...entry, ...(p.patch || {}) };
-          const approved = req.status === 'approved' ? (req.approvedBy || req.approvedByName || '—') : '—';
+          const approvedName = req.status === 'approved' ? (req.approvedBy || req.approvedByName || '—') : '';
+          const approvedCell = approvedName ? escapeHtml(approvedName) : `<span class="wr-state">${escapeHtml(r.status)}</span>`;
           const changeable = canChangeReviewWork(req);
           const editable = changeable && (['account_opening','account_maintenance','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','operational_entry'].includes(req.type) || (req.status === 'pending' && ['cash_receipt','inter_staff_credit'].includes(req.type)));
           const reversible = changeable && (req.status === 'pending' || (['account_opening','account_maintenance','account_reactivation','account_block','account_closure','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','cash_receipt','inter_staff_credit','operational_entry'].includes(req.type) && (req.type !== 'account_maintenance' || req.payload?.__reviewBefore)));
-          const action = `<td><div class="inline-actions"><button class="secondary tiny-btn" data-review-request="${escapeHtml(req.id)}">View</button><button class="secondary tiny-btn" data-review-edit="${escapeHtml(req.id)}" ${editable ? '' : 'disabled title="Use Reverse followed by a new request for this work"'}>Edit</button><button class="danger tiny-btn" data-review-reverse="${escapeHtml(req.id)}" ${reversible ? '' : 'disabled title="Previous values or a supported database posting are required for reversal"'}>Reverse</button></div>${req.reviewAction ? `<span class="note">${escapeHtml(req.reviewAction)} ${req.status === 'approved' ? 'approved' : 'requested'}</span>` : ''}${req.payload?.__reviewResolved ? '<span class="note">Correction completed</span>' : ''}</td>`;
-          if (customerWork) return `<tr><td>${n ? '' : i+1}</td><td>${escapeHtml(data.accountNumber || data.generatedAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.fullName || data.name || '—')}</td><td>${escapeHtml(data.address || '—')}</td><td>${escapeHtml(data.phone || '—')}</td><td>${escapeHtml(data.nin || '—')}</td><td>${escapeHtml(data.bvn || '—')}</td><td>${escapeHtml(approved)}</td><td>${escapeHtml(r.status)}</td>${action}</tr>`;
-          return `<tr><td>${n ? '' : i+1}</td><td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—')}</td><td>${money(entry.amount || p.formAmount || 0)}</td><td>${escapeHtml(approved)}</td><td>${escapeHtml(r.status)}</td>${action}</tr>`;
+          const action = `<td class="wr-act-cell"><div class="wr-actions"><button type="button" class="wr-act" data-review-reverse="${escapeHtml(req.id)}" ${reversible ? '' : 'disabled title="Previous values or a supported database posting are required for reversal"'}>Reverse</button><button type="button" class="wr-act" data-review-edit="${escapeHtml(req.id)}" ${editable ? '' : 'disabled title="Use Reverse followed by a new request for this work"'}>Edit</button><button type="button" class="wr-act" data-review-request="${escapeHtml(req.id)}">View</button></div>${req.reviewAction ? `<span class="wr-note">${escapeHtml(req.reviewAction)} ${req.status === 'approved' ? 'approved' : 'requested'}</span>` : ''}${req.payload?.__reviewResolved ? '<span class="wr-note">Correction completed</span>' : ''}</td>`;
+          if (customerWork) return `<tr class="wr-row"><td class="wr-sn">${n ? '' : i+1}</td><td>${escapeHtml(data.accountNumber || data.generatedAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.fullName || data.name || '—')}</td><td>${escapeHtml(data.address || '—')}</td><td>${escapeHtml(data.phone || '—')}</td><td>${escapeHtml(data.nin || '—')}</td><td>${escapeHtml(data.bvn || '—')}</td><td>${approvedCell}</td>${action}</tr>`;
+          return `<tr class="wr-row"><td class="wr-sn">${n ? '' : i+1}</td><td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—')}</td><td class="wr-amt">${money(entry.amount || p.formAmount || 0)}</td><td>${approvedCell}</td>${action}</tr>`;
         }).join('');
       }).join('');
-      const headings = customerWork ? ['S/N','Account Number','Account Name','Address','Phone No.','NIN','BVN','Approved By','Status','Action'] : ['S/N','Transaction Type','Account Number','Account Name','Description','Received/Paid By','Amount','Approved By','Status','Action'];
-      return `<h4>${escapeHtml(prettyApprovalType(type))}</h4><div class="table-wrap"><table class="table"><thead><tr>${headings.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
-    }).join('');
+      const cols = headings.length;
+      return `<div class="table-wrap wr-wrap"><table class="wr-table"><thead><tr>${headings.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody><tr class="wr-section"><td colspan="2">${escapeHtml(heading)}</td><td colspan="${cols - 2}"></td></tr>${rows || `<tr class="wr-empty"><td class="wr-sn"></td><td colspan="${cols - 1}">No work in this period</td></tr>`}</tbody></table></div>`;
+    }).join('')}</div>`;
+    // The Administration sidebar has no review groups, so an admin reviewing someone gets the sub-items here.
+    const subChips = (isAdminStaff(viewer) && state.ui.module === 'administration' && subKeys.length > 1)
+      ? `<div class="action-inline wr-subchips">${subKeys.map(k => `<button class="filter-chip ${k === tool ? 'active' : 'secondary'}" data-review-sub="${k}">${escapeHtml(REVIEW_SUB_TOOLS[k].short)}</button>`).join('')}</div>` : '';
     const label = f.mode === 'range' ? `${range.from ? fmtDate(`${range.from}T12:00:00.000Z`) : 'Start'} – ${range.to ? fmtDate(`${range.to}T12:00:00.000Z`) : 'Today'}` : fmtDate(`${range.from}T12:00:00.000Z`);
-    const showTeller = def.cod || tool === 'teller_review';
+    const showTeller = def.cod || baseTool === 'teller_review';
     return `
       <div class="stack">
         <div class="form-card">
@@ -6687,14 +6747,16 @@ function staffLedgerEvents(staffId) {
             <label class="inline-field"><span>To</span><input id="reviewTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label>
             <button class="filter-chip ${f.mode === 'range' ? 'active' : 'secondary'}" id="reviewApplyRange">Apply Range</button>
           </div>
-          ${body || '<div class="note">No work in this period</div>'}
+          ${subChips}
+          ${body}
         </div>
       </div>`;
   }
   function bindStaffReview() {
     if (byId('reviewStaffSelect') && isAdminStaff()) byId('reviewStaffSelect').onchange = e => {
-      state.ui.reviewStaffId = e.target.value; state.ui.tool = reviewToolFor(staffById(e.target.value)); save(); renderWorkspace();
+      state.ui.reviewStaffId = e.target.value; state.ui.tool = reviewLandingTool(staffById(e.target.value)); save(); renderWorkspace();
     };
+    qq('[data-review-sub]').forEach(btn => btn.onclick = () => { state.ui.tool = btn.dataset.reviewSub; save(); renderWorkspace(); });
     qq('[data-review-request]').forEach(btn => btn.onclick = () => openRequestDetailModal(btn.dataset.reviewRequest, { readOnly: true }));
     qq('[data-review-edit]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewEdit, 'edit'));
     qq('[data-review-reverse]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewReverse, 'reverse'));
@@ -7046,6 +7108,7 @@ function normalizeStaffLedgerEntryType(row) {
   function bindToolHandlers() {
     if (APPROVAL_SUB_TOOLS[state.ui.tool]) { bindApprovals(); return; }
     if (ADMIN_SUB_TOOLS[state.ui.tool]) { bindAdminSub(state.ui.tool); return; }
+    if (REVIEW_SUB_TOOLS[state.ui.tool]) { bindStaffReview(); return; }
     if (BALANCE_SUB_TOOLS[state.ui.tool]) { bindPeriodBalance(); return; }
     switch (state.ui.tool) {
       case 'check_balance': bindCheckBalance(); break;
