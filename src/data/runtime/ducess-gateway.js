@@ -983,6 +983,9 @@ const anonKey = "sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I";
         type: row.request_type || row.type || '',
         requestType: row.request_type || row.type || '',
         status: row.status || 'pending',
+        reviewAction: payload.__review?.action || '',
+        reviewSourceId: payload.__review?.sourceId || '',
+        reviewOriginalType: payload.__review?.originalType || '',
         payload,
         requestedAt: row.requested_at || row.requestedAt || new Date().toISOString(),
         requestedBy: row.requested_by_staff_id || row.requestedByStaffId || row.requestedBy || '',
@@ -1451,7 +1454,7 @@ if (inserted.error) {
           customerName: payload.sourceAccountName, amount, txType: 'debit',
           details: payload.details || `Transfer to ${payload.destAccountName || payload.destAccountNumber}`,
           paymentMode: 'transfer', payoutSource: 'transfer'
-        }, 'debit', approver, { skipExistingCheck: true });
+        }, 'debit', approver, { skipExistingCheck: true, plan });
         if (!debitResult.ok) return debitResult;
         // Credit destination customer
         const creditResult = await postSingleCustomerTransaction(requestRow, {
@@ -1459,7 +1462,7 @@ if (inserted.error) {
           customerName: payload.destAccountName, amount, txType: 'credit',
           details: payload.details || `Transfer from ${payload.sourceAccountName || payload.sourceAccountNumber}`,
           paymentMode: 'transfer'
-        }, 'credit', approver, { skipExistingCheck: true });
+        }, 'credit', approver, { skipExistingCheck: true, plan });
         if (!creditResult.ok) return creditResult;
         return defaultResult.ok({ posted: true, requestType: type, transactions: [debitResult.data, creditResult.data], cashLedger: null, decisionNote: decisionNote || '' });
       }
@@ -1626,10 +1629,12 @@ if (inserted.error) {
           patch = { status: 'closed', is_active: false };
         }
         if (!Object.keys(patch).length) return defaultResult.ok({ posted: false, requestType: type, transactions: [], cashLedger: null, decisionNote: decisionNote || '' });
+        const previous = await client.from(customersTable).select('full_name,address,phone,nin,bvn,old_account_number,status,is_active').eq('id',customerId).maybeSingle();
+        if (previous.error || !previous.data) return defaultResult.err('CUSTOMER_SNAPSHOT_FAILED','Could not save the previous account values; nothing was updated.',previous.error);
         const upd = await client.from(customersTable).update(patch).eq('id', customerId).select(customersSelect).maybeSingle();
         if (upd.error) return defaultResult.err('CUSTOMER_UPDATE_FAILED', 'Could not update the customer for this approval.', upd.error);
         if (!upd.data) return defaultResult.err('CUSTOMER_NOT_FOUND', 'The customer for this approval was not found.');
-        return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, customer: upd.data, decisionNote: decisionNote || '' });
+        return defaultResult.ok({ posted: true, requestType: type, transactions: [], cashLedger: null, customer: upd.data, reviewBefore: previous.data, decisionNote: decisionNote || '' });
       }
 
       const postable = ['customer_credit', 'customer_debit', 'customer_credit_journal', 'customer_debit_journal', 'float_topup', 'float_declaration', 'debt_repayment'];
@@ -1968,6 +1973,52 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       return defaultResult.ok(normalizeApprovalRecord(data));
     }
 
+    function reviewRpcError(error) {
+      return defaultResult.err('WORK_REVIEW_FAILED', isMissingRpcError(error) ? 'Work Review actions need the 2026-11-13-work-review-actions.sql database migration.' : (error?.message || 'The change could not be saved.'), error);
+    }
+    async function getWorkReviewContext(requestId) {
+      if (!canUseSupabase()) return defaultResult.err('ONLINE_REQUIRED', 'Sign in online to edit or reverse work.');
+      const { data, error } = await client.rpc('ducess_review_context', { p_request_id: requestId });
+      return error ? reviewRpcError(error) : defaultResult.ok(data);
+    }
+    async function submitWorkReviewAction(input) {
+      if (!canUseSupabase()) return defaultResult.err('ONLINE_REQUIRED', 'Sign in online to edit or reverse work.');
+      const { data, error } = await client.rpc('ducess_submit_review_action', {
+        p_request_id: input.requestId, p_action: input.action, p_patch: input.patch || {},
+        p_reason: input.reason, p_version: input.version, p_date: input.date
+      });
+      return error ? reviewRpcError(error) : defaultResult.ok(normalizeApprovalRecord(data));
+    }
+    async function approveWorkReviewChange(requestRow, approver) {
+      const m = requestRow.payload?.__review;
+      if (!m?.sourceId) return defaultResult.err('INVALID_CORRECTION', 'Original work is missing.');
+      const plan = { transactions: [], ledger: null, runningBalances: new Map() };
+      if (m.action === 'edit' && !m.originalType.startsWith('account_') && m.originalType !== 'operational_entry') {
+        const source = await fetchApprovalRequestRow(m.sourceId, 'approved');
+        if (!source.ok) return source;
+        const posted = await fetchExistingPostedTransactionsByRequest(m.sourceId);
+        if (!posted.ok) return posted;
+        const undo = new Map();
+        for (const row of posted.data || []) undo.set(String(row.account_id), (undo.get(String(row.account_id)) || 0) + (row.tx_type === 'credit' ? -1 : 1) * Number(row.amount));
+        for (const [id, delta] of undo) {
+          const summary = await getAccountSummary(id);
+          if (!summary.ok || !summary.data) return defaultResult.err('ACCOUNT_MISSING', 'A correction account could not be loaded.');
+          plan.runningBalances.set(id, Number(summary.data.balance || 0) + delta);
+        }
+        const replacement = { ...requestRow, request_type: m.originalType, payload: { ...requestRow.payload } };
+        delete replacement.payload.__review;
+        const built = await performDirectPostingForApproval(replacement, approver, m.reason, plan);
+        if (!built.ok) return built;
+      }
+      const { data, error } = await client.rpc('ducess_commit_review_change', {
+        p_request_id: requestRow.id,
+        p_transactions: plan.transactions.map(t => ({ row: t.row, delta: t.delta, seed_balance: t.seedBalance })),
+        p_ledger: plan.ledger
+      });
+      // Corrections require the atomic RPC. Never fall back to separate writes.
+      return error ? reviewRpcError(error) : defaultResult.ok(normalizeApprovalRecord(data));
+    }
+
     async function approveRequest(payload = {}) {
       if (!canUseSupabase()) return local.approvals.approveRequest(payload);
       const approver = {
@@ -1981,6 +2032,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const requestResult = await fetchApprovalRequestRow(payload.requestId, 'pending');
       if (!requestResult.ok) return requestResult;
       const requestRow = requestResult.data;
+      if (requestRow.request_type === 'work_review_change') return approveWorkReviewChange(requestRow, approver);
 
       if (approvalPostingRpc) {
         // For staff account transactions, skip the RPC (which doesn't know about
@@ -2020,10 +2072,12 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const ledger = postingResult.data?.cashLedger;
       const compactLedger = ledger ? { amount: normalizeNumber(ledger.amount), delta: normalizeNumber(ledger.delta) } : null;
       const postingMeta = {
+        ...(postingResult.data?.reviewBefore ? { __reviewBefore: postingResult.data.reviewBefore } : {}),
         __posting: {
           posted: postingResult.data?.posted !== false,
           postedAt: new Date().toISOString(),
           requestType: requestRow.request_type || '',
+          customerId: postingResult.data?.customer?.id || null,
           transactions: compactTx,
           cashLedger: compactLedger,
         }
@@ -3829,6 +3883,8 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         approveRequest,
         markApprovalApprovedDirect,
         setReviewLock,
+        getWorkReviewContext,
+        submitWorkReviewAction,
         rejectRequest,
       },
       cod: {

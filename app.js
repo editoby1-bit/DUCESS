@@ -1,5 +1,6 @@
 (() => {
   const runtimeConfig = window.__DUCESS_CONFIG__ || {};
+  const reviewPostingCache = new WeakMap();
   const STORAGE_KEY = runtimeConfig.storageKey || 'duces_enterprise_ledger_v1';
   const gateway = window.DucessGateway?.createGateway?.({
     storageKey: STORAGE_KEY,
@@ -772,7 +773,7 @@
     return payloadDate || approval?.requestedAt || approval?.requested_at || '';
   }
 
-  const COD_LOCKED_POSTING_TYPES = ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','float_declaration','float_topup','wallet_fund','debt_repayment','operational_entry','close_of_day'];
+  const COD_LOCKED_POSTING_TYPES = ['work_review_change','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','float_declaration','float_topup','wallet_fund','debt_repayment','operational_entry','close_of_day'];
 
   function approvalBusinessDate(type, payload = {}) {
     return String(payload?.date || payload?.businessDate || payload?.float_date || businessDate()).slice(0,10);
@@ -865,22 +866,18 @@
     return ({ customer: 'customer', staff_salary: 'staff', income: 'income', expense: 'expense', staff_operational: 'tellerng', treasury: 'treasury' })[t] || '';
   }
   const accountsInSegment = (seg) => (state.customers || []).filter(c => accountSegmentOf(c) === seg);
-  // SURGICAL ADDITION 2026-09-28 (client correction): "Teller ID" is the
-  // staff's FIRST NAME, not their T#### operational account number.
   function staffFirstName(st){ return String(st?.name || '').trim().split(/\s+/)[0] || '—'; }
-  // 2026-11-09 (client): "Teller ID" always shows the Teller AND the account
-  // number (e.g. "Mary Daniel • T1001"), never just a first name.
-  function tellerIdLabel(st, acctNo) {
+  // Use the exact staff-management ID; the operational account is separate.
+  function tellerIdLabel(st) {
     if (!st) return '—';
-    const no = acctNo || staffOperationalAccountNumber(st.id);
-    return `${st.name || staffFirstName(st)}${no ? ' • ' + no : ''}`;
+    return String(st.staffId || st.staffCode || st.staff_code || st.id || '—');
   }
   function tellerIdForAccount(c){ return c?.accountType === 'staff_operational' ? tellerIdLabel(staffById(c.linkedStaffId), c.accountNumber) : '—'; }
   function tellerBannerHtml(st = currentStaff()) {
     if (!st) return '';
     const no = staffOperationalAccountNumber(st.id);
     if (!no && !(staffHasRole(st, 'teller') || staffHasRole(st, 'admin_officer'))) return '';
-    return `<div class="teller-id-banner"><span><span class="k">Teller ID</span><strong>${escapeHtml(st.name || '')}</strong></span><span><span class="k">Account No</span><strong>${escapeHtml(no || 'Not opened yet')}</strong></span></div>`;
+    return `<div class="teller-id-banner"><span><span class="k">Teller ID</span><strong>${escapeHtml(tellerIdLabel(st))}</strong></span><span><span class="k">Account No</span><strong>${escapeHtml(no || 'Not opened yet')}</strong></span></div>`;
   }
   // SURGICAL ADDITION 2026-09-28 (client correction): Account Status is a
   // small colour-coded box, not a full-size display field.
@@ -1725,6 +1722,32 @@
     syncAllStaffWallets();
   }
 
+  // Read-only accounting projection: keep the original on its original date,
+  // add its inverse on the correction date, and add the replacement for edits.
+  // Derived events never enter the stored approval list or sync-ID requests.
+  function postingApprovals() {
+    return (state.approvals || []).flatMap(r => {
+      if (!r.reviewAction) return [r];
+      if (r.status !== 'approved') return [];
+      if (reviewPostingCache.has(r)) return reviewPostingCache.get(r);
+      const m = r.payload.__review;
+      const original = m.originalPayload || r.payload;
+      const inverseTypes = {customer_credit:'customer_debit',customer_debit:'customer_credit',customer_credit_journal:'customer_debit_journal',customer_debit_journal:'customer_credit_journal'};
+      const originalType = m.originalType;
+      const items = [];
+      if (!originalType.startsWith('account_')) {
+        const payload = {...original,date:m.date}; delete payload.__review;
+        if (['cash_receipt','inter_staff_credit','operational_entry'].includes(originalType)) payload.amount = -Number(original.amount || 0);
+        if (originalType === 'intra_bank_transfer') {
+          for (const suffix of ['Id','Name','Number']) { payload['sourceAccount'+suffix]=original['destAccount'+suffix]; payload['destAccount'+suffix]=original['sourceAccount'+suffix]; }
+        }
+        items.push({...r,id:'review-inverse:'+r.id,type:inverseTypes[originalType] || originalType,payload,reviewInverse:true,reviewOriginalType:originalType,reviewAction:''});
+        if (m.action === 'edit') { const replacement={...r.payload};delete replacement.__review;items.push({...r,type:originalType,payload:replacement,reviewAction:''}); }
+      }
+      reviewPostingCache.set(r,items); return items;
+    });
+  }
+
   function syncOperationalEffectsFromApprovedRequests() {
     state.operations ||= { incomeAccounts: [], expenseAccounts: [], entries: [] };
     state.operations.incomeAccounts ||= [];
@@ -1746,7 +1769,7 @@
             kind: 'income',
             accountId: incomeAccount?.id || chargeRow.key || '',
             accountName: incomeAccount?.name || chargeRow.accountName || chargeRow.label || 'Charge Income',
-            amount: Number(chargeRow.amount || 0),
+            amount: Number(chargeRow.amount || 0) * (req.reviewInverse ? -1 : 1),
             note: cleanOperationalNote(`${chargeRow.label || 'Charge'} from ${customerAccount}`),
             date: `${entry?.date || req.payload?.date || req.payload?.businessDate || today()}T12:00:00.000Z`,
             postedBy: req.requestedByName || staffName(req.requestedBy) || 'System',
@@ -1759,7 +1782,7 @@
         });
       });
     };
-    (state.approvals || []).forEach(req => {
+    postingApprovals().forEach(req => {
       if (!req || req.status !== 'approved') return;
       const p = req.payload || {};
       if (req.type === 'operational_entry') {
@@ -1784,6 +1807,8 @@
           sourceApprovalId: req.id
         });
       }
+      if (req.reviewInverse && req.reviewOriginalType === 'customer_credit') addChargeOperationalEntries(req, [p]);
+      if (req.reviewInverse && req.reviewOriginalType === 'customer_credit_journal') addChargeOperationalEntries(req, p.rows || []);
       if (req.type === 'customer_credit') addChargeOperationalEntries(req, [p]);
       if (req.type === 'customer_credit_journal') addChargeOperationalEntries(req, Array.isArray(p.rows) ? p.rows : Array.isArray(p.entries) ? p.entries : []);
       if (req.type === 'create_operational_account') {
@@ -2303,6 +2328,10 @@
 
   async function syncApprovalEffectsFromGateway(approvalRecord) {
   if (!approvalRecord?.type) return defaultResultOk(null);
+  if (approvalRecord.reviewAction) {
+    const m = approvalRecord.payload.__review;
+    return syncApprovalEffectsFromGateway({ ...approvalRecord, reviewAction: '', type:m.originalType === 'account_opening' ? 'account_maintenance' : m.originalType, payload:approvalRecord.payload });
+  }
 
   // Enrich approvalRecord.payload from local state when the gateway returns a
   // minimal record (e.g. after RPC approval). This ensures accountType is present.
@@ -2624,7 +2653,7 @@ if (approvalRecord.type === 'float_topup') {
           payload: payloadOverride || null
         });
         if (result?.ok) {
-          await syncApprovalsByIdFromGateway([id]);
+          await syncApprovalsByIdFromGateway([id, pendingReq?.reviewSourceId].filter(Boolean));
           await syncApprovalEffectsFromGateway(result.data);
           await syncCodFromGateway();
           syncOperationalEffectsFromApprovedRequests();
@@ -3318,7 +3347,7 @@ function hideProcessing() {
   function renderModules() {
     const current = state.ui.module;
     const moduleOrder = ['customer_service','tellering','cash_officer','approvals','administration'];
-    byId('moduleGrid').innerHTML = `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
+    byId('moduleGrid').innerHTML = (currentStaff() ? `<div class="dashboard-staff-id"><span>Teller ID</span><strong>${escapeHtml(tellerIdLabel(currentStaff()))}</strong></div>` : '') + `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
       const m = MODULES[key];
       const allowed = moduleAllowed(key);
       return `<div class="module-card ${current===key?'active':''} ${allowed?'':'disabled'}" data-module="${key}" data-module-key="${key}">
@@ -3819,6 +3848,39 @@ function hideProcessing() {
     return ['', 'customer', 'staff_wallet', 'staff'].includes(cp.toLowerCase()) ? '' : cp;
   }
 
+  // Upgrade old cached statement rows only when viewed, in bounded batches.
+  // No full-history reload, polling, or per-row requests.
+  const statementAttributionChecked = new WeakSet();
+  const statementAttributionLoading = new Set();
+  async function hydrateStatementAttribution(customer, filter) {
+    if (!isSupabaseApprovalMode() || !gateway.history?.transactionsByIds || statementAttributionLoading.has(customer.id)) return;
+    const missing = (customer.transactions || []).filter(tx => tx.id && !tx.__bf && !statementAttributionChecked.has(tx) && (!tx.postedBy || !tx.approvedBy) && (!filter.from || String(tx.date).slice(0,10) >= filter.from) && (!filter.to || String(tx.date).slice(0,10) <= filter.to));
+    if (!missing.length) return;
+    statementAttributionLoading.add(customer.id);
+    let changed = false;
+    try {
+      for (let offset = 0; offset < missing.length; offset += 100) {
+        const batch = missing.slice(offset, offset + 100);
+        batch.forEach(tx => statementAttributionChecked.add(tx));
+        const res = await gateway.history.transactionsByIds(batch.map(tx => tx.id));
+        if (!res?.ok) break;
+        const fetched = new Map((res.data || []).map(row => [row.tx.id, row.tx]));
+        batch.forEach(tx => {
+          const full = fetched.get(tx.id);
+          if (!full) return;
+          for (const key of ['postedBy', 'postedById', 'approvedBy', 'counterparty', 'receivedOrPaidBy']) {
+            if (!tx[key] && full[key]) { tx[key] = full[key]; changed = true; }
+          }
+        });
+      }
+      if (changed) {
+        save();
+        if (state.ui.tool === 'account_statement' && state.ui.selectedCustomerId === customer.id) renderWorkspace();
+      }
+    } catch (err) { console.warn('[DUCESS] Statement attribution refresh failed', err); }
+    finally { statementAttributionLoading.delete(customer.id); }
+  }
+
   function renderAccountStatement() {
     const customer = getSelectedCustomer();
     const filter = state.ui.accountStatementFilter ||= { from: '', to: '' };
@@ -3852,6 +3914,7 @@ function hideProcessing() {
         </div>
         <div class="action-row compact-action-row" style="margin-top:10px"><button class="secondary tiny-btn" id="stmtPrintBtn">Print Statement</button></div>`;
     } else if (generated) {
+      hydrateStatementAttribution(customer, filter);
       const rows = (customer.transactions || []).filter(tx => {
         const d = tx.date.slice(0,10);
         if (filter.from && d < filter.from) return false;
@@ -4045,7 +4108,7 @@ function hideProcessing() {
   function validateJournalDate(value) {
     const v = String(value || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return 'Enter the Journal Date';
-    if (v > businessDate()) return 'Journal Date cannot be after the business date';
+    if (Number.isNaN(Date.parse(v + 'T12:00:00Z'))) return 'Enter a valid Journal Date';
     return '';
   }
   async function submitJournalRows(kind, staffId, staffName, formAmount, formPaymentMode, rows, fieldNote, journalNumber, funding, meta) {
@@ -4085,7 +4148,8 @@ function hideProcessing() {
   // status changes after the fact.
   function journalEffectiveStatus(record) {
     if (record.status === 'draft') return 'draft';
-    const linked = (state.approvals || []).find(r => r.payload?.journalNumber === record.journalNumber);
+    const linked = (state.approvals || []).find(r => !r.reviewAction && r.payload?.journalNumber === record.journalNumber);
+    if (linked?.payload?.__reviewResolved) return linked.payload.__reviewResolved.action === 'reverse' ? 'Reversed' : 'Corrected';
     return linked?.status || record.status || 'sent';
   }
 
@@ -4224,8 +4288,9 @@ function hideProcessing() {
   // and re-open the posting modal with that account preset, since only one
   // modal can be shown at a time.
   function openJournalFundSearchModal(list, record, currentTyped) {
+    list = sortedSearchAccounts(list);
     const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-fund-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick-fund="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick-fund="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalFundCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalFundCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [
+    openModal('Account Search', `<div class="stack customer-search-modal"><input id="modalFundCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalFundCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [
       { label: 'Cancel', className: 'secondary', onClick: () => openJournalPostModal(record, currentTyped) }
     ]);
     const pickFundCustomer = (id) => {
@@ -4275,7 +4340,7 @@ function hideProcessing() {
         fieldNote: p.fieldNote || null, status: 'sent', createdAt: req.requestedAt || req.createdAt || ''
       });
     });
-    return local.concat(fromApprovals);
+    return journalsVisibleToCurrentStaff(local.concat(fromApprovals));
   }
 
   function journalDetailBody(record) {
@@ -4430,8 +4495,11 @@ function hideProcessing() {
     qq('[data-journal-view]').forEach(btn => btn.onclick = async () => {
       const record = allJournalRecords().find(j => j.id === btn.dataset.journalView);
       if (!record) return showToast('Journal not found');
-      await ensureJournalFull(record);
       openModal(`${record.journalNumber}`, journalDetailBody(record), [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+      try {
+        await ensureJournalFull(record);
+        if (byId('modalTitle')?.textContent === record.journalNumber && !byId('modalBack').classList.contains('hidden')) byId('modalBody').innerHTML = journalDetailBody(record);
+      } catch (_e) { showToast('Journal opened; its attachment could not be loaded'); }
     });
   }
 
@@ -4567,7 +4635,7 @@ function hideProcessing() {
               <div class="jr-cell"><input id="journalConfirmedBy" class="entry-input" value="${escapeHtml(String(telleringDraft.journalConfirmedBy || ''))}"></div>
 
               <div class="jr-label">Journal Date</div>
-              <div class="jr-cell"><input id="journalDate" class="entry-input" type="date" lang="en-GB" max="${escapeHtml(businessDate())}" value="${escapeHtml(String(telleringDraft.journalDate || ''))}"></div>
+              <div class="jr-cell"><input id="journalDate" class="entry-input" type="date" lang="en-GB" value="${escapeHtml(String(telleringDraft.journalDate || ''))}"></div>
               <div class="jr-label">Journal Description</div>
               <div class="jr-cell"><input id="journalDescription" class="entry-input" value="${escapeHtml(String(telleringDraft.journalDescription || ''))}"></div>
               <div class="jr-label">Journal Value</div>
@@ -4723,7 +4791,8 @@ function hideProcessing() {
       // Non Cash Postings, anything else to Direct Postings.
       const opEntryHere = a.type === 'operational_entry' && (state.ui.tool === 'appr_direct' || state.ui.tool === 'appr_non_cash')
         && ((/transfer|non.?cash|bank|pos|cheque/i.test(String(a.payload?.paymentMode || a.payload?.paymentMethod || a.payload?.method || a.payload?.mode || ''))) === (state.ui.tool === 'appr_non_cash'));
-      if (!(subTool ? (subTool.types.includes(a.type) || opEntryHere) : categories[currentSection].includes(a.type))) return false;
+      const queueType = a.reviewOriginalType || a.type;
+      if (!(subTool ? (subTool.types.includes(queueType) || opEntryHere) : categories[currentSection].includes(queueType))) return false;
       if (a.status !== 'pending') return false; // decided items live in Approval History now
       const reqDate = approvalBusinessDate(a.type, a.payload || {});
       // Approval Queue belongs to the CURRENT OPEN business date only.
@@ -4745,12 +4814,12 @@ function hideProcessing() {
       const actionDisabled = lockedByOther ? 'disabled' : '';
       const pendingActions = a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success" ${actionDisabled}>Approve</button><button type="button" data-reject="${a.id}" class="danger" ${actionDisabled}>Reject</button></div>` : '';
       const journalActions = a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${pendingActions}</div>` : '';
-      const normalActions = !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
+      const normalActions = a.reviewAction ? `<button type="button" class="secondary tiny-btn" data-inspect-request="${a.id}">View Change</button>${pendingActions}` : !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
       // View removed: the open account's own headings are shown inline below instead of a separate modal.
       const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
         ? approvalAccountHeadingsInline(a)
         : approvalDetails(a);
-      return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${journalActions}${normalActions}</td></tr>`;
+      return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${a.reviewAction ? escapeHtml(a.reviewAction.toUpperCase()) + ' — ' + prettyApprovalType(a.reviewOriginalType) : prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${journalActions}${normalActions}</td></tr>`;
     }).join('');
     state.ui.codResolutionLimit ||= 10;
     const codRows=(state.cod||[]).filter(c=>{
@@ -4783,16 +4852,14 @@ function hideProcessing() {
         : (recomputedVariance > 0 ? `<span class="badge">Variance</span>` : `<span class="badge balanced">Balanced</span>`);
       return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.staffName || '')}</td><td>${money(formAmount)}</td><td>${money(creditCash + creditTransfer)}</td><td>${money(debitCash + debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${escapeHtml(c.resolutionNote || c.note || '—')}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
     }).join('');
-    const selected = state.ui.codAdminDate;
-    const codStatusRows = state.staff.filter(s => (staffPermsOf(s)).includes('credit') || (staffPermsOf(s)).includes('debit') || (state.cod||[]).some(c=>c.staffId===s.id && c.date===selected)).map((s,i)=>{ const rec=(state.cod||[]).find(c=>c.staffId===s.id && c.date===selected); const status=rec?(rec.status==='resolved'?'Resolved':rec.status==='flagged'?'Anomaly':'Submitted'):'Missing'; const opBalance = rec ? Number(rec.formAmount ?? rec.openingBalance ?? getStaffOperationalBalance(rec.staffId)) : null; const remaining = rec ? Number(rec.remainingBalance ?? rec.runningFloat ?? 0) : null; return `<tr><td>${i+1}</td><td>${escapeHtml(s.name || '')}</td><td>${staffRoleLabels(s)}</td><td>${status}</td><td>${rec?money(opBalance):'—'}</td><td>${rec?money(remaining):'—'}</td></tr>`; }).join('');
     const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
     const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}${subTool ? '' : `<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Administration']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div>`}<div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>${subTool ? escapeHtml(subTool.label) : 'Approval Queue'}</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div>${canCloseBusinessDay()?`<div class="table-card"><h3>COD Daily Submission Status</h3><div class="action-inline"><div class="inline-field compact"><span>COD Date</span><input type="date" lang="en-GB" id="codAdminDate" value="${selected}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Staff</th><th>Office</th><th>Status</th><th>Form</th><th>Remaining Balance</th></tr></thead><tbody>${codStatusRows}</tbody></table></div></div>`:''}</div>`;
+    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}${subTool ? '' : `<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Administration']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div>`}<div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>${subTool ? escapeHtml(subTool.label) : 'Approval Queue'}</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div></div>`;
   }
 
   function renderApprovalHistory() {
-    const allTypes = ['account_opening','account_maintenance','account_reactivation','cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'];
+    const allTypes = ['work_review_change','account_opening','account_maintenance','account_reactivation','cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'];
     const decided = (state.approvals || [])
       .filter(a => allTypes.includes(a.type) && a.status !== 'pending' && !isApprovalRoutedAway(a))
       .sort((a, b) => new Date(approvalDisplayDate(b) || 0) - new Date(approvalDisplayDate(a) || 0));
@@ -4801,7 +4868,7 @@ function hideProcessing() {
       const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
         ? approvalAccountHeadingsInline(a)
         : approvalDetails(a);
-      return `<tr><td>${i+1}</td><td>${prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${escapeHtml(a.approvedBy || a.approvedByName || '—')}</td></tr>`;
+      return `<tr><td>${i+1}</td><td>${a.reviewAction ? escapeHtml(a.reviewAction.toUpperCase()) + ' — ' + prettyApprovalType(a.reviewOriginalType) : prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${escapeHtml(a.approvedBy || a.approvedByName || '—')}</td></tr>`;
     }).join('');
     const moreLess = `<div class="action-row">${decided.length > limit ? `<button id="approvalHistoryMore" class="secondary">Show More</button>`:''}${limit > 30 ? `<button id="approvalHistoryLess" class="secondary">Show Less</button>`:''}</div>`;
     return `<div class="stack"><div class="table-card"><h3>Approval History</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Decided By</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No decided requests yet</td></tr>'}</tbody></table></div>${moreLess}</div></div>`;
@@ -4818,6 +4885,7 @@ function hideProcessing() {
     return `${escapeHtml(name)} • ${roleLabel || 'Staff'}${routedNote}`;
   }
   function approvalDetails(a) {
+    if (a.reviewAction) return `${escapeHtml(a.reviewAction)} • ${escapeHtml(a.payload?.__review?.reason || '')} • Original ${escapeHtml(a.reviewSourceId)}`;
     const p = a.payload || {};
     if (a.type === 'customer_credit') return `${money(p.amount)} to ${escapeHtml(customerName(p.customerId) || p.accountNumber || '')}${chargeSummaryText(p)}${p.details ? ' • ' + escapeHtml(p.details) : ''}`;
     if (a.type === 'customer_debit') return `${money(p.amount)} from ${escapeHtml(customerName(p.customerId) || p.accountNumber || '')}${p.details ? ' • ' + escapeHtml(p.details) : ''}`;
@@ -4882,6 +4950,7 @@ function hideProcessing() {
   }
 
   function prettyApprovalType(type) {
+    if (type === 'work_review_change') return 'Work Review Change';
     return {
       account_opening:'Account Opening', account_maintenance:'Account Maintenance', account_reactivation:'Account Reactivation', account_block:'Account Block', account_closure:'Account Closure',
       customer_credit:'Credit', customer_debit:'Debit', customer_credit_journal:'Credit Journal', customer_debit_journal:'Debit Journal', cash_receipt:'Cash Receipt', inter_staff_credit:'Staff Account Credit', intra_bank_transfer:'Non Cash Transaction', float_topup:'Float Top-Up', operational_entry:'Operational Entry',
@@ -4915,7 +4984,7 @@ function hideProcessing() {
     return Number.isFinite(num) ? num : 0;
   }
 
-  async function openRequestDetailModal(reqId) {
+  async function openRequestDetailModal(reqId, { readOnly = false } = {}) {
   let req = state.approvals.find(r => r.id === reqId);
   if (!req) return;
 
@@ -5077,7 +5146,7 @@ function hideProcessing() {
 
   const actions = [{ label: 'Close', className: 'secondary', onClick: closeModal }];
 
-  if (req.status === 'pending') {
+  if (!readOnly && req.status === 'pending') {
     actions.unshift({
       label: 'Reject',
       className: 'danger',
@@ -5286,7 +5355,7 @@ function nextPaint() {
         <div class="table-card">
           <div class="action-inline"><h3 style="margin:0">All Customers' Balance</h3></div>
           <div class="form-grid one" style="margin-top:12px">
-            <div class="field"><label>Search Customer</label><input id="customerDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.customerDirectorySearch || '')}"></div>
+            <div class="field"><label>Search Account</label><input id="customerDirectorySearch" class="entry-input" value="${escapeHtml(state.ui.customerDirectorySearch || '')}"></div>
           </div>
           <div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${bodyRows || '<tr><td colspan="9">No matching customers</td></tr>'}${filteredCustomers.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td><td colspan="3"></td></tr>` : ''}</tbody></table></div>
           <div class="action-row" style="margin-top:14px"><button id="customerDirectoryCloseBtn" class="secondary">Collapse Directory</button></div>
@@ -5411,14 +5480,13 @@ function nextPaint() {
   }
 
   function periodAccountsTable(title, accounts, r, opts = {}) {
-    let tO = 0, tD = 0, tC = 0, tB = 0;
+    let credit = 0, balance = 0;
     const rows = accounts.map((a, i) => {
-      const fig = opts.figures ? opts.figures(a) : periodFigures(a.balance, txItems(a), r);
-      tO += fig.opening; tD += fig.debit; tC += fig.credit; tB += fig.closing;
-      return `<tr><td>${i+1}</td><td>${escapeHtml(a.name || '—')}</td><td>${escapeHtml(String(a.accountNumber || '—'))}</td><td>${money(fig.opening)}</td><td>${money(fig.debit)}</td><td>${money(fig.credit)}</td><td class="${fig.closing<0?'balance-negative':''}">${money(fig.closing)}</td></tr>`;
+      const f = opts.figures ? opts.figures(a) : periodFigures(a.balance, txItems(a), r);
+      credit += f.credit; balance += f.closing;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(a.accountNumber || '—')}</td><td>${escapeHtml(a.name || '—')}</td><td>${money(f.credit)}</td><td class="${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td></tr>`;
     }).join('');
-    const total = accounts.length ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(tO)}</strong></td><td><strong>${money(tD)}</strong></td><td><strong>${money(tC)}</strong></td><td><strong>${money(tB)}</strong></td></tr>` : '';
-    return `<div class="table-card"><h3>${escapeHtml(title)}</h3>${opts.extra || ''}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Name</th><th>Account Number</th><th>Opening Balance</th><th>Total Debit</th><th>Total Credit</th><th>Closing Balance</th></tr></thead><tbody>${rows || `<tr><td colspan="7">${opts.empty || 'No accounts found'}</td></tr>`}${total}</tbody></table></div></div>`;
+    return `<div class="table-card"><h3>${escapeHtml(title)}</h3>${opts.extra || ''}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Number</th><th>Details</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows || `<tr><td colspan="5">${opts.empty || 'No accounts found'}</td></tr>`}${accounts.length ? `<tr class="total-row"><td colspan="3">Total</td><td>${money(credit)}</td><td>${money(balance)}</td></tr>` : ''}</tbody></table></div></div>`;
   }
 
   // Teller figures are rebuilt from approved requests up to a date, using the
@@ -5437,7 +5505,7 @@ function nextPaint() {
   function tellerFigures(staffId, r) {
     const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(staffId)) : 0;
     const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(staffId));
-    const mine = (state.approvals || []).filter(a => a.status === 'approved' && a.payload?.staffId === staffId && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
+    const mine = postingApprovals().filter(a => a.status === 'approved' && a.payload?.staffId === staffId && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
     const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
     const credit = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
     const debit = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
@@ -5461,8 +5529,8 @@ function nextPaint() {
         ['Treasury Balance', sumGroup(accountsInSegment('treasury'), txItems, c => c.balance)],
       ];
       const g = cats.reduce((t, [, f]) => ({ opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { opening: 0, debit: 0, credit: 0, closing: 0 });
-      const rows = cats.map(([n, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(n)}</td><td>${money(f.opening)}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`).join('');
-      return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">The company's entire truth — every balance category rolled up into one business total, for the selected period.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Opening Balance</th><th>Total Debit</th><th>Total Credit</th><th>Closing Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(g.opening)}</strong></td><td><strong>${money(g.debit)}</strong></td><td><strong>${money(g.credit)}</strong></td><td><strong>${money(g.closing)}</strong></td></tr></tbody></table></div></div></div>`;
+      const rows = cats.map(([n, f], i) => `<tr><td>${i+1}</td><td>—</td><td>${escapeHtml(n)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`).join('');
+      return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">The company's entire truth — every balance category rolled up into one business total, for the selected period.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Number</th><th>Details</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="3"><strong>Overall Balance of the Business</strong></td><td><strong>${money(g.credit)}</strong></td><td><strong>${money(g.closing)}</strong></td></tr></tbody></table></div></div></div>`;
     }
     const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
     const opFigSeg = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
@@ -5485,8 +5553,8 @@ function nextPaint() {
       const figOf = (list, fn) => list.reduce((t, a) => { const f = fn ? fn(a) : periodFigures(a.balance, txItems(a), r); return { opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
       const totals = segs.map(([n, list, fn]) => [n, list.length, figOf(list, fn)]);
       const grand = totals.reduce((t, [, c, f]) => ({ count: t.count + c, opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { count: 0, opening: 0, debit: 0, credit: 0, closing: 0 });
-      const sumRows = totals.map(([n, c, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(n)}</td><td>${c}</td><td>${money(f.opening)}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td class="${f.closing<0?'balance-negative':''}">${money(f.closing)}</td></tr>`).join('');
-      const summary = `<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">Every account in its own segment, each with its own total, and all of them together below.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Segment</th><th>Accounts</th><th>Opening Balance</th><th>Total Debit</th><th>Total Credit</th><th>Closing Balance</th></tr></thead><tbody>${sumRows}<tr class="total-row"><td colspan="2"><strong>All Accounts</strong></td><td><strong>${grand.count}</strong></td><td><strong>${money(grand.opening)}</strong></td><td><strong>${money(grand.debit)}</strong></td><td><strong>${money(grand.credit)}</strong></td><td><strong>${money(grand.closing)}</strong></td></tr></tbody></table></div></div>`;
+      const sumRows = totals.map(([n, c, f], i) => `<tr><td>${i+1}</td><td>—</td><td>${escapeHtml(n)}</td><td>${money(f.credit)}</td><td class="${f.closing<0?'balance-negative':''}">${money(f.closing)}</td></tr>`).join('');
+      const summary = `<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">Every account in its own segment, each with its own total, and all of them together below.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Number</th><th>Details</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${sumRows}<tr class="total-row"><td colspan="3"><strong>All Accounts</strong></td><td><strong>${money(grand.credit)}</strong></td><td><strong>${money(grand.closing)}</strong></td></tr></tbody></table></div></div>`;
       return `<div class="stack">${head}${summary}${segs.map(([n, list, fn, empty]) => periodAccountsTable(n, list, r, { figures: fn, empty })).join('')}</div>`;
     }
     if (def.report === 'customers' || def.report === 'salary') {
@@ -5499,17 +5567,8 @@ function nextPaint() {
       return `<div class="stack">${head}${periodAccountsTable(def.label, accounts, r, { extra, empty: def.report === 'salary' ? 'No staff salary accounts found' : 'No matching customers' })}</div>`;
     }
     if (def.report === 'tellers') {
-      const rows = (state.staff || []).map(st => {
-        const opAcc = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st.id);
-        const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(st.id)) : 0;
-        const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(st.id));
-        const mine = (state.approvals || []).filter(a => a.status === 'approved' && a.payload?.staffId === st.id && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
-        const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
-        const credits = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
-        const debits = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
-        return `<tr><td>${escapeHtml(st.name || '')}</td><td>${staffRoleLabels(st)}</td><td>${escapeHtml(opAcc?.accountNumber || '—')}</td><td>${money(opening)}</td><td>${money(credits)}</td><td>${money(debits)}</td><td class="${closing<0?'balance-negative':''}">${money(closing)}</td><td><button class="secondary" data-staff-ledger="${st.id}">Ledger</button></td></tr>`;
-      }).join('');
-      return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="table-wrap"><table class="table"><thead><tr><th>Staff</th><th>Office</th><th>Op. Account</th><th>Opening Balance</th><th>Total Credit Received</th><th>Total Debits Paid</th><th>Closing Balance</th><th>Ledger</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No staff</td></tr>'}</tbody></table></div></div></div>`;
+      const tellers = sortAccSeg(accountsInSegment('tellerng').filter(c => staffHasRole(staffById(c.linkedStaffId), 'teller')));
+      return `<div class="stack">${head}${periodAccountsTable(def.label, tellers, r, { figures: c => tellerFigures(c.linkedStaffId, r), empty: 'No teller accounts' })}</div>`;
     }
     // Income & Expense
     const opFig = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
@@ -5563,7 +5622,7 @@ function nextPaint() {
     const selId = state.ui.admSelectedStaffId && staffList.some(s => s.id === state.ui.admSelectedStaffId) ? state.ui.admSelectedStaffId : '';
     const sel = staffList.find(s => s.id === selId);
     const prof = { ...(profileOf(selId) || {}), ...(state.ui.admProfileDraft?.staffId === selId ? state.ui.admProfileDraft.data : {}) };
-    const rows = staffList.map((s, i) => `<tr class="${s.id === selId ? 'adm-selected' : ''}"><td>${i+1}</td><td>${escapeHtml(s.name || '—')}</td><td>${escapeHtml(staffRoleLabels(s))}</td><td>${escapeHtml(profileOf(s.id)?.job_title || '—')}</td><td><code>${escapeHtml(String(s.staffId || s.staffCode || '—'))}</code></td><td>${s.active === false ? 'Blocked' : 'Active'}</td><td><button class="secondary tiny-btn" data-adm-staff="${s.id}">Open</button> <button class="secondary tiny-btn" data-adm-extra-roles="${s.id}">Extra Roles</button></td></tr>`).join('');
+    const rows = staffList.map((s, i) => `<tr class="${s.id === selId ? 'adm-selected' : ''}"><td>${i+1}</td><td>${escapeHtml(s.name || '—')}</td><td>${escapeHtml(staffRoleLabels(s))}</td><td>${escapeHtml(profileOf(s.id)?.job_title || '—')}</td><td><code>${escapeHtml(String(s.staffId || s.staffCode || '—'))}</code></td><td>${s.active === false ? 'Blocked' : 'Active'}</td><td><button class="secondary tiny-btn" data-staff-work-review="${s.id}">Work Review</button> <button class="secondary tiny-btn" data-adm-staff="${s.id}">Open</button> <button class="secondary tiny-btn" data-adm-extra-roles="${s.id}">Extra Roles</button></td></tr>`).join('');
     const opAcc = sel ? staffOperationalAccountNumber(sel.id) : '';
     const fieldHtml = ([key, label, kind]) => {
       const v = escapeHtml(String(prof[key] || ''));
@@ -5620,7 +5679,7 @@ function nextPaint() {
   function tellerPeriodRow(st, r) {
     const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(st.id)) : 0;
     const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(st.id));
-    const mine = (state.approvals || []).filter(a => a.status === 'approved' && a.payload?.staffId === st.id && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
+    const mine = postingApprovals().filter(a => a.status === 'approved' && a.payload?.staffId === st.id && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
     const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
     const received = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
     const withdrawn = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
@@ -5748,6 +5807,11 @@ function nextPaint() {
       if (!adminSessionLoaded.profiles) { loadStaffProfiles(); }
       bindStaffDirectory();
       qq('[data-adm-extra-roles]').forEach(btn => btn.onclick = () => openExtraRolesModal(btn.dataset.admExtraRoles));
+      qq('[data-staff-work-review]').forEach(btn => btn.onclick = () => {
+        if (!isAdminStaff()) return;
+        state.ui.reviewStaffId = btn.dataset.staffWorkReview;
+        state.ui.tool = reviewToolFor(staffById(state.ui.reviewStaffId)); save(); renderWorkspace();
+      });
       qq('[data-adm-staff]').forEach(btn => btn.onclick = async () => {
         state.ui.admSelectedStaffId = btn.dataset.admStaff; state.ui.admProfileDraft = null; save(); renderWorkspace();
         requestAnimationFrame(() => q('.adm-staff-layout .cs2-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -6195,6 +6259,10 @@ function staffLedgerEvents(staffId) {
         event.postedBy = event.postedBy || ctxReq.requestedByName || staffName(ctxReq.requestedBy) || '';
         event.approvedBy = event.approvedBy || ctxReq.approvedBy || ctxReq.approvedByName || '';
       }
+      if (!ctxReq) {
+        const source = (acc.entries || []).find(entry => entry.id === key);
+        if (source) { event.postedBy ||= source.postedBy || ''; event.approvedBy ||= source.approvedBy || ''; event.receivedOrPaidBy ||= source.receivedOrPaidBy || ''; }
+      }
       seen.add(key);
       events.push(event);
     };
@@ -6213,7 +6281,7 @@ function staffLedgerEvents(staffId) {
       else if (['customer_debit_journal'].includes(type)) addEvent({ key: entry.id || `debit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Debit journal form', runningType: 'debit' });
       else if (['debt_repayment','wallet_fund','wallet_funding'].includes(type)) addEvent({ key: entry.id || `${type}-${date}-${amount}`, date, type: type === 'debt_repayment' ? 'Debt Repayment' : 'Wallet', amount, delta: 0, details: entry.note || type.replace(/_/g,' '), runningType: 'other' });
     });
-    (state.approvals || []).filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
+    postingApprovals().filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
       const payload = req.payload || {};
       ctxReq = req;
       const date = payload.date || payload.float_date || String(req.approvedAt || req.requestedAt || '').slice(0,10) || businessDate();
@@ -6441,9 +6509,9 @@ function staffLedgerEvents(staffId) {
   }
 
   // ===== 2026-11-09 (client): Work / Tellerng / Approval / Treasury Review =====
-  // A personal activity log: each person sees ONLY what they did themselves,
+  // Role work review: each person sees their submitted work or decisions,
   // for one day (date picker) or for a past range (From / To). Read-only —
-  // it reads the same requests, close-of-day records and audit trail the rest
+  // it reads the same cached requests the rest
   // of the app already keeps, and changes nothing.
   const STAFF_REVIEW_DEFS = {
     work_review:     { title: 'Work Review',     mode: 'submitted', cod: false },
@@ -6451,6 +6519,13 @@ function staffLedgerEvents(staffId) {
     treasury_review: { title: 'Treasury Review', mode: 'submitted', cod: true },
     approval_review: { title: 'Approval Review', mode: 'decided',   cod: false }
   };
+  function reviewToolFor(st) {
+    if (staffHasRole(st, 'customer_service')) return 'work_review';
+    if (staffHasRole(st, 'teller')) return 'teller_review';
+    if (staffHasRole(st, 'cash_officer')) return 'treasury_review';
+    if (staffHasRole(st, 'approving_officer')) return 'approval_review';
+    return 'work_review';
+  }
   function reviewFilterFor(tool) {
     state.ui.reviewFilters ||= {};
     return (state.ui.reviewFilters[tool] ||= { mode: 'today', date: '', from: '', to: '' });
@@ -6465,39 +6540,86 @@ function staffLedgerEvents(staffId) {
     const backendId = getStaffBackendId(st);
     const isMe = (id) => !!id && (id === st.id || id === backendId);
     const rows = [];
-    const reqDetail = (r) => {
-      try {
-        return ['account_opening','account_maintenance','account_reactivation'].includes(r.type) ? approvalAccountHeadingsInline(r) : approvalDetails(r);
-      } catch (_e) { return '—'; }
-    };
     const reqAmount = (r) => { const p = r.payload || {}; return Number(p.amount || p.formAmount || 0); };
     (state.approvals || []).forEach(r => {
       if (def.mode === 'submitted') {
         const mine = isMe(r.requestedBy) || isMe(r.requestedByStaffId) || (!r.requestedBy && r.requestedByName && r.requestedByName === st.name);
         if (!mine) return;
         const at = r.requestedAt || '';
-        rows.push({ at, date: dateOnly(at), activity: prettyApprovalType(r.type), details: reqDetail(r), amount: reqAmount(r), status: r.status || 'pending', other: r.status === 'pending' ? '—' : (r.approvedBy || r.approvedByName || '—') });
+        rows.push({ request: r, at, date: dateOnly(at), activity: prettyApprovalType(r.type),  amount: reqAmount(r), status: r.status || 'pending', other: r.status === 'pending' ? '—' : (r.approvedBy || r.approvedByName || '—') });
       } else {
         if (!['approved', 'rejected'].includes(String(r.status || ''))) return;
         const mine = (r.approvedBy && r.approvedBy === st.name) || isMe(r.approvedByStaffId);
         if (!mine) return;
         const at = r.approvedAt || r.requestedAt || '';
-        rows.push({ at, date: dateOnly(at), activity: prettyApprovalType(r.type), details: reqDetail(r), amount: reqAmount(r), status: r.status, other: r.requestedByName || staffName(r.requestedBy) || '—' });
+        rows.push({ request: r, at, date: dateOnly(at), activity: prettyApprovalType(r.type),  amount: reqAmount(r), status: r.status, other: r.requestedByName || staffName(r.requestedBy) || '—' });
       }
-    });
-    if (def.cod) {
-      (state.cod || []).filter(c => isMe(c.staffId)).forEach(c => {
-        const at = c.submittedAt || c.resolvedAt || c.createdAt || '';
-        rows.push({ at: at || `${c.date}T23:59:00`, date: String(c.date || dateOnly(at) || '').slice(0, 10), activity: 'Close of Day', details: `Remaining ${money(c.remainingBalance ?? c.runningFloat ?? 0)} • Variance ${money(c.variance || 0)}`, amount: Number(c.remainingBalance ?? c.runningFloat ?? c.actualCash ?? 0), status: String(c.status || 'submitted').toLowerCase(), other: '—' });
-      });
-    }
-    (state.audit || []).filter(a => isMe(a.actorId) && !['request_created', 'request_approved', 'request_rejected'].includes(a.action)).forEach(a => {
-      rows.push({ at: a.at || '', date: dateOnly(a.at), activity: String(a.action || 'activity').replace(/_/g, ' ').replace(/^./, ch => ch.toUpperCase()), details: escapeHtml(String(a.details || '').replace(/<[^>]*>/g, '')) || '—', amount: 0, status: 'done', other: '—' });
     });
     return rows.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
   }
-  function renderStaffReview(tool) {
+  function canChangeReviewWork(req) {
     const st = currentStaff();
+    return !!st && (isAdminStaff(st) || [st.id, getStaffBackendId(st)].includes(req.requestedByStaffId || req.requestedBy)) &&
+      ['pending','approved'].includes(req.status) && !req.payload?.__reviewResolved && (!req.reviewAction || req.status === 'pending');
+  }
+
+  async function openWorkReviewAction(requestId, action) {
+    const req = state.approvals.find(r => r.id === requestId);
+    if (!req || !canChangeReviewWork(req)) return showToast('Only your own pending or approved work can be changed.');
+    if (!gateway.approvals?.getWorkReviewContext) return showToast('Sign in online to edit or reverse work.');
+    showProcessing('Loading work record…');
+    let result;
+    try { result = await withRequestTimeout(gateway.approvals.getWorkReviewContext(requestId)); }
+    catch (e) { result = defaultResultErr('LOAD_FAILED', e.message); }
+    finally { hideProcessing(); }
+    if (!result?.ok) return showToast(result?.error?.message || 'Could not load this work.');
+    const context = result.data, p = context.payload || {};
+    const customerWork = ['account_opening','account_maintenance'].includes(context.type);
+    const c = state.customers.find(c => c.id === p.customerId || String(c.accountNumber) === String(p.generatedAccountNumber || p.accountNumber)) || {};
+    const values = customerWork ? { ...c, ...p, ...(p.patch || p.updates || {}), ...(context.customer || {}) } : p;
+    const fields = customerWork ? [['name','Account Name'],['address','Address'],['phone','Phone'],['nin','NIN'],['bvn','BVN']] :
+      (context.type.endsWith('_journal') ? [['formAmount','Journal Value'],['journalDate','Journal Date'],['description','Description'],['counterparty','Received/Paid By']] : ( ['cash_receipt','inter_staff_credit','operational_entry'].includes(context.type) ? [['amount','Amount'],['note','Description']] : [['amount','Amount'],['details','Description'],['receivedOrPaidBy','Received/Paid By']]));
+    const form = action === 'edit' ? fields.map(([key,label]) => `<label class="field"><span>${label}</span><input class="entry-input" data-review-field="${key}" type="${key === 'journalDate' ? 'date' : 'text'}" ${['amount','formAmount'].includes(key) ? 'inputmode="decimal"' : ''} value="${escapeHtml(String(values[key] ?? ''))}"></label>`).join('') : '';
+    const rows = action === 'edit' && Array.isArray(p.rows) ? `<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account</th><th>Amount</th><th>Description</th></tr></thead><tbody>${p.rows.map((row,i) => `<tr><td>${i+1}</td><td>${escapeHtml(row.accountNumber || '')} ${escapeHtml(row.customerName || '')}</td><td><input class="entry-input" data-review-row-amount="${i}" value="${escapeHtml(String(row.amount || ''))}" inputmode="decimal"></td><td><input class="entry-input" data-review-row-details="${i}" value="${escapeHtml(row.details || '')}"></td></tr>`).join('')}</tbody></table></div>` : '';
+    const approved = context.status === 'approved';
+    const explanation = approved ? 'This change will be sent for approval. The original record stays in the history. Posted reversals use opposite entries; edited postings reverse and replace the original together.' : action === 'reverse' ? 'This withdraws the pending request. It has not posted any money.' : 'This updates the pending request and leaves it awaiting approval.';
+    let submitting = false;
+    openModal(`${action === 'edit' ? 'Edit' : 'Reverse'} Work`, `<div class="stack"><div class="note">${explanation}</div><div class="form-grid two">${form}</div>${rows}<label class="field"><span>Reason</span><textarea id="reviewActionReason" class="entry-input" maxlength="500"></textarea></label></div>`, [
+      { label:'Cancel', className:'secondary', onClick:closeModal },
+      { label:approved ? 'Send for Approval' : action === 'reverse' ? 'Withdraw Request' : 'Save Changes', className:action === 'reverse' ? 'danger' : 'success', onClick:async () => {
+        if (submitting) return;
+        const reason = byId('reviewActionReason')?.value.trim();
+        if (!reason || reason.length < 3) return showToast('Enter a reason for the change.');
+        const patch = {};
+        if (action === 'edit') {
+          for (const input of qq('[data-review-field]')) {
+            const key = input.dataset.reviewField;
+            const value = ['amount','formAmount'].includes(key) ? Number(input.value.replace(/,/g,'')) : input.value.trim();
+            if (['amount','formAmount'].includes(key) && (!Number.isFinite(value) || value <= 0)) return showToast('Enter an amount greater than zero.');
+            if (key === 'journalDate' && validateJournalDate(value)) return showToast(validateJournalDate(value));
+            patch[key] = value;
+          }
+          if (Array.isArray(p.rows)) {
+            patch.rows = p.rows.map((row,i) => ({ amount:Number(q(`[data-review-row-amount="${i}"]`)?.value.replace(/,/g,'')), details:q(`[data-review-row-details="${i}"]`)?.value.trim() || '' }));
+            if (patch.rows.some(r => !Number.isFinite(r.amount) || r.amount <= 0)) return showToast('Every journal row needs an amount greater than zero.');
+          }
+        }
+        if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
+        submitting = true; showProcessing('Saving work change…');
+        try {
+          const saved = await withRequestTimeout(gateway.approvals.submitWorkReviewAction({requestId,action,patch,reason,version:context.version,date:businessDate()}));
+          if (!saved?.ok) return showToast(saved?.error?.message || 'Could not save this change.');
+          await syncApprovalsByIdFromGateway([requestId,saved.data?.id].filter(Boolean));
+          closeModal(); renderWorkspace(); showToast(approved ? 'Change sent for approval.' : action === 'reverse' ? 'Pending request withdrawn.' : 'Pending request updated.');
+        } catch(e) { showToast(e.message || 'Could not save this change.'); }
+        finally { submitting = false; hideProcessing(); }
+      }}
+    ]);
+  }
+
+  function renderStaffReview(tool) {
+    const viewer = currentStaff();
+    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? staffById(state.ui.reviewStaffId) : viewer;
     const def = STAFF_REVIEW_DEFS[tool];
     if (!st || !def) return `<div class="form-card"><div class="note">No staff session found.</div></div>`;
     const f = reviewFilterFor(tool);
@@ -6507,18 +6629,52 @@ function staffLedgerEvents(staffId) {
     const count = (k) => inRange.filter(r => r.status === k).length;
     const value = inRange.filter(r => r.status === 'approved').reduce((t, r) => t + r.amount, 0);
     const decided = def.mode === 'decided';
-    const body = inRange.map((r, i) => `<tr><td>${i + 1}</td><td>${r.date ? fmtDate(`${r.date}T12:00:00.000Z`) : '—'}</td><td>${r.at ? TIME_FMT.format(new Date(r.at)) : '—'}</td><td>${escapeHtml(r.activity)}</td><td>${r.details || '—'}</td><td>${r.amount ? money(r.amount) : ''}</td><td><span class="badge ${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td><td>${escapeHtml(r.other)}</td></tr>`).join('');
+    const groups = new Map();
+    inRange.forEach(row => {
+      const type = row.request.reviewOriginalType || row.request.type;
+      if (!groups.has(type)) groups.set(type, []);
+      groups.get(type).push(row);
+    });
+    const body = [...groups].map(([type, items]) => {
+      const customerWork = ['account_opening', 'account_maintenance', 'account_reactivation', 'account_block', 'account_closure'].includes(type);
+      const rows = items.map((r, i) => {
+        const req = r.request, p = req.payload || {};
+        let entries = Array.isArray(p.rows) && p.rows.length ? p.rows : [p];
+        if (type === 'intra_bank_transfer') entries = [
+          { ...p, type: 'debit', customerId: p.fromCustomerId || p.sourceCustomerId, accountNumber: p.fromAccountNumber || p.sourceAccountNumber, customerName: p.fromCustomerName || p.sourceAccountName, receivedOrPaidBy: p.paidBy },
+          { ...p, type: 'credit', customerId: p.toCustomerId || p.destCustomerId, accountNumber: p.toAccountNumber || p.destAccountNumber, customerName: p.toCustomerName || p.destAccountName, details: p.destDetails || p.details, receivedOrPaidBy: p.receivedBy }
+        ];
+        if (type === 'customer_credit_journal' || type === 'customer_debit_journal') {
+          const account = state.customers.find(c => c.accountType === 'staff_operational' && c.linkedStaffId === p.staffId);
+          entries = [{ type: type === 'customer_credit_journal' ? 'debit' : 'credit', accountNumber: account?.accountNumber || p.staffAccountNumber || '—', customerName: p.staffName || req.requestedByName, amount: p.formAmount, details: p.description }, ...entries];
+        }
+        return entries.map((entry, n) => {
+          const c = state.customers.find(c => c.id === (entry.customerId || p.customerId)) || {};
+          const data = { ...c, ...p, ...entry, ...(p.patch || {}) };
+          const approved = req.status === 'approved' ? (req.approvedBy || req.approvedByName || '—') : '—';
+          const changeable = canChangeReviewWork(req);
+          const editable = changeable && (['account_opening','account_maintenance','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','operational_entry'].includes(req.type) || (req.status === 'pending' && ['cash_receipt','inter_staff_credit'].includes(req.type)));
+          const reversible = changeable && (req.status === 'pending' || (['account_opening','account_maintenance','account_reactivation','account_block','account_closure','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','cash_receipt','inter_staff_credit','operational_entry'].includes(req.type) && (req.type !== 'account_maintenance' || req.payload?.__reviewBefore)));
+          const action = `<td><div class="inline-actions"><button class="secondary tiny-btn" data-review-request="${escapeHtml(req.id)}">View</button><button class="secondary tiny-btn" data-review-edit="${escapeHtml(req.id)}" ${editable ? '' : 'disabled title="Use Reverse followed by a new request for this work"'}>Edit</button><button class="danger tiny-btn" data-review-reverse="${escapeHtml(req.id)}" ${reversible ? '' : 'disabled title="Previous values or a supported database posting are required for reversal"'}>Reverse</button></div>${req.reviewAction ? `<span class="note">${escapeHtml(req.reviewAction)} ${req.status === 'approved' ? 'approved' : 'requested'}</span>` : ''}${req.payload?.__reviewResolved ? '<span class="note">Correction completed</span>' : ''}</td>`;
+          if (customerWork) return `<tr><td>${n ? '' : i+1}</td><td>${escapeHtml(data.accountNumber || data.generatedAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.fullName || data.name || '—')}</td><td>${escapeHtml(data.address || '—')}</td><td>${escapeHtml(data.phone || '—')}</td><td>${escapeHtml(data.nin || '—')}</td><td>${escapeHtml(data.bvn || '—')}</td><td>${escapeHtml(approved)}</td><td>${escapeHtml(r.status)}</td>${action}</tr>`;
+          return `<tr><td>${n ? '' : i+1}</td><td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—')}</td><td>${money(entry.amount || p.formAmount || 0)}</td><td>${escapeHtml(approved)}</td><td>${escapeHtml(r.status)}</td>${action}</tr>`;
+        }).join('');
+      }).join('');
+      const headings = customerWork ? ['S/N','Account Number','Account Name','Address','Phone No.','NIN','BVN','Approved By','Status','Action'] : ['S/N','Transaction Type','Account Number','Account Name','Description','Received/Paid By','Amount','Approved By','Status','Action'];
+      return `<h4>${escapeHtml(prettyApprovalType(type))}</h4><div class="table-wrap"><table class="table"><thead><tr>${headings.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    }).join('');
     const label = f.mode === 'range' ? `${range.from ? fmtDate(`${range.from}T12:00:00.000Z`) : 'Start'} – ${range.to ? fmtDate(`${range.to}T12:00:00.000Z`) : 'Today'}` : fmtDate(`${range.from}T12:00:00.000Z`);
     const showTeller = def.cod || tool === 'teller_review';
     return `
       <div class="stack">
         <div class="form-card">
           <h3>${def.title}</h3>
+          ${isAdminStaff(viewer) ? `<label class="inline-field"><span>Review Staff</span><select id="reviewStaffSelect">${state.staff.map(s => `<option value="${escapeHtml(s.id)}" ${s.id === st.id ? 'selected' : ''}>${escapeHtml(s.name)} — ${escapeHtml(tellerIdLabel(s))}</option>`).join('')}</select></label>` : ''}
           ${showTeller ? tellerBannerHtml(st) : ''}
           <div class="kpi-row wrap">
             <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(st.name || '')}</div></div>
             <div class="kpi"><div class="label">Period</div><div class="number">${label}</div></div>
-            <div class="kpi"><div class="label">${decided ? 'Decisions' : 'Activities'}</div><div class="number">${inRange.length}</div></div>
+            <div class="kpi"><div class="label">${decided ? 'Decisions' : 'Work Items'}</div><div class="number">${inRange.length}</div></div>
             <div class="kpi"><div class="label">Approved</div><div class="number">${count('approved')}</div></div>
             ${decided ? '' : `<div class="kpi"><div class="label">Pending</div><div class="number">${count('pending')}</div></div>`}
             <div class="kpi"><div class="label">Rejected</div><div class="number">${count('rejected')}</div></div>
@@ -6531,11 +6687,17 @@ function staffLedgerEvents(staffId) {
             <label class="inline-field"><span>To</span><input id="reviewTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label>
             <button class="filter-chip ${f.mode === 'range' ? 'active' : 'secondary'}" id="reviewApplyRange">Apply Range</button>
           </div>
-          <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>S/N</th><th>Date</th><th>Time</th><th>Activity</th><th>Details</th><th>Amount</th><th>Status</th><th>${decided ? 'Submitted By' : 'Decided By'}</th></tr></thead><tbody>${body || '<tr><td colspan="8" class="muted">No activity in this period</td></tr>'}</tbody></table></div>
+          ${body || '<div class="note">No work in this period</div>'}
         </div>
       </div>`;
   }
   function bindStaffReview() {
+    if (byId('reviewStaffSelect') && isAdminStaff()) byId('reviewStaffSelect').onchange = e => {
+      state.ui.reviewStaffId = e.target.value; state.ui.tool = reviewToolFor(staffById(e.target.value)); save(); renderWorkspace();
+    };
+    qq('[data-review-request]').forEach(btn => btn.onclick = () => openRequestDetailModal(btn.dataset.reviewRequest, { readOnly: true }));
+    qq('[data-review-edit]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewEdit, 'edit'));
+    qq('[data-review-reverse]').forEach(btn => btn.onclick = () => openWorkReviewAction(btn.dataset.reviewReverse, 'reverse'));
     const tool = state.ui.tool;
     const f = reviewFilterFor(tool);
     const todayBtn = byId('reviewToday');
@@ -6674,7 +6836,8 @@ function staffLedgerEvents(staffId) {
             // Note: historical rows that already have a nonzero (wrong-
             // signed) delta from before the gateway fix still display with
             // their old stored value — this only affects rows without one.
-            if (['form','credit','debit'].includes(runningType)) running += delta || (runningType === 'debit' ? -amount : amount);
+            if (Number.isFinite(delta) && delta !== 0) running += delta;
+            else if (['form','credit','debit'].includes(runningType)) running += runningType === 'debit' ? -amount : amount;
             return {
               date: String(row.business_date || row.float_date || '').slice(0,10),
               businessDate: row.business_date || row.float_date || null,
@@ -6683,6 +6846,7 @@ function staffLedgerEvents(staffId) {
               type,
               amount,
               runningBalance: running,
+              side: delta ? (/^customer_(credit|debit)/.test(entryType) ? (delta > 0 ? 'debit' : 'credit') : (delta > 0 ? 'credit' : 'debit')) : '',
               details: row.note || '—'
             };
           }).sort((a,b)=> new Date(`${staffLedgerDisplayDate(b)}T12:00:00Z`) - new Date(`${staffLedgerDisplayDate(a)}T12:00:00Z`));
@@ -8113,7 +8277,7 @@ function normalizeStaffLedgerEntryType(row) {
     const cashWithdrawal = approvedDebitTotalForDateByMode(staffId, dateStr, 'cash');
     const till = openingCash + cashReceived - cashWithdrawal;
     const opAccount = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === staffId);
-    const handedOverToday = !!opAccount && (state.approvals || []).some(r =>
+    const handedOverToday = !!opAccount && postingApprovals().some(r =>
       r.status === 'approved' && r.type === 'inter_staff_credit' &&
       r.payload?.sourceAccountId === opAccount.id && r.payload?.date === dateStr);
     if (handedOverToday && Math.abs(till) < 0.01) return { openingCash: 0, cashReceived: 0, cashWithdrawal: 0, till: 0 };
@@ -8157,7 +8321,7 @@ function normalizeStaffLedgerEntryType(row) {
       c.accountType === 'staff_operational' && c.linkedStaffId === staffId
     );
     if (!opAccount) return { cash: 0, postingCash: 0, variance: 0 };
-    const cash = (state.approvals || [])
+    const cash = postingApprovals()
       .filter(r => r.status === 'approved' &&
         (r.type === 'cash_receipt' || r.type === 'inter_staff_credit') &&
         (r.payload?.operationalAccountId === opAccount.id || r.payload?.targetAccountId === opAccount.id))
@@ -8173,10 +8337,10 @@ function normalizeStaffLedgerEntryType(row) {
       // matches when the SOURCE is itself a staff account (Admin Injection
       // and Debit-an-Account sources are never a staff_operational
       // account, so this never double-subtracts a customer-sourced credit).
-      - (state.approvals || [])
+      - postingApprovals()
         .filter(r => r.status === 'approved' && r.type === 'inter_staff_credit' && r.payload?.sourceAccountId === opAccount.id)
         .reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
-    const postingCash = (state.approvals || [])
+    const postingCash = postingApprovals()
       .filter(r => r.status === 'approved' && r.payload?.staffId === staffId &&
         ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type) &&
         (!excludeDateStr || r.payload?.date !== excludeDateStr))
@@ -8204,7 +8368,7 @@ function normalizeStaffLedgerEntryType(row) {
   // getStaffOperationalBreakdown above — posts nothing, so it cannot
   // affect Business Balance/Overall Balance.
   function getCollectorTotal(staffId, filter) {
-    const approved = (state.approvals || []).filter(r =>
+    const approved = postingApprovals().filter(r =>
       r.status === 'approved' && (
         (r.type === 'cash_receipt' && r.payload?.receivedFromId === staffId) ||
         (r.type === 'inter_staff_credit' && r.payload?.collectorId === staffId)
@@ -8846,7 +9010,7 @@ function normalizeStaffLedgerEntryType(row) {
         const shortfall = journalDebitShortfall([{ customerId: resolvedCustomer.id, amount }, ...journal]);
         if (shortfall) return showToast(shortfall);
       }
-      journal.unshift({
+      journal.push({
         id: uid('jr'),
         customerId: resolvedCustomer.id,
         customerName: resolvedCustomer.name,
@@ -9871,9 +10035,15 @@ function normalizeStaffLedgerEntryType(row) {
   function customerStatusLabel(c){ if(!c) return '—'; if (c.closed) return 'Closed'; return (!c.active || isCustomerFrozen(c)) ? 'Frozen' : 'Active'; }
   function freezeInactiveCustomer(c){ if(!c) return; if(c.active === false) c.frozen = true; }
 
+  function sortedSearchAccounts(list) {
+    const order = { customer: 0, staff_salary: 1, staff: 1, staff_wallet: 1, staff_operational: 2, income: 3, expense: 4, treasury: 5 };
+    return [...list].sort((a, b) => (order[a.accountType || 'customer'] ?? 6) - (order[b.accountType || 'customer'] ?? 6) || String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
+  }
+
   function openCustomerSearchModal(list) {
+    list = sortedSearchAccounts(list);
     const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick="${c.id}">${escapeHtml(c.name || '')}</button>${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    openModal('Account Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const pickCustomer = (id) => { state.ui.selectedCustomerId = id; save(); closeModal(); applySelectedCustomerToActiveTool(); };
     const bindPicks = () => {
       qq('[data-pick]').forEach(el => el.onclick = (event) => { event.stopPropagation(); pickCustomer(el.dataset.pick); });
@@ -9890,8 +10060,9 @@ function normalizeStaffLedgerEntryType(row) {
 
 
   function openJournalCustomerSearchModal(list) {
+    list = sortedSearchAccounts(list);
     const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-journal-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick-journal="${c.id}">${escapeHtml(c.name || '')}</button></td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick-journal="${c.id}">Select</button></td></tr>`).join('');
-    openModal('Customer Search', `<div class="stack customer-search-modal"><input id="modalJournalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalJournalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
+    openModal('Account Search', `<div class="stack customer-search-modal"><input id="modalJournalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalJournalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const pickJournalCustomer = (id) => {
       const c = state.customers.find(x => x.id === id);
       if (!c) return showToast('Customer not found');
@@ -10031,23 +10202,23 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   }
 
   function approvedCreditTotalForDateByMode(staffId, dateStr, mode) {
-    return (state.approvals||[])
+    return postingApprovals()
       .filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedDebitTotalForDateByMode(staffId, dateStr, mode) {
-    return (state.approvals||[])
+    return postingApprovals()
       .filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedCreditTotalForDate(staffId, dateStr) {
-    return (state.approvals||[]).filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_credit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
+    return postingApprovals().filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_credit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }
 
   function approvedDebitTotalForDate(staffId, dateStr) {
-    return (state.approvals||[]).filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_debit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
+    return postingApprovals().filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_debit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }
 
   function pendingPostedFloatImpactForDate(staffId, dateStr) {
