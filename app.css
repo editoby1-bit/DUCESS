@@ -13477,3 +13477,8 @@ body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 .teller-id-banner .k { opacity: .7; margin-right: 4px; }
 #txTellerId, #itrTellerId, #itrDestTellerId, #journalRowTellerId, #jpmFundTellerId { white-space: normal; line-height: 1.2; word-break: break-word; }
 .review-business-date { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 10px; }
+
+/* Staff identity stays inside the existing sticky dashboard tools. */
+.dashboard-staff-id { display:flex; flex-direction:column; gap:2px; padding:4px 12px; border-right:1px solid var(--line); }
+.dashboard-staff-id span { font-size:11px; }
+.dashboard-staff-id strong { font-size:14px; overflow-wrap:anywhere; }

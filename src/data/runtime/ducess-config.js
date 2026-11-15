@@ -22,7 +22,7 @@ window.__DUCESS_CONFIG__ = Object.assign(
       customerBalancesSelect: 'account_id, book_balance, updated_at',
 
       customerTransactionsTable: 'customer_transactions',
-      customerTransactionsSelect: 'id, customer_id, tx_type, amount, created_at',
+      customerTransactionsSelect: 'id, customer_id, account_id, tx_type, amount, details, posted_by, posted_by_id, approved_by, counterparty, effective_at, created_at, balance_after',
 
       staffCashLedgerTable: 'staff_cash_ledger',
       staffCashLedgerSelect: 'id, staff_id, entry_type, amount, delta, note, approval_request_id, float_date, created_at',
