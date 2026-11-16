@@ -382,7 +382,8 @@
   // Monthly / Yearly, each listing the same five balance reports. Tool key
   // is balp_<period>_<report>; the report opens on that period, with the
   // usual date buttons + From/To pickers to change it.
-  const BALANCE_PERIODS = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']];
+  // 2026-11-16 (client): only the Daily balances remain; its From/To pickers cover every other period.
+  const BALANCE_PERIODS = [['daily','Daily']];
   const BALANCE_REPORTS = [
     ['customers', 'customer_directory',   "All Customers' Balance"],
     ['salary',    'staff_directory',      'Staff Salary Balance'],
@@ -390,9 +391,9 @@
     ['expense',   'operational_accounts', 'Expense Balance'],
     ['tellers',   'teller_balances',      'Tellerng Balance'],
     ['treasury',  'overall_balance',      'Treasury Balance'],
-    // 2026-11-11 (client): the two roll-ups come last.
-    ['all',       'overall_balance',      'All Accounts'],
-    ['overall',   'overall_balance',      'Overall Balance'],
+    // 2026-11-16 (client): "All Accounts" and "Overall Balance" are merged into one
+    // Consolidated Account (the consolidated trial balance).
+    ['consolidated', 'overall_balance',   'Consolidated Account'],
   ];
   const BALANCE_SUB_TOOLS = {};
   BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
@@ -3404,6 +3405,11 @@ function hideProcessing() {
   }
 
   function renderWorkspace() {
+    if (typeof state.ui.tool === 'string' && /^balp_/.test(state.ui.tool) && !BALANCE_SUB_TOOLS[state.ui.tool]) {
+      const rk = state.ui.tool.split('_')[2];
+      const next = `balp_daily_${rk === 'all' || rk === 'overall' ? 'consolidated' : rk}`;
+      state.ui.tool = BALANCE_SUB_TOOLS[next] ? next : null;
+    }
     const card = q('.workspace-card');
     const module = state.ui.module ? MODULES[state.ui.module] : null;
     if (!module) {
@@ -5472,7 +5478,7 @@ function nextPaint() {
   }
   function balancePeriodRangeOf(f) {
     const ref = dateOnly(businessDate()) || '';
-    const preset = f?.preset || 'daily';
+    const preset = ['weekly', 'monthly', 'yearly'].includes(f?.preset) ? 'daily' : (f?.preset || 'daily');
     if (preset === 'all') return { start: '', end: '', preset };
     if (preset === 'custom') return { start: f.from || '', end: f.to || '', preset };
     if (preset === 'daily') return { start: ref, end: ref, preset };
@@ -5506,19 +5512,23 @@ function nextPaint() {
   function renderPeriodBar() {
     const f = state.ui.balancePeriodFilter || { preset: 'daily', from: '', to: '' };
     const r = balancePeriodRange(f);
-    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly'],['all','All']];
+    const presets = [['daily','Daily'],['all','All']];
     const label = r.preset === 'all' ? 'All dates' : `${r.start ? fmtDate(r.start) : '…'} – ${r.end ? fmtDate(r.end) : '…'}`;
     return `<div class="form-card balance-filters-card"><div class="action-inline balance-filters-row">${presets.map(([k,l]) => `<button class="filter-chip ${f.preset===k?'active':'secondary'}" data-period-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="balPeriodFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label><label class="inline-field"><span>To</span><input id="balPeriodTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label><button id="balPeriodApply" class="secondary">Apply Custom</button></div><div class="note" style="margin-top:6px">Period: <strong>${label}</strong></div></div>`;
   }
 
+  // 2026-11-16 (client): every balance report is drawn like the "Account Balances" sheet:
+  // title bar, S/N | A/C NO | A/C NAME | DESCRIPTION | DR | CR | BALANCE | ACTION (Statement),
+  // and a total row. opts.kind is 'op' for income/expense accounts (otherwise a customer record).
   function periodAccountsTable(title, accounts, r, opts = {}) {
-    let credit = 0, balance = 0;
+    let dr = 0, cr = 0, balance = 0;
+    const kind = opts.kind || 'cust';
     const rows = accounts.map((a, i) => {
       const f = opts.figures ? opts.figures(a) : periodFigures(a.balance, txItems(a), r);
-      credit += f.credit; balance += f.closing;
-      return `<tr><td>${i+1}</td><td>${escapeHtml(a.accountNumber || '—')}</td><td>${escapeHtml(a.name || '—')}</td><td>${money(f.credit)}</td><td class="${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td></tr>`;
+      dr += f.debit; cr += f.credit; balance += f.closing;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(a.accountNumber || '—')}</td><td>${escapeHtml(a.name || '—')}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td><td class="bs-act"><button type="button" class="secondary tiny-btn" data-bs-statement="${kind}:${escapeHtml(a.id)}">Statement</button></td></tr>`;
     }).join('');
-    return `<div class="table-card"><h3>${escapeHtml(title)}</h3>${opts.extra || ''}<div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Number</th><th>Details</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows || `<tr><td colspan="5">${opts.empty || 'No accounts found'}</td></tr>`}${accounts.length ? `<tr class="total-row"><td colspan="3">Total</td><td>${money(credit)}</td><td>${money(balance)}</td></tr>` : ''}</tbody></table></div></div>`;
+    return `<div class="table-card bs-card">${opts.extra || ''}<div class="table-wrap"><table class="table bs-table"><caption class="bs-title">${escapeHtml(title)}</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th><th>Action</th></tr></thead><tbody>${rows || `<tr><td colspan="8">${opts.empty || 'No accounts found'}</td></tr>`}${accounts.length ? `<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(dr)}</td><td class="bs-num">${money(cr)}</td><td class="bs-num">${money(balance)}</td><td></td></tr>` : ''}</tbody></table></div></div>`;
   }
 
   // Teller figures are rebuilt from approved requests up to a date, using the
@@ -5547,7 +5557,7 @@ function nextPaint() {
   function renderPeriodBalance(def) {
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: def.preset });
     const head = renderPeriodBar();
-    if (def.report === 'overall') {
+    if (def.report === 'consolidated' || def.report === 'overall') {
       const sumGroup = (accts, itemsOf, balOf) => accts.reduce((acc, a) => { const f = periodFigures(balOf(a), itemsOf(a), r); acc.opening += f.opening; acc.debit += f.debit; acc.credit += f.credit; acc.closing += f.closing; return acc; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
       const addFig = (x, y) => ({ opening: x.opening + y.opening, debit: x.debit + y.debit, credit: x.credit + y.credit, closing: x.closing + y.closing });
       const staffWallets = sumGroup((state.staff || []).map(st => { const acc = ensureStaffAccount(st.id); return { acc, wallet: (state.customers || []).find(c => c.id === acc.linkedCustomerId) }; }), x => txItems(x.wallet), x => x.acc.balance);
@@ -5561,33 +5571,18 @@ function nextPaint() {
         ['Treasury Balance', sumGroup(accountsInSegment('treasury'), txItems, c => c.balance)],
       ];
       const g = cats.reduce((t, [, f]) => ({ opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { opening: 0, debit: 0, credit: 0, closing: 0 });
-      const rows = cats.map(([n, f], i) => `<tr><td>${i+1}</td><td>—</td><td>${escapeHtml(n)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`).join('');
-      return `<div class="stack">${head}<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">The company's entire truth — every balance category rolled up into one business total, for the selected period.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Number</th><th>Details</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="3"><strong>Overall Balance of the Business</strong></td><td><strong>${money(g.credit)}</strong></td><td><strong>${money(g.closing)}</strong></td></tr></tbody></table></div></div></div>`;
+      const codes = [['1', 'CUSTOMER ACCOUNT'], ['S', 'STAFF ACCOUNT'], ['I', 'INCOME ACCOUNT'], ['E', 'EXPENSES ACCOUNT'], ['T', 'TELLER ACCOUNT'], ['TR', 'TREASURY ACCOUNT']];
+      const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${codes[i][0]}</td><td>${codes[i][1]}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td></tr>`).join('');
+      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.closing)}</td></tr></tbody></table></div></div></div>`;
     }
     const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
     const opFigSeg = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
     if (def.report === 'income' || def.report === 'expense') {
       const isInc = def.report === 'income';
-      return `<div class="stack">${head}${periodAccountsTable(isInc ? 'All Income Balance' : 'All Expense Balance', sortAccSeg(isInc ? state.operations.incomeAccounts : state.operations.expenseAccounts), r, { figures: opFigSeg, empty: isInc ? 'No income accounts' : 'No expense accounts' })}</div>`;
+      return `<div class="stack">${head}${periodAccountsTable(isInc ? 'Income Account' : 'Expenses Account', sortAccSeg(isInc ? state.operations.incomeAccounts : state.operations.expenseAccounts), r, { kind: 'op', figures: opFigSeg, empty: isInc ? 'No income accounts' : 'No expense accounts' })}</div>`;
     }
     if (def.report === 'treasury') {
-      return `<div class="stack">${head}${periodAccountsTable('All Treasury Balance', sortAccSeg(accountsInSegment('treasury')), r, { empty: 'No treasury accounts' })}</div>`;
-    }
-    if (def.report === 'all') {
-      const segs = [
-        ['Customers', sortAccSeg(accountsInSegment('customer')), undefined, 'No customer accounts'],
-        ['Staff', sortAccSeg(accountsInSegment('staff')), undefined, 'No staff accounts'],
-        ['Income', sortAccSeg(state.operations.incomeAccounts), opFigSeg, 'No income accounts'],
-        ['Expenses', sortAccSeg(state.operations.expenseAccounts), opFigSeg, 'No expense accounts'],
-        ['Tellerng', sortAccSeg(accountsInSegment('tellerng')), (c) => tellerFigures(c.linkedStaffId, r), 'No teller accounts'],
-        ['Treasury', sortAccSeg(accountsInSegment('treasury')), undefined, 'No treasury accounts'],
-      ];
-      const figOf = (list, fn) => list.reduce((t, a) => { const f = fn ? fn(a) : periodFigures(a.balance, txItems(a), r); return { opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
-      const totals = segs.map(([n, list, fn]) => [n, list.length, figOf(list, fn)]);
-      const grand = totals.reduce((t, [, c, f]) => ({ count: t.count + c, opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { count: 0, opening: 0, debit: 0, credit: 0, closing: 0 });
-      const sumRows = totals.map(([n, c, f], i) => `<tr><td>${i+1}</td><td>—</td><td>${escapeHtml(n)}</td><td>${money(f.credit)}</td><td class="${f.closing<0?'balance-negative':''}">${money(f.closing)}</td></tr>`).join('');
-      const summary = `<div class="table-card"><h3>${escapeHtml(def.label)}</h3><div class="note">Every account in its own segment, each with its own total, and all of them together below.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Account Number</th><th>Details</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${sumRows}<tr class="total-row"><td colspan="3"><strong>All Accounts</strong></td><td><strong>${money(grand.credit)}</strong></td><td><strong>${money(grand.closing)}</strong></td></tr></tbody></table></div></div>`;
-      return `<div class="stack">${head}${summary}${segs.map(([n, list, fn, empty]) => periodAccountsTable(n, list, r, { figures: fn, empty })).join('')}</div>`;
+      return `<div class="stack">${head}${periodAccountsTable('Treasury Account', sortAccSeg(accountsInSegment('treasury')), r, { empty: 'No treasury accounts' })}</div>`;
     }
     if (def.report === 'customers' || def.report === 'salary') {
       const search = String(state.ui.periodBalanceSearch || '').trim().toLowerCase();
@@ -5596,11 +5591,11 @@ function nextPaint() {
         .filter(c => !search || [c.name, c.accountNumber, c.phone].some(v => String(v || '').toLowerCase().includes(search)))
         .sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
       const extra = `<div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div>`;
-      return `<div class="stack">${head}${periodAccountsTable(def.label, accounts, r, { extra, empty: def.report === 'salary' ? 'No staff salary accounts found' : 'No matching customers' })}</div>`;
+      return `<div class="stack">${head}${periodAccountsTable(def.report === 'salary' ? 'Staff Account' : 'Customers Account', accounts, r, { extra, empty: def.report === 'salary' ? 'No staff salary accounts found' : 'No matching customers' })}</div>`;
     }
     if (def.report === 'tellers') {
       const tellers = sortAccSeg(accountsInSegment('tellerng').filter(c => staffHasRole(staffById(c.linkedStaffId), 'teller')));
-      return `<div class="stack">${head}${periodAccountsTable(def.label, tellers, r, { figures: c => tellerFigures(c.linkedStaffId, r), empty: 'No teller accounts' })}</div>`;
+      return `<div class="stack">${head}${periodAccountsTable('Teller Account', tellers, r, { figures: c => tellerFigures(c.linkedStaffId, r), empty: 'No teller accounts' })}</div>`;
     }
     // Income & Expense
     const opFig = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
@@ -5614,6 +5609,69 @@ function nextPaint() {
     const search = byId('periodBalanceSearch');
     if (search) search.oninput = debounce(() => { state.ui.periodBalanceSearch = search.value; save(); renderWorkspace(); requestAnimationFrame(() => { const el = byId('periodBalanceSearch'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }); }, 300);
     qq('[data-staff-ledger]').forEach(btn => btn.onclick = () => openStaffLedgerModal(btn.dataset.staffLedger));
+    qq('[data-bs-statement]').forEach(btn => btn.onclick = () => {
+      const r0 = balancePeriodRangeOf(state.ui.balancePeriodFilter || { preset: 'daily' });
+      openBalanceStatementModal(btn.dataset.bsStatement, { from: r0.start || '', to: r0.end || '' });
+    });
+  }
+
+  // 2026-11-16 (client): the Statement button on a balance row opens the account's
+  // "Individual Account Statement" - address / gender / name / number / date block, then
+  // S/N, Date, Description, DR, CR, Balance, Received/Paid By, Posted By, Approved By and a TOTAL row.
+  function openBalanceStatementModal(key, range) {
+    const cut = key.indexOf(':');
+    const kind = key.slice(0, cut), id = key.slice(cut + 1);
+    const f = { from: range?.from || '', to: range?.to || '' };
+    const inRange = (d) => { const x = String(d || '').slice(0, 10); return (!f.from || x >= f.from) && (!f.to || x <= f.to); };
+    let acct = null, rows = [], totals = { dr: 0, cr: 0, bal: 0 }, address = '—', gender = '—';
+    const cell = (v) => escapeHtml(v || '—');
+    if (kind === 'op') {
+      acct = [...(state.operations.incomeAccounts || []), ...(state.operations.expenseAccounts || [])].find(a => a.id === id);
+      if (!acct) return showToast('Account not found');
+      const all = (state.operations.entries || []).filter(e => e.accountId === id).sort((x, y) => new Date(x.date) - new Date(y.date));
+      const signed = (e) => (String(e.kind || e.type || '').toLowerCase() === 'income' ? 1 : -1) * Number(e.amount || 0);
+      let run = operationalAccountTotals(acct).balance - all.reduce((t, e) => t + signed(e), 0);
+      const lines = all.map(e => { run += signed(e); return { e, run }; }).filter(x => inRange(x.e.date));
+      rows = lines.map(({ e, run }, i) => { const cr = signed(e) > 0; const amt = Number(e.amount || 0); if (cr) totals.cr += amt; else totals.dr += amt; totals.bal = run;
+        return `<tr><td>${i+1}</td><td>${fmtDate(e.date)}</td><td>${cell(cleanOperationalNote(e.details || e.note))}</td><td class="bs-num">${cr ? '' : money(amt)}</td><td class="bs-num">${cr ? money(amt) : ''}</td><td class="bs-num">${money(run)}</td><td>${cell(e.receivedOrPaidBy)}</td><td>${cell(e.postedBy)}</td><td>${cell(e.approvedBy)}</td></tr>`; }).join('');
+    } else {
+      acct = (state.customers || []).find(c => c.id === id);
+      if (!acct) return showToast('Account not found');
+      address = acct.address || '—'; gender = acct.gender || '—';
+      if (acct.accountType === 'staff_operational' && acct.linkedStaffId) {
+        historyCovers(f.from || null);
+        const events = staffLedgerEvents(acct.linkedStaffId).slice().sort((x, y) => x.seq - y.seq).filter(ev => inRange(ev.date));
+        rows = events.map((ev, i) => { const amt = Number(ev.amount || 0); if (ev.side === 'debit') totals.dr += amt; else if (ev.side === 'credit') totals.cr += amt; totals.bal = Number(ev.runningBalance || 0);
+          return `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td>${tellerStatementCells(ev).replace(/<td/g, '<td class="bs-num"').replace('class="bs-num" class="', 'class="bs-num ')}<td>${cell(ev.receivedOrPaidBy)}</td><td>${cell(ev.postedBy || ev.staffName)}</td><td>${cell(ev.approvedBy)}</td></tr>`; }).join('');
+      } else {
+        customerHistoryCovers(acct);
+        const txs = (acct.transactions || []).filter(tx => inRange(tx.date));
+        rows = txs.map((tx, i) => { const amt = Number(tx.amount || 0); if (tx.type === 'debit') totals.dr += amt; else if (tx.type === 'credit') totals.cr += amt; totals.bal = Number(tx.balanceAfter || 0);
+          return `<tr><td>${i+1}</td><td>${fmtDate(tx.date)}</td><td>${cell(tx.details)}</td><td class="bs-num">${tx.type === 'debit' ? money(amt) : ''}</td><td class="bs-num">${tx.type === 'credit' ? money(amt) : ''}</td><td class="bs-num">${money(tx.balanceAfter)}</td><td>${cell(statementReceivedBy(tx))}</td><td>${cell(tx.postedBy || tx.postedById)}</td><td>${cell(tx.approvedBy)}</td></tr>`; }).join('');
+      }
+    }
+    const today = fmtDate(`${dateOnly(businessDate())}T12:00:00.000Z`);
+    const body = `<div class="action-inline balance-filters-row bs-stmt-filters">
+        <label class="inline-field"><span>From</span><input id="bsFrom" type="date" lang="en-GB" value="${escapeHtml(f.from)}"></label>
+        <label class="inline-field"><span>To</span><input id="bsTo" type="date" lang="en-GB" value="${escapeHtml(f.to)}"></label>
+        <button type="button" class="filter-chip secondary" id="bsApply">Apply</button>
+        <button type="button" class="filter-chip secondary" id="bsAll">All Dates</button>
+        <button type="button" class="filter-chip secondary" id="bsPrint">Print</button>
+      </div>
+      <div id="bsPrintArea" class="bs-stmt">
+        <div class="bs-stmt-title">Individual Account Statement</div>
+        <table class="table bs-stmt-head"><tbody>
+          <tr><th>Address</th><td colspan="3">${cell(address)}</td><th>Gender</th><td>${cell(gender)}</td></tr>
+          <tr><th>A/C Name</th><td colspan="3">${cell(acct.name)}</td><th>A/C No</th><td>${cell(acct.accountNumber)}</td></tr>
+          <tr><th colspan="5">Date</th><td>${today}</td></tr>
+        </tbody></table>
+        <div class="table-wrap bs-wrap"><table class="table bs-table bs-stmt-table"><thead><tr><th>S/N</th><th>Date</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}<tr class="total-row"><td colspan="3">TOTAL</td><td class="bs-num">${money(totals.dr)}</td><td class="bs-num">${money(totals.cr)}</td><td class="bs-num">${money(totals.bal)}</td><td colspan="3"></td></tr></tbody></table></div>
+      </div>`;
+    openModal('Individual Account Statement', body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
+    if (byId('bsApply')) byId('bsApply').onclick = () => openBalanceStatementModal(key, { from: byId('bsFrom')?.value || '', to: byId('bsTo')?.value || '' });
+    if (byId('bsAll')) byId('bsAll').onclick = () => openBalanceStatementModal(key, { from: '', to: '' });
+    if (byId('bsPrint')) byId('bsPrint').onclick = () => printHtml(`<h2>Individual Account Statement</h2>${byId('bsPrintArea')?.innerHTML || ''}`);
   }
 
   // ===== ADMINISTRATION (client sheet "Administrative / Audit & ICT Unit") =====

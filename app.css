@@ -13508,3 +13508,20 @@ body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 .wr-summary { margin-bottom: 6px; }
 .wr-actions .tiny-btn { padding: 2px 6px; font-size: 10px; min-height: 0; }
 .wr-subchips { margin: 10px 0 0; flex-wrap: wrap; }
+
+/* ===== 2026-11-16 (client): Account Balances sheet + Individual Account Statement =====
+   Layout only; every colour comes from the app's own table styles. */
+.bs-table caption.bs-title { caption-side: top; text-align: left; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 2px; }
+.bs-table th, .bs-table td { padding: 3px 6px; font-size: 11px; }
+.bs-table td.bs-num, .bs-table th.bs-num { text-align: right; white-space: nowrap; }
+.bs-table td.bs-act { text-align: center; white-space: nowrap; }
+.bs-table td.bs-act .tiny-btn { padding: 2px 6px; font-size: 10px; min-height: 0; }
+.bs-table tr.total-row td { font-weight: 700; }
+.bs-card { margin-bottom: 12px; }
+#modalBack .modal[data-modal-title="Individual Account Statement"] { width: min(1000px, 96vw); max-width: 96vw; }
+.bs-stmt-title { text-align: center; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 0; }
+.bs-stmt-head { margin-bottom: 8px; }
+.bs-stmt-head th { text-align: left; width: 1%; white-space: nowrap; text-transform: uppercase; font-size: 11px; }
+.bs-stmt-head td { font-size: 11px; font-weight: 600; }
+.bs-stmt-filters { margin-bottom: 8px; flex-wrap: wrap; }
+.bs-wrap { max-height: 60vh; overflow: auto; }
