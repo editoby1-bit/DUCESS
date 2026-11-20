@@ -5514,21 +5514,23 @@ function nextPaint() {
     const r = balancePeriodRange(f);
     const presets = [['daily','Daily'],['all','All']];
     const label = r.preset === 'all' ? 'All dates' : `${r.start ? fmtDate(r.start) : '…'} – ${r.end ? fmtDate(r.end) : '…'}`;
-    return `<div class="form-card balance-filters-card"><div class="action-inline balance-filters-row">${presets.map(([k,l]) => `<button class="filter-chip ${f.preset===k?'active':'secondary'}" data-period-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="balPeriodFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label><label class="inline-field"><span>To</span><input id="balPeriodTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label><button id="balPeriodApply" class="secondary">Apply Custom</button></div><div class="note" style="margin-top:6px">Period: <strong>${label}</strong></div></div>`;
+    return `<div class="form-card balance-filters-card"><div class="action-inline balance-filters-row">${presets.map(([k,l]) => `<button class="filter-chip ${f.preset===k?'active':'secondary'}" data-period-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="balPeriodFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label><label class="inline-field"><span>To</span><input id="balPeriodTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label><button id="balPeriodApply" class="secondary">Apply Custom</button></div><div class="note" style="margin-top:6px">Period: <strong>${label}</strong></div><div class="note">Balance = B/F (balance brought forward from the end of the day before the period) + Total CR − Total DR.</div></div>`;
   }
 
   // 2026-11-16 (client): every balance report is drawn like the "Account Balances" sheet:
   // title bar, S/N | A/C NO | A/C NAME | DESCRIPTION | DR | CR | BALANCE | ACTION (Statement),
   // and a total row. opts.kind is 'op' for income/expense accounts (otherwise a customer record).
   function periodAccountsTable(title, accounts, r, opts = {}) {
-    let dr = 0, cr = 0, balance = 0;
+    let bf = 0, dr = 0, cr = 0, balance = 0;
     const kind = opts.kind || 'cust';
     const rows = accounts.map((a, i) => {
       const f = opts.figures ? opts.figures(a) : periodFigures(a.balance, txItems(a), r);
-      dr += f.debit; cr += f.credit; balance += f.closing;
-      return `<tr><td>${i+1}</td><td>${escapeHtml(a.accountNumber || '—')}</td><td>${escapeHtml(a.name || '—')}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td><td class="bs-act"><button type="button" class="secondary tiny-btn" data-bs-statement="${kind}:${escapeHtml(a.id)}">Statement</button></td></tr>`;
+      // Client formula: Balance = B/F (balance brought forward) + Total CR - Total DR.
+      const bal = f.opening + f.credit - f.debit;
+      bf += f.opening; dr += f.debit; cr += f.credit; balance += bal;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(a.accountNumber || a.account_number || '—')}</td><td>${escapeHtml(a.name || '—')}</td><td>B/F + Total CR - Total DR</td><td class="bs-num">${money(f.opening)}</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal < 0 ? 'balance-negative' : ''}">${money(bal)}</td><td class="bs-act"><button type="button" class="secondary tiny-btn" data-bs-statement="${kind}:${escapeHtml(a.id)}">Statement</button></td></tr>`;
     }).join('');
-    return `<div class="table-card bs-card">${opts.extra || ''}<div class="table-wrap"><table class="table bs-table"><caption class="bs-title">${escapeHtml(title)}</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th><th>Action</th></tr></thead><tbody>${rows || `<tr><td colspan="8">${opts.empty || 'No accounts found'}</td></tr>`}${accounts.length ? `<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(dr)}</td><td class="bs-num">${money(cr)}</td><td class="bs-num">${money(balance)}</td><td></td></tr>` : ''}</tbody></table></div></div>`;
+    return `<div class="table-card bs-card">${opts.extra || ''}<div class="table-wrap"><table class="table bs-table"><caption class="bs-title">${escapeHtml(title)}</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th title="Balance brought forward">B/F</th><th>DR</th><th>CR</th><th>Balance</th><th>Action</th></tr></thead><tbody>${rows || `<tr><td colspan="9">${opts.empty || 'No accounts found'}</td></tr>`}${accounts.length ? `<tr class="total-row"><td colspan="4">Total</td><td class="bs-num">${money(bf)}</td><td class="bs-num">${money(dr)}</td><td class="bs-num">${money(cr)}</td><td class="bs-num">${money(balance)}</td><td></td></tr>` : ''}</tbody></table></div></div>`;
   }
 
   // Teller figures are rebuilt from approved requests up to a date, using the
@@ -5547,11 +5549,11 @@ function nextPaint() {
   function tellerFigures(staffId, r) {
     const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(staffId)) : 0;
     const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(staffId));
-    const mine = postingApprovals().filter(a => a.status === 'approved' && a.payload?.staffId === staffId && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
-    const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
-    const credit = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
-    const debit = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
-    return { opening, debit, credit, closing };
+    // DR/CR are every movement on the teller account in the period (the same events the
+    // teller statement lists), so Balance = B/F + Total CR - Total DR.
+    const evs = staffLedgerEvents(staffId).filter(ev => inPeriod(String(ev.date || '').slice(0, 10), r));
+    const sum = (side) => evs.filter(ev => ev.side === side).reduce((t, ev) => t + Number(ev.amount || 0), 0);
+    return { opening, debit: sum('debit'), credit: sum('credit'), closing };
   }
 
   function renderPeriodBalance(def) {
@@ -5571,9 +5573,21 @@ function nextPaint() {
         ['Treasury Balance', sumGroup(accountsInSegment('treasury'), txItems, c => c.balance)],
       ];
       const g = cats.reduce((t, [, f]) => ({ opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { opening: 0, debit: 0, credit: 0, closing: 0 });
-      const codes = [['1', 'CUSTOMER ACCOUNT'], ['S', 'STAFF ACCOUNT'], ['I', 'INCOME ACCOUNT'], ['E', 'EXPENSES ACCOUNT'], ['T', 'TELLER ACCOUNT'], ['TR', 'TREASURY ACCOUNT']];
-      const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${codes[i][0]}</td><td>${codes[i][1]}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td></tr>`).join('');
-      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.closing)}</td></tr></tbody></table></div></div></div>`;
+      // A/C No shows the real account numbers held in each category (first - last), never made-up codes.
+      const numsOf = (list) => (list || []).map(a => String(a?.accountNumber || a?.account_number || '').trim()).filter(Boolean).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
+      const noRange = (nums) => !nums.length ? '—' : nums.length === 1 || nums[0] === nums[nums.length - 1] ? nums[0] : `${nums[0]} – ${nums[nums.length - 1]}`;
+      const staffNos = numsOf([...accountsInSegment('staff'), ...(state.staff || []).map(st => ensureStaffAccount(st.id))]);
+      const catMeta = [
+        ['CUSTOMER ACCOUNT', noRange(numsOf(accountsInSegment('customer')))],
+        ['STAFF ACCOUNT', noRange([...new Set(staffNos)])],
+        ['INCOME ACCOUNT', noRange(numsOf(state.operations.incomeAccounts))],
+        ['EXPENSES ACCOUNT', noRange(numsOf(state.operations.expenseAccounts))],
+        ['TELLER ACCOUNT', noRange(numsOf(accountsInSegment('tellerng')))],
+        ['TREASURY ACCOUNT', noRange(numsOf(accountsInSegment('treasury')))],
+      ];
+      const bal = (f) => f.opening + f.credit - f.debit;
+      const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(catMeta[i][1])}</td><td>${catMeta[i][0]}</td><td>B/F + Total CR - Total DR</td><td class="bs-num">${money(f.opening)}</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal(f) < 0 ? 'balance-negative' : ''}">${money(bal(f))}</td></tr>`).join('');
+      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th title="Balance brought forward">B/F</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total</td><td class="bs-num">${money(g.opening)}</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.opening + g.credit - g.debit)}</td></tr></tbody></table></div></div></div>`;
     }
     const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
     const opFigSeg = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
@@ -5646,11 +5660,15 @@ function nextPaint() {
       } else {
         customerHistoryCovers(acct);
         const txs = (acct.transactions || []).filter(tx => inRange(tx.date));
+        if (!txs.length) { const upTo = (acct.transactions || []).filter(tx => !f.to || String(tx.date || '').slice(0, 10) <= f.to); totals.bal = upTo.length ? Number(upTo[upTo.length - 1].balanceAfter || 0) : 0; }
         rows = txs.map((tx, i) => { const amt = Number(tx.amount || 0); if (tx.type === 'debit') totals.dr += amt; else if (tx.type === 'credit') totals.cr += amt; totals.bal = Number(tx.balanceAfter || 0);
           return `<tr><td>${i+1}</td><td>${fmtDate(tx.date)}</td><td>${cell(tx.details)}</td><td class="bs-num">${tx.type === 'debit' ? money(amt) : ''}</td><td class="bs-num">${tx.type === 'credit' ? money(amt) : ''}</td><td class="bs-num">${money(tx.balanceAfter)}</td><td>${cell(statementReceivedBy(tx))}</td><td>${cell(tx.postedBy || tx.postedById)}</td><td>${cell(tx.approvedBy)}</td></tr>`; }).join('');
       }
     }
     const today = fmtDate(`${dateOnly(businessDate())}T12:00:00.000Z`);
+    // Balance brought forward: shown as the first line when the period does not start at the account's beginning.
+    const opening = totals.bal - totals.cr + totals.dr;
+    const bfRow = rows && opening ? `<tr class="bs-bf"><td>—</td><td>${f.from ? fmtDate(`${f.from}T12:00:00.000Z`) : ''}</td><td>Balance brought forward</td><td></td><td></td><td class="bs-num">${money(opening)}</td><td colspan="3"></td></tr>` : '';
     const body = `<div class="action-inline balance-filters-row bs-stmt-filters">
         <label class="inline-field"><span>From</span><input id="bsFrom" type="date" lang="en-GB" value="${escapeHtml(f.from)}"></label>
         <label class="inline-field"><span>To</span><input id="bsTo" type="date" lang="en-GB" value="${escapeHtml(f.to)}"></label>
@@ -5660,13 +5678,14 @@ function nextPaint() {
       </div>
       <div id="bsPrintArea" class="bs-stmt">
         <div class="bs-stmt-title">Individual Account Statement</div>
-        <table class="table bs-stmt-head"><tbody>
-          <tr><th>Address</th><td colspan="3">${cell(address)}</td><th>Gender</th><td>${cell(gender)}</td></tr>
-          <tr><th>A/C Name</th><td colspan="3">${cell(acct.name)}</td><th>A/C No</th><td>${cell(acct.accountNumber)}</td></tr>
-          <tr><th colspan="5">Date</th><td>${today}</td></tr>
-        </tbody></table>
-        <div class="table-wrap bs-wrap"><table class="table bs-table bs-stmt-table"><thead><tr><th>S/N</th><th>Date</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="9">No entries in range</td></tr>'}<tr class="total-row"><td colspan="3">TOTAL</td><td class="bs-num">${money(totals.dr)}</td><td class="bs-num">${money(totals.cr)}</td><td class="bs-num">${money(totals.bal)}</td><td colspan="3"></td></tr></tbody></table></div>
+        <div class="table-wrap bs-wrap"><table class="table bs-table bs-stmt-table">
+          <thead>
+            <tr class="bs-band"><th colspan="2">Address</th><td>${cell(address)}</td><th>Gender</th><td>${cell(gender)}</td><td colspan="4"></td></tr>
+            <tr class="bs-band"><th colspan="2">A/C Name</th><td>${cell(acct.name)}</td><th>A/C No</th><td>${cell(acct.accountNumber || acct.account_number)}</td><td colspan="2"></td><th>Date</th><td>${today}</td></tr>
+            <tr class="bs-cols"><th>S/N</th><th>Date</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr>
+          </thead>
+          <tbody>${bfRow}${rows || '<tr><td colspan="9">No entries in range</td></tr>'}<tr class="total-row"><td colspan="3">TOTAL</td><td class="bs-num">${money(totals.dr)}</td><td class="bs-num">${money(totals.cr)}</td><td class="bs-num">${money(totals.bal)}</td><td colspan="3"></td></tr></tbody>
+        </table></div>
       </div>`;
     openModal('Individual Account Statement', body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
     if (byId('bsApply')) byId('bsApply').onclick = () => openBalanceStatementModal(key, { from: byId('bsFrom')?.value || '', to: byId('bsTo')?.value || '' });

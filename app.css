@@ -13525,3 +13525,12 @@ body:has(#modalBack:not(.hidden)){ background-image: none !important; }
 .bs-stmt-head td { font-size: 11px; font-weight: 600; }
 .bs-stmt-filters { margin-bottom: 8px; flex-wrap: wrap; }
 .bs-wrap { max-height: 60vh; overflow: auto; }
+
+/* 2026-11-20 (client): total rows and the statement band use the same dark shade as the sidebar headers. */
+.bs-table tr.total-row td { background: #3a3a3a !important; color: #fff !important; font-weight: 700; border-color: #3a3a3a; }
+.bs-stmt-table tr.bs-band th, .bs-stmt-table tr.bs-band td,
+.bs-stmt-table tr.bs-cols th { background: #3a3a3a !important; color: #fff !important; font-weight: 700; text-transform: uppercase; text-align: left; border-color: #3a3a3a; }
+.bs-stmt-table tr.bs-cols th { text-align: center; }
+.bs-stmt-table tbody td:nth-child(-n+2), .bs-stmt-table tbody td.bs-num { text-align: center; }
+.bs-stmt-table tbody td.bs-num { font-weight: 700; }
+.bs-stmt-table tr.bs-bf td { font-style: italic; }
