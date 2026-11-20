@@ -13554,3 +13554,7 @@ table.table.bs-stmt-table thead tr.bs-cols th {
 }
 .sheet-uniform table.table.bs-stmt-table thead tr.bs-cols th,
 table.table.bs-stmt-table thead tr.bs-cols th { text-align: center !important; }
+
+/* 2026-11-20 (fix): other modal rules cap the width, so these two sheets must say !important to open wide enough. */
+#modalBack .modal[data-modal-title="Individual Account Statement"],
+#modalBack .modal[data-modal-title$="Work Review Format"] { width: min(1000px, 96vw) !important; max-width: 96vw !important; }
