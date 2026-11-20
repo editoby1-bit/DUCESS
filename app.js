@@ -5668,7 +5668,7 @@ function nextPaint() {
     const today = fmtDate(`${dateOnly(businessDate())}T12:00:00.000Z`);
     // Balance brought forward: shown as the first line when the period does not start at the account's beginning.
     const opening = totals.bal - totals.cr + totals.dr;
-    const bfRow = rows && opening ? `<tr class="bs-bf"><td>—</td><td>${f.from ? fmtDate(`${f.from}T12:00:00.000Z`) : ''}</td><td>Balance brought forward</td><td></td><td></td><td class="bs-num">${money(opening)}</td><td colspan="3"></td></tr>` : '';
+    const bfRow = opening ? `<tr class="bs-bf"><td>—</td><td>${f.from ? fmtDate(`${f.from}T12:00:00.000Z`) : ''}</td><td>Balance brought forward</td><td></td><td></td><td class="bs-num">${money(opening)}</td><td colspan="3"></td></tr>` : '';
     const body = `<div class="action-inline balance-filters-row bs-stmt-filters">
         <label class="inline-field"><span>From</span><input id="bsFrom" type="date" lang="en-GB" value="${escapeHtml(f.from)}"></label>
         <label class="inline-field"><span>To</span><input id="bsTo" type="date" lang="en-GB" value="${escapeHtml(f.to)}"></label>
