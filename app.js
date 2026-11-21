@@ -383,7 +383,7 @@
   // is balp_<period>_<report>; the report opens on that period, with the
   // usual date buttons + From/To pickers to change it.
   // 2026-11-16 (client): only the Daily balances remain; its From/To pickers cover every other period.
-  const BALANCE_PERIODS = [['daily','Daily']];
+  const BALANCE_PERIODS = [['daily','']]; // one "Balances" group; the header filter (Daily / Weekly / Monthly / Yearly / All / From-To) picks the period
   const BALANCE_REPORTS = [
     ['customers', 'customer_directory',   "All Customers' Balance"],
     ['salary',    'staff_directory',      'Staff Salary Balance'],
@@ -397,7 +397,7 @@
   ];
   const BALANCE_SUB_TOOLS = {};
   BALANCE_PERIODS.forEach(([pk, pl]) => BALANCE_REPORTS.forEach(([rk, base, rl]) => {
-    BALANCE_SUB_TOOLS[`balp_${pk}_${rk}`] = { base, preset: pk, report: rk, short: rl, label: `${pl} ${rl}` };
+    BALANCE_SUB_TOOLS[`balp_${pk}_${rk}`] = { base, preset: pk, report: rk, short: rl, label: `${pl} ${rl}`.trim() };
   }));
   // SURGICAL ADDITION 2026-10-22 (client sheet "Administrative / Audit &
   // ICT Unit"): Administration is regrouped into Administrative, Audits,
@@ -3476,7 +3476,7 @@ function hideProcessing() {
           ${BALANCE_PERIODS.map(([pk, pl]) => {
             const keys = BALANCE_REPORTS.map(([rk]) => `balp_${pk}_${rk}`);
             const isOpen = !!state.ui.tellerGroupOpen[`balp_${pk}`] || keys.includes(state.ui.tool);
-            return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="balp_${pk}">${pl} Balances <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
+            return `<button type="button" class="tool-group-toggle ${isOpen ? 'open' : ''}" data-posting-group="balp_${pk}">${pl ? pl + ' ' : ''}Balances <span class="tool-group-caret">${isOpen ? '▾' : '▸'}</span></button>
           <div class="tool-group-body ${isOpen ? '' : 'hidden'}">${keys.map(k => `<button class="tool-tab ${state.ui.tool===k?'active':''}" data-tool="${k}" ${hasPermission(k)?'':'disabled'}>${escapeHtml(BALANCE_SUB_TOOLS[k].short)}</button>`).join('')}</div>`;
           }).join('')}
           ${toolBtn('approval_history')}
@@ -5486,7 +5486,7 @@ function nextPaint() {
   }
   function balancePeriodRangeOf(f) {
     const ref = dateOnly(businessDate()) || '';
-    const preset = ['weekly', 'monthly', 'yearly'].includes(f?.preset) ? 'daily' : (f?.preset || 'daily');
+    const preset = f?.preset || 'daily';
     if (preset === 'all') return { start: '', end: '', preset };
     if (preset === 'custom') return { start: f.from || '', end: f.to || '', preset };
     if (preset === 'daily') return { start: ref, end: ref, preset };
@@ -5520,7 +5520,7 @@ function nextPaint() {
   function renderPeriodBar() {
     const f = state.ui.balancePeriodFilter || { preset: 'daily', from: '', to: '' };
     const r = balancePeriodRange(f);
-    const presets = [['daily','Daily'],['all','All']];
+    const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly'],['all','All']];
     const label = r.preset === 'all' ? 'All dates' : `${r.start ? fmtDate(r.start) : '…'} – ${r.end ? fmtDate(r.end) : '…'}`;
     return `<div class="form-card balance-filters-card"><div class="action-inline balance-filters-row">${presets.map(([k,l]) => `<button class="filter-chip ${f.preset===k?'active':'secondary'}" data-period-preset="${k}">${l}</button>`).join('')}<label class="inline-field"><span>From</span><input id="balPeriodFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label><label class="inline-field"><span>To</span><input id="balPeriodTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label><button id="balPeriodApply" class="secondary">Apply Custom</button></div><div class="note" style="margin-top:6px">Period: <strong>${label}</strong></div></div>`;
   }
@@ -5555,13 +5555,19 @@ function nextPaint() {
 
   // One teller's period figures — the same rules the Teller Balances report uses.
   function tellerFigures(staffId, r) {
-    const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(staffId)) : 0;
+    // Money INTO the teller account (funding, customer deposits, credit journals) is a CREDIT; money OUT
+    // (customer withdrawals, debit journals, transfers out) is a DEBIT. DR/CR come from the teller's own
+    // ledger; the closing balance stays the real till balance as of the end of the period, and B/F is what
+    // makes Balance = B/F + Total CR - Total DR hold.
     const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(staffId));
-    // DR/CR are every movement on the teller account in the period (the same events the
-    // teller statement lists), so Balance = B/F + Total CR - Total DR.
-    const evs = staffLedgerEvents(staffId).filter(ev => inPeriod(String(ev.date || '').slice(0, 10), r));
-    const sum = (side) => evs.filter(ev => ev.side === side).reduce((t, ev) => t + Number(ev.amount || 0), 0);
-    return { opening, debit: sum('debit'), credit: sum('credit'), closing };
+    let credit = 0, debit = 0;
+    staffLedgerEvents(staffId).forEach(ev => {
+      const d = Number(ev.delta || 0);
+      if (!d || !['form', 'credit', 'debit'].includes(ev.runningType)) return;
+      if (!inPeriod(String(ev.date || '').slice(0, 10), r)) return;
+      if (d > 0) credit += d; else debit += -d;
+    });
+    return { opening: closing - credit + debit, debit, credit, closing };
   }
 
   function renderPeriodBalance(def) {
@@ -5678,9 +5684,12 @@ function nextPaint() {
       address = acct.address || '—'; gender = acct.gender || '—';
       if (acct.accountType === 'staff_operational' && acct.linkedStaffId) {
         historyCovers(f.from || null);
-        const events = staffLedgerEvents(acct.linkedStaffId).slice().sort((x, y) => x.seq - y.seq).filter(ev => inRange(ev.date));
-        rows = events.map((ev, i) => { const amt = Number(ev.amount || 0); if (ev.side === 'debit') totals.dr += amt; else if (ev.side === 'credit') totals.cr += amt; totals.bal = Number(ev.runningBalance || 0);
-          return `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td>${tellerStatementCells(ev).replace(/<td/g, '<td class="bs-num"').replace('class="bs-num" class="', 'class="bs-num ')}<td>${cell(ev.receivedOrPaidBy)}</td><td>${cell(ev.postedBy || ev.staffName)}</td><td>${cell(ev.approvedBy)}</td></tr>`; }).join('');
+        // Money in = CREDIT, money out = DEBIT (same rule as the Teller Balance page), so Balance = B/F + CR - DR.
+        const all = staffLedgerEvents(acct.linkedStaffId).slice().sort((x, y) => x.seq - y.seq).filter(ev => ['form', 'credit', 'debit'].includes(ev.runningType) && Number(ev.delta || 0) !== 0);
+        const events = all.filter(ev => inRange(ev.date));
+        if (!events.length) { const upTo = all.filter(ev => !f.to || String(ev.date).slice(0, 10) <= f.to); totals.bal = upTo.length ? Number(upTo[upTo.length - 1].runningBalance || 0) : 0; }
+        rows = events.map((ev, i) => { const d = Number(ev.delta || 0), amt = Math.abs(d); if (d < 0) totals.dr += amt; else totals.cr += amt; totals.bal = Number(ev.runningBalance || 0);
+          return `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td><td class="bs-num">${d < 0 ? money(amt) : ''}</td><td class="bs-num">${d > 0 ? money(amt) : ''}</td><td class="bs-num">${money(ev.runningBalance)}</td><td>${cell(ev.receivedOrPaidBy)}</td><td>${cell(ev.postedBy || ev.staffName)}</td><td>${cell(ev.approvedBy)}</td></tr>`; }).join('');
       } else {
         const txs = (acct.transactions || []).filter(tx => inRange(tx.date));
         if (!txs.length) {
@@ -5696,11 +5705,12 @@ function nextPaint() {
     // Balance brought forward: shown as the first line when the period does not start at the account's beginning.
     const opening = totals.bal - totals.cr + totals.dr;
     const bfRow = opening ? `<tr class="bs-bf"><td>—</td><td>${f.from ? fmtDate(`${f.from}T12:00:00.000Z`) : ''}</td><td>Balance brought forward</td><td></td><td></td><td class="bs-num">${money(opening)}</td><td colspan="3"></td></tr>` : '';
+    const chip = (k, l) => { const pr = k === 'all' ? { start: '', end: '' } : balancePeriodRangeOf({ preset: k }); const on = (pr.start || '') === f.from && (pr.end || '') === f.to; return `<button type="button" class="filter-chip ${on ? 'active' : 'secondary'}" data-bs-preset="${k}">${l}</button>`; };
     const body = `<div class="action-inline balance-filters-row bs-stmt-filters">
+        ${chip('daily', 'Daily')}${chip('weekly', 'Weekly')}${chip('monthly', 'Monthly')}${chip('yearly', 'Yearly')}${chip('all', 'All')}
         <label class="inline-field"><span>From</span><input id="bsFrom" type="date" lang="en-GB" value="${escapeHtml(f.from)}"></label>
         <label class="inline-field"><span>To</span><input id="bsTo" type="date" lang="en-GB" value="${escapeHtml(f.to)}"></label>
         <button type="button" class="filter-chip secondary" id="bsApply">Apply</button>
-        <button type="button" class="filter-chip secondary" id="bsAll">All Dates</button>
         <button type="button" class="filter-chip secondary" id="bsPrint">Print</button>
       </div>
       <div id="bsPrintArea" class="bs-stmt">
@@ -5716,7 +5726,11 @@ function nextPaint() {
       </div>`;
     openModal('Individual Account Statement', body, [{ label: 'Close', className: 'secondary', onClick: closeModal }]);
     if (byId('bsApply')) byId('bsApply').onclick = () => openBalanceStatementModal(key, { from: byId('bsFrom')?.value || '', to: byId('bsTo')?.value || '' });
-    if (byId('bsAll')) byId('bsAll').onclick = () => openBalanceStatementModal(key, { from: '', to: '' });
+    qq('[data-bs-preset]').forEach(btn => btn.onclick = () => {
+      const k = btn.dataset.bsPreset;
+      const pr = k === 'all' ? { start: '', end: '' } : balancePeriodRangeOf({ preset: k });
+      openBalanceStatementModal(key, { from: pr.start || '', to: pr.end || '' });
+    });
     if (byId('bsPrint')) byId('bsPrint').onclick = () => printHtml(`<h2>Individual Account Statement</h2>${byId('bsPrintArea')?.innerHTML || ''}`);
   }
 
