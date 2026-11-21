@@ -2311,6 +2311,7 @@
       oldAccountNumber: customer.oldAccountNumber || '',
       name: customer.name || customer.fullName || '',
       address: customer.address || '',
+      gender: customer.gender || '',
       nin: customer.nin || '',
       bvn: customer.bvn || '',
       phone: customer.phone || '',
@@ -2790,6 +2791,7 @@ if (approvalRecord.type === 'float_topup') {
           oldAccountNumber: p.oldAccountNumber || '',
           name: p.name,
           address: p.address,
+          gender: p.gender || '',
           nin: p.nin,
           bvn: p.bvn,
           phone: p.phone,
@@ -3781,6 +3783,10 @@ function hideProcessing() {
           <div class="cs2-row">
             <div class="cs2-label">Address</div>
             <div class="cs2-input-wrap cs2-wide"><input id="openAddress" class="entry-input cs2-input" value="${escapeHtml(String(openingDraft.address || ''))}" autocomplete="off"></div>
+          </div>
+          <div class="cs2-row">
+            <div class="cs2-label">Gender</div>
+            <div class="cs2-input-wrap cs2-medium"><select id="openGender" class="entry-input cs2-input"><option value="">— Select —</option>${['Male', 'Female'].map(g => `<option value="${g}" ${openingDraft.gender === g ? 'selected' : ''}>${g}</option>`).join('')}</select></div>
           </div>
           <div class="cs2-row">
             <div class="cs2-label">Phone Number</div>
@@ -4956,6 +4962,7 @@ function hideProcessing() {
         ${line('Name', p.fullName || p.name)}
         ${isCustomer ? line('Phone', p.phone) : ''}
         ${isCustomer ? line('Address', p.address) : ''}
+        ${isCustomer && p.gender ? line('Gender', p.gender) : ''}
         ${isCustomer ? line('NIN', p.nin) : ''}
         ${isCustomer ? line('BVN', p.bvn) : ''}
         ${acctType === 'staff_operational' ? line('Linked Staff', p.linkedStaffName || p.linkedStaffId) : ''}
@@ -5081,6 +5088,7 @@ function hideProcessing() {
       ${field('Name / Display Name', p.fullName || p.name, 'field-wide')}
       ${isCustomer ? field('Phone', p.phone, 'field-phone') : ''}
       ${isCustomer ? field('Address', p.address, 'field-wide') : ''}
+      ${isCustomer && p.gender ? field('Gender', p.gender) : ''}
       ${isCustomer ? field('NIN', p.nin, 'field-id') : ''}
       ${isCustomer ? field('BVN', p.bvn, 'field-bvn') : ''}
       ${acctType === 'staff_operational' ? field('Linked Staff', p.linkedStaffName || p.linkedStaffId || '—', 'field-wide') : ''}
@@ -7517,6 +7525,7 @@ function normalizeStaffLedgerEntryType(row) {
     const draftBindings = {
       openName: 'name',
       openAddress: 'address',
+      openGender: 'gender',
       openPhone: 'phone',
       openNin: 'nin',
       openBvn: 'bvn',
@@ -7588,18 +7597,20 @@ function normalizeStaffLedgerEntryType(row) {
       let payload;
       if (isCustomer) {
         const address = (byId('openAddress')?.value || '').trim();
+        const gender = (byId('openGender')?.value || '').trim();
         const phone = (byId('openPhone')?.value || '').trim();
         const nin = (byId('openNin')?.value || '').trim();
         const bvn = (byId('openBvn')?.value || '').trim();
         const accountNumber = (byId('openAccountNumber')?.value || '').trim();
         if (!address || !phone || !nin || !bvn) return showToast('Complete all required fields');
+        if (!gender) return showToast('Select the account holder’s gender');
         // SURGICAL PATCH 2026-08-14: account number is now required at
         // opening (assigned by Customer Service), not optional/left for the
         // approving officer to fill in later.
         if (!accountNumber) return showToast('Account number is required');
         if (getCustomerByAccountNo(accountNumber)) return showToast('This account number is already in use');
         payload = {
-          accountType: 'customer', name, address, phone, nin, bvn,
+          accountType: 'customer', name, address, gender, phone, nin, bvn,
           accountNumber,
           oldAccountNumber: (byId('openOldAccount')?.value || '').trim(),
           generatedAccountNumber: accountNumber,
@@ -7624,13 +7635,15 @@ function normalizeStaffLedgerEntryType(row) {
         // Role classification removed 2026-08-14 — client only needs
         // account-number search on the Staff Salary Balance report.
         const address = (byId('openAddress')?.value || '').trim();
+        const gender = (byId('openGender')?.value || '').trim();
         const phone = (byId('openPhone')?.value || '').trim();
         const nin = (byId('openNin')?.value || '').trim();
         const bvn = (byId('openBvn')?.value || '').trim();
         if (!address || !phone || !nin || !bvn) return showToast('Complete all required fields');
+        if (!gender) return showToast('Select the account holder’s gender');
         payload = {
           accountType: 'staff_salary', name,
-          address, phone, nin, bvn,
+          address, gender, phone, nin, bvn,
           oldAccountNumber: (byId('openOldAccount')?.value || '').trim(),
           photo: byId('openPhoto')?.dataset?.base64 || '',
           systemAssigned: true, generatedAccountNumber: ''
