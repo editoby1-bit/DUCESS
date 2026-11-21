@@ -163,6 +163,7 @@ const ROLE_DEFAULT_TOOLS = {
       oldAccountNumber: rawCustomer.oldAccountNumber ?? rawCustomer.old_account_number ?? '',
       name: rawCustomer.name || rawCustomer.fullName || rawCustomer.full_name || '',
       address: rawCustomer.address || '',
+      gender: rawCustomer.gender || '',
       nin: rawCustomer.nin || '',
       bvn: rawCustomer.bvn || '',
       phone: rawCustomer.phone || '',
@@ -197,6 +198,7 @@ const ROLE_DEFAULT_TOOLS = {
       linkedStaffId: normalized.staffId || null,
       oldAccountNumber: normalized.oldAccountNumber,
       address: normalized.address,
+      gender: normalized.gender || '',
       nin: normalized.nin,
       bvn: normalized.bvn,
       balance: normalized.balance,
@@ -952,7 +954,23 @@ const anonKey = "sb_publishable_8jZ0dBPAzFqJ6xi3CxAkdw_qrzP6p8I";
     const staffEmailMode = config?.supabase?.staffEmailMode || 'synthetic_suffix';
     const syntheticEmailSuffix = config?.supabase?.syntheticEmailSuffix || '@ducess.local';
     const customersTable = config?.supabase?.customersTable || 'customers';
-    const customersSelect = config?.supabase?.customersSelect || 'id, customer_number, account_number, old_account_number, full_name, address, nin, bvn, phone, photo_path, status, linked_staff_id, account_type, created_at, is_active';
+    let customersSelect = config?.supabase?.customersSelect || 'id, customer_number, account_number, old_account_number, full_name, address, nin, bvn, phone, photo_path, status, linked_staff_id, account_type, created_at, is_active';
+    // 2026-11-21 (client): customers now carry a gender. The column is only read/written once it exists
+    // (run sql/2026-11-21-customer-gender.sql); until then every query behaves exactly as before.
+    let genderColumn = false;
+    try { genderColumn = typeof localStorage !== 'undefined' && localStorage.getItem('ducess_customers_gender_col') === '1'; } catch (_e) { /* storage blocked */ }
+    if (genderColumn && !/\bgender\b/.test(customersSelect)) customersSelect += ', gender';
+    // Once the column is known to exist this browser never asks again (no extra request on later loads).
+    const genderReady = genderColumn ? Promise.resolve() : (async () => {
+      try {
+        const probe = await client?.from(customersTable).select('gender').limit(1);
+        if (probe && !probe.error) {
+          genderColumn = true;
+          if (!/\bgender\b/.test(customersSelect)) customersSelect += ', gender';
+          try { localStorage.setItem('ducess_customers_gender_col', '1'); } catch (_e) { /* storage blocked */ }
+        }
+      } catch (_e) { /* column not added yet */ }
+    })();
     const customerTransactionsTable = config?.supabase?.customerTransactionsTable || 'customer_transactions';
     const customerTransactionsSelect = config?.supabase?.customerTransactionsSelect || 'id, customer_id, account_id, tx_type, amount, details, posted_by, posted_by_id, approved_by, counterparty, effective_at, created_at, balance_after';
     const customerBalancesTable = config?.supabase?.customerBalancesTable || 'customer_account_balances';
@@ -1363,7 +1381,9 @@ function subscribeRealtime() {
     if (existingOp.data) return defaultResult.err('STAFF_ALREADY_LINKED', `This staff member already has operational account ${existingOp.data.account_number}. It stays permanently linked to them.`, existingOp.data);
   }
 
+  await genderReady;
   const customerRow = {
+    ...(genderColumn && payload.gender ? { gender: String(payload.gender) } : {}),
     account_number: generatedAccountNumber,
     old_account_number: payload.oldAccountNumber || payload.old_account_number || '',
     full_name: fullName,
@@ -2716,6 +2736,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         old_account_number: row.old_account_number,
         full_name: row.full_name,
         address: row.address,
+        gender: row.gender,
         nin: row.nin,
         bvn: row.bvn,
         phone: row.phone,
