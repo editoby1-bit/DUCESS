@@ -462,7 +462,7 @@
   // database. Sign-in is kept. To force another one-time clear later, change
   // the date text in RESET_TOKEN; never leave it changing on every release.
   (function oneTimeLocalReset() {
-    const RESET_TOKEN = '2026-10-29-clean-slate';
+    const RESET_TOKEN = '2026-11-22-fresh-test-admin-only';
     const TOKEN_KEY = STORAGE_KEY + '__reset';
     try {
       if (localStorage.getItem(TOKEN_KEY) === RESET_TOKEN) return;
