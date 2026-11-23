@@ -1820,7 +1820,7 @@
         if (state.operations.entries.some(e => e.sourceApprovalId === req.id)) return;
         const amount = Number(p.amount || 0);
         const accountId = String(p.accountId || '').trim();
-        if (!accountId || !(amount > 0)) return;
+        if (!accountId || !Number.isFinite(amount) || (req.reviewInverse ? amount >= 0 : amount <= 0)) return;
         const account = [...state.operations.incomeAccounts, ...state.operations.expenseAccounts]
           .find(a => String(a.id || '') === accountId);
         if (!account) return;
@@ -5321,7 +5321,20 @@ function nextPaint() {
       </div>`;
   }
 
+  function operationalBalanceAccounts(kind) {
+    const legacy = kind === 'income' ? state.operations.incomeAccounts : state.operations.expenseAccounts;
+    return [...accountsInSegment(kind), ...(legacy || [])];
+  }
+
   function operationalAccountTotals(a) {
+    if (a.accountType === 'income' || a.accountType === 'expense') {
+      let totalDebit = 0, totalCredit = 0;
+      txItems(a).forEach(({ amount, isCredit }) => {
+        if (isCredit) totalCredit += amount;
+        else totalDebit += amount;
+      });
+      return { totalDebit, totalCredit, balance: Number(a.balance || 0) };
+    }
     const entries = state.operations.entries.filter(e => e.accountId === a.id);
     const totalCredit = entries.filter(e => e.kind === 'income').reduce((s,e)=>s+Number(e.amount||0),0);
     const totalDebit = entries.filter(e => e.kind === 'expense').reduce((s,e)=>s+Number(e.amount||0),0);
@@ -5368,8 +5381,8 @@ function nextPaint() {
             <div class="action-row compact-action-row"><button id="oeSubmit" class="tiny-btn">Submit for Approval</button></div>
           </div>
         </div>
-        ${operationalBalanceTable("All Income Balance", state.operations.incomeAccounts)}
-        ${operationalBalanceTable("All Expense Balance", state.operations.expenseAccounts)}
+        ${operationalBalanceTable("All Income Balance", operationalBalanceAccounts('income'))}
+        ${operationalBalanceTable("All Expense Balance", operationalBalanceAccounts('expense'))}
       </div>`;
   }
 
@@ -5517,6 +5530,9 @@ function nextPaint() {
   const txItems = (c) => (c?.transactions || []).filter(tx => tx.type === 'credit' || tx.type === 'debit').map(tx => ({ iso: filterRowDate(tx), amount: Number(tx.amount || 0), isCredit: tx.type === 'credit' }));
   const opItems = (accountId) => (state.operations.entries || []).filter(e => e.accountId === accountId).map(e => ({ iso: filterRowDate(e), amount: Number(e.amount || 0), isCredit: e.kind === 'income' }));
 
+  const balanceItems = (a) => a.accountType === 'income' || a.accountType === 'expense' ? txItems(a) : opItems(a.id);
+  const operationalPeriodFigures = (a, r) => periodFigures(operationalAccountTotals(a).balance, balanceItems(a), r);
+
   function renderPeriodBar() {
     const f = state.ui.balancePeriodFilter || { preset: 'daily', from: '', to: '' };
     const r = balancePeriodRange(f);
@@ -5527,11 +5543,11 @@ function nextPaint() {
 
   // 2026-11-16 (client): every balance report is drawn like the "Account Balances" sheet:
   // title bar, S/N | A/C NO | A/C NAME | DESCRIPTION | DR | CR | BALANCE | ACTION (Statement),
-  // and a total row. opts.kind is 'op' for income/expense accounts (otherwise a customer record).
+  // and a total row. Income/expense reports can include legacy operational accounts.
   function periodAccountsTable(title, accounts, r, opts = {}) {
     let dr = 0, cr = 0, balance = 0;
-    const kind = opts.kind || 'cust';
     const rows = accounts.map((a, i) => {
+      const kind = opts.kind === 'op' && !a.accountType ? 'op' : 'cust';
       const f = opts.figures ? opts.figures(a) : periodFigures(a.balance, txItems(a), r);
       // Client rule: Balance = balance brought forward + Total CR - Total DR (the B/F is not a column on the sheet).
       const bal = f.opening + f.credit - f.debit;
@@ -5581,8 +5597,8 @@ function nextPaint() {
       const cats = [
         ["All Customers' Balance", sumGroup(accountsInSegment('customer'), txItems, c => c.balance)],
         ['All Staff Balance', addFig(staffWallets, sumGroup(accountsInSegment('staff'), txItems, c => c.balance))],
-        ['Income Balance', sumGroup(state.operations.incomeAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
-        ['Expense Balance', sumGroup(state.operations.expenseAccounts || [], a => opItems(a.id), a => operationalAccountTotals(a).balance)],
+        ['Income Balance', sumGroup(operationalBalanceAccounts('income'), balanceItems, a => operationalAccountTotals(a).balance)],
+        ['Expense Balance', sumGroup(operationalBalanceAccounts('expense'), balanceItems, a => operationalAccountTotals(a).balance)],
         ['Tellerng Balance', tellerSeg],
         ['Treasury Balance', sumGroup(accountsInSegment('treasury'), txItems, c => c.balance)],
       ];
@@ -5594,8 +5610,8 @@ function nextPaint() {
       const catMeta = [
         ['CUSTOMER ACCOUNT', noRange(numsOf(accountsInSegment('customer')))],
         ['STAFF ACCOUNT', noRange([...new Set(staffNos)])],
-        ['INCOME ACCOUNT', noRange(numsOf(state.operations.incomeAccounts))],
-        ['EXPENSES ACCOUNT', noRange(numsOf(state.operations.expenseAccounts))],
+        ['INCOME ACCOUNT', noRange(numsOf(operationalBalanceAccounts('income')))],
+        ['EXPENSES ACCOUNT', noRange(numsOf(operationalBalanceAccounts('expense')))],
         ['TELLER ACCOUNT', noRange(numsOf(accountsInSegment('tellerng')))],
         ['TREASURY ACCOUNT', noRange(numsOf(accountsInSegment('treasury')))],
       ];
@@ -5604,10 +5620,10 @@ function nextPaint() {
       return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.opening + g.credit - g.debit)}</td></tr></tbody></table></div></div></div>`;
     }
     const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
-    const opFigSeg = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
+    const opFig = (a) => operationalPeriodFigures(a, r);
     if (def.report === 'income' || def.report === 'expense') {
       const isInc = def.report === 'income';
-      return `<div class="stack">${head}${periodAccountsTable(isInc ? 'Income Account' : 'Expenses Account', sortAccSeg(isInc ? state.operations.incomeAccounts : state.operations.expenseAccounts), r, { kind: 'op', figures: opFigSeg, empty: isInc ? 'No income accounts' : 'No expense accounts' })}</div>`;
+      return `<div class="stack">${head}${periodAccountsTable(isInc ? 'Income Account' : 'Expenses Account', sortAccSeg(operationalBalanceAccounts(def.report)), r, { kind: 'op', figures: opFig, empty: isInc ? 'No income accounts' : 'No expense accounts' })}</div>`;
     }
     if (def.report === 'treasury') {
       return `<div class="stack">${head}${periodAccountsTable('Treasury Account', sortAccSeg(accountsInSegment('treasury')), r, { empty: 'No treasury accounts' })}</div>`;
@@ -5626,9 +5642,8 @@ function nextPaint() {
       return `<div class="stack">${head}${periodAccountsTable('Teller Account', tellers, r, { figures: c => tellerFigures(c.linkedStaffId, r), empty: 'No teller accounts' })}</div>`;
     }
     // Income & Expense
-    const opFig = (a) => periodFigures(operationalAccountTotals(a).balance, opItems(a.id), r);
     const sortAcc = (list) => [...(list || [])].sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
-    return `<div class="stack">${head}${periodAccountsTable('All Income Balance', sortAcc(state.operations.incomeAccounts), r, { figures: opFig, empty: 'No income accounts' })}${periodAccountsTable('All Expense Balance', sortAcc(state.operations.expenseAccounts), r, { figures: opFig, empty: 'No expense accounts' })}</div>`;
+    return `<div class="stack">${head}${periodAccountsTable('All Income Balance', sortAcc(operationalBalanceAccounts('income')), r, { kind: 'op', figures: opFig, empty: 'No income accounts' })}${periodAccountsTable('All Expense Balance', sortAcc(operationalBalanceAccounts('expense')), r, { kind: 'op', figures: opFig, empty: 'No expense accounts' })}</div>`;
   }
 
   function bindPeriodBalance() {
@@ -5673,10 +5688,15 @@ function nextPaint() {
       acct = [...(state.operations.incomeAccounts || []), ...(state.operations.expenseAccounts || [])].find(a => a.id === id);
       if (!acct) return showToast('Account not found');
       const all = (state.operations.entries || []).filter(e => e.accountId === id).sort((x, y) => new Date(x.date) - new Date(y.date));
-      const signed = (e) => (String(e.kind || e.type || '').toLowerCase() === 'income' ? 1 : -1) * Number(e.amount || 0);
+      const isCredit = (e) => e.kind === 'income';
+      const signed = (e) => (isCredit(e) ? 1 : -1) * Number(e.amount || 0);
       let run = operationalAccountTotals(acct).balance - all.reduce((t, e) => t + signed(e), 0);
-      const lines = all.map(e => { run += signed(e); return { e, run }; }).filter(x => inRange(x.e.date));
-      rows = lines.map(({ e, run }, i) => { const cr = signed(e) > 0; const amt = Number(e.amount || 0); if (cr) totals.cr += amt; else totals.dr += amt; totals.bal = run;
+      const lines = all.map(e => {
+        run += signed(e);
+        if (!f.to || filterRowDate(e) <= f.to) totals.bal = run;
+        return { e, run };
+      }).filter(x => inRange(x.e.date));
+      rows = lines.map(({ e, run }, i) => { const cr = isCredit(e); const amt = Number(e.amount || 0); if (cr) totals.cr += amt; else totals.dr += amt; totals.bal = run;
         return `<tr><td>${i+1}</td><td>${fmtDate(e.date)}</td><td>${cell(cleanOperationalNote(e.details || e.note))}</td><td class="bs-num">${cr ? '' : money(amt)}</td><td class="bs-num">${cr ? money(amt) : ''}</td><td class="bs-num">${money(run)}</td><td>${cell(e.receivedOrPaidBy)}</td><td>${cell(e.postedBy)}</td><td>${cell(e.approvedBy)}</td></tr>`; }).join('');
     } else {
       acct = (state.customers || []).find(c => c.id === id);
@@ -5862,7 +5882,7 @@ function nextPaint() {
     if (tool === 'aud_types') {
       const staffRole = (id) => (state.staff || []).find(s => s.id === id)?.role || '';
       const acctSum = (list) => list.reduce((a, c) => { const f = periodFigures(c.balance, txItems(c), r); return { dr: a.dr + f.debit, cr: a.cr + f.credit, bal: a.bal + f.closing }; }, { dr: 0, cr: 0, bal: 0 });
-      const opSum = (list) => list.reduce((a, acc) => { const f = periodFigures(operationalAccountTotals(acc).balance, opItems(acc.id), r); return { dr: a.dr + f.debit, cr: a.cr + f.credit, bal: a.bal + f.closing }; }, { dr: 0, cr: 0, bal: 0 });
+      const opSum = (list) => list.reduce((a, acc) => { const f = operationalPeriodFigures(acc, r); return { dr: a.dr + f.debit, cr: a.cr + f.credit, bal: a.bal + f.closing }; }, { dr: 0, cr: 0, bal: 0 });
       const tellerSum = (list) => list.reduce((a, c) => {
         const ev = staffLedgerEvents(c.linkedStaffId).filter(e => inPeriod(String(e.date || '').slice(0,10), r));
         return { dr: a.dr + ev.filter(e => e.side === 'debit').reduce((t, e) => t + Number(e.amount || 0), 0), cr: a.cr + ev.filter(e => e.side === 'credit').reduce((t, e) => t + Number(e.amount || 0), 0), bal: a.bal + withApprovalsUpTo(r.end, () => getStaffOperationalBalance(c.linkedStaffId)) };
@@ -5871,8 +5891,8 @@ function nextPaint() {
       const rows = [
         ['Customer Account', acctSum((state.customers || []).filter(c => String(c.accountType || 'customer') === 'customer')), 'aud_customers'],
         ['Staff Account', acctSum((state.customers || []).filter(c => c.accountType === 'staff_salary')), 'aud_types'],
-        ['Income Account', opSum(state.operations.incomeAccounts || []), 'operational_accounts'],
-        ['Expenses Account', opSum(state.operations.expenseAccounts || []), 'operational_accounts'],
+        ['Income Account', opSum(operationalBalanceAccounts('income')), 'operational_accounts'],
+        ['Expenses Account', opSum(operationalBalanceAccounts('expense')), 'operational_accounts'],
         ['Teller Account', tellerSum(ops), 'aud_tellers'],
         ['Treasury Account', acctSum((state.customers || []).filter(c => c.accountType === 'treasury')), 'aud_customers:treasury'],
       ];
@@ -6069,12 +6089,12 @@ function nextPaint() {
       tellerDebit += f.debit; tellerCredit += f.credit; tellerBalance += f.closing;
     });
     let incomeDebit = 0, incomeCredit = 0, incomeBalance = 0;
-    (state.operations.incomeAccounts || []).forEach(a => {
+    operationalBalanceAccounts('income').forEach(a => {
       const t = operationalAccountTotals(a);
       incomeDebit += t.totalDebit; incomeCredit += t.totalCredit; incomeBalance += t.balance;
     });
     let expenseDebit = 0, expenseCredit = 0, expenseBalance = 0;
-    (state.operations.expenseAccounts || []).forEach(a => {
+    operationalBalanceAccounts('expense').forEach(a => {
       const t = operationalAccountTotals(a);
       expenseDebit += t.totalDebit; expenseCredit += t.totalCredit; expenseBalance += t.balance;
     });
