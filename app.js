@@ -3406,14 +3406,14 @@ function hideProcessing() {
   function renderModules() {
     const current = state.ui.module;
     const moduleOrder = ['customer_service','tellering','cash_officer','approvals','administration'];
-    byId('moduleGrid').innerHTML = (currentStaff() ? `<div class="dashboard-staff-id"><span>Teller ID</span><strong>${escapeHtml(tellerIdentity(currentStaff()))}</strong></div>` : '') + `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
+    byId('moduleGrid').innerHTML = `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
       const m = MODULES[key];
       const allowed = moduleAllowed(key);
       return `<div class="module-card ${current===key?'active':''} ${allowed?'':'disabled'}" data-module="${key}" data-module-key="${key}">
         <div class="module-icon">${m.icon}</div>
         <div class="module-title">${m.title}</div>
       </div>`;
-    }).join('') + (currentStaff() && !hasAssignedRole(currentStaff()) ? `<div class="note" style="grid-column:1/-1;margin-top:12px">No role has been assigned to your staff profile yet, so no sections are available. Ask an Administrative Officer to assign you a role.</div>` : '');
+    }).join('') + (currentStaff() ? `<div class="dashboard-staff-id"><span>Teller ID</span><strong>${escapeHtml(tellerIdentity(currentStaff()))}</strong></div>` : '') + (currentStaff() && !hasAssignedRole(currentStaff()) ? `<div class="note" style="grid-column:1/-1;margin-top:12px">No role has been assigned to your staff profile yet, so no sections are available. Ask an Administrative Officer to assign you a role.</div>` : '');
     qq('.module-card').forEach(card => {
       card.onclick = () => {
         const key = card.dataset.module;
@@ -5579,6 +5579,23 @@ function nextPaint() {
     return { opening: closing - credit + debit, debit, credit, closing };
   }
 
+  function cashBalanceCategories(range) {
+    const staffIds = new Set(accountsInSegment('tellerng').map(c => c.linkedStaffId).filter(Boolean));
+    const tellerFiguresByStaff = [...staffIds].map(id => tellerFigures(id, range));
+    const treasuryFiguresByAccount = accountsInSegment('treasury').map(c => periodFigures(c.balance, txItems(c), range));
+    return [['Tellering Balance', tellerFiguresByStaff], ['Treasury Balance', treasuryFiguresByAccount]]
+      .map(([label, figures]) => [label, figures.reduce((total, f) => ({
+        debit: total.debit + f.debit,
+        credit: total.credit + f.credit,
+        closing: total.closing + f.closing
+      }), { debit: 0, credit: 0, closing: 0 })]);
+  }
+
+  function renderCashBalances(categories) {
+    const rows = categories.map(([label, f]) => `<tr><td>${label}</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td></tr>`).join('');
+    return `<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Tellering and Treasury</caption><thead><tr><th>Account</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }
+
   function renderPeriodBalance(def) {
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: def.preset });
     const head = renderPeriodBar();
@@ -5591,10 +5608,9 @@ function nextPaint() {
         ['Expense Balance', sumGroup(operationalBalanceAccounts('expense'), balanceItems, a => operationalAccountTotals(a).balance)],
       ];
       const g = cats.reduce((t, [, f]) => ({ opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { opening: 0, debit: 0, credit: 0, closing: 0 });
+      const cashCategories = cashBalanceCategories(r);
       if (def.report === 'total') {
-        const staffIds = new Set(accountsInSegment('tellerng').map(c => c.linkedStaffId).filter(Boolean));
-        const teller = withApprovalsUpTo(r.end, () => [...staffIds].reduce((sum, id) => sum + getStaffOperationalBalance(id), 0));
-        const treasury = sumGroup(accountsInSegment('treasury'), txItems, c => c.balance).closing;
+        const [[, { closing: teller }], [, { closing: treasury }]] = cashCategories;
         const variance = Number((g.closing - teller - treasury).toFixed(2));
         const rows = [
           ['Total amount credited', g.credit],
@@ -5618,7 +5634,7 @@ function nextPaint() {
       ];
       const bal = (f) => f.opening + f.credit - f.debit;
       const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(catMeta[i][1])}</td><td>${catMeta[i][0]}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal(f) < 0 ? 'balance-negative' : ''}">${money(bal(f))}</td></tr>`).join('');
-      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.opening + g.credit - g.debit)}</td></tr></tbody></table></div></div></div>`;
+      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.opening + g.credit - g.debit)}</td></tr></tbody></table></div></div>${renderCashBalances(cashCategories)}</div>`;
     }
     const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
     const opFig = (a) => operationalPeriodFigures(a, r);
@@ -6095,7 +6111,7 @@ function nextPaint() {
     const bodyRows = categories.map((c,i) =>
       `<tr><td>${i+1}</td><td>${escapeHtml(c.name)}</td><td>${money(c.totalDebit)}</td><td>${money(c.totalCredit)}</td><td>${money(c.balance)}</td></tr>`
     ).join('');
-    return `<div class="stack"><div class="table-card"><h3>Overall Balance</h3><div class="note">Customers, staff, income and expense accounts.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr></thead><tbody>${bodyRows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td></tr></tbody></table></div></div></div>`;
+    return `<div class="stack"><div class="table-card"><h3>Overall Balance</h3><div class="note">Customers, staff, income and expense accounts.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr></thead><tbody>${bodyRows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td></tr></tbody></table></div></div>${renderCashBalances(cashBalanceCategories({ start: '', end: '' }))}</div>`;
   }
 
   function renderBusinessBalance() {
