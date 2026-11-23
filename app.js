@@ -405,7 +405,7 @@
   const ADMIN_SUB_TOOLS = {
     adm_staff:     { base: 'staff_roster',    label: 'Staff Management & Roles' },
     adm_balance:   { base: 'overall_balance', label: 'Account Balance' },
-    adm_total:     { base: 'overall_balance', label: 'Total Balance' },
+    adm_total:     { base: 'overall_balance', label: 'Variance' },
     aud_cs:        { base: 'overall_balance', label: 'Customer Service / Marketing Audit' },
     aud_tellers:   { base: 'overall_balance', label: 'Tellering / Non-Tellering Audit' },
     aud_types:     { base: 'overall_balance', label: 'Account Types Audit' },
@@ -5593,9 +5593,24 @@ function nextPaint() {
       }), { debit: 0, credit: 0, closing: 0 })]);
   }
 
-  function renderCashBalances(categories) {
-    const rows = categories.map(([label, f]) => `<tr><td>${label}</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td></tr>`).join('');
-    return `<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Tellering and Treasury</caption><thead><tr><th>Account</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  const varianceFormula = 'Consolidated total − (Tellering + Treasury total)';
+
+  function balanceVariance(consolidated, cashTotal) {
+    const amount = Number((consolidated - cashTotal).toFixed(2));
+    const status = amount < 0 ? 'Loss' : amount > 0 ? 'Gain' : 'Balanced';
+    return { amount, label: `Variance (${status})` };
+  }
+
+  function renderCashBalances(categories, consolidated) {
+    const total = categories.reduce((sum, [, f]) => ({
+      debit: sum.debit + f.debit,
+      credit: sum.credit + f.credit,
+      closing: sum.closing + f.closing
+    }), { debit: 0, credit: 0, closing: 0 });
+    const variance = balanceVariance(consolidated, total.closing);
+    const cells = f => `<td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td>`;
+    const rows = categories.map(([label, f]) => `<tr><td>${label}</td>${cells(f)}</tr>`).join('');
+    return `<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Tellering and Treasury</caption><thead><tr><th>Account</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td>Total Tellering and Treasury</td>${cells(total)}</tr></tbody></table></div><div class="note"><strong>${variance.label}</strong> = ${varianceFormula} = <strong>${money(variance.amount)}</strong></div></div>`;
   }
 
   function renderPeriodBalance(def) {
@@ -5613,16 +5628,16 @@ function nextPaint() {
       const cashCategories = cashBalanceCategories(r);
       if (def.report === 'total') {
         const [[, { closing: teller }], [, { closing: treasury }]] = cashCategories;
-        const variance = Number((g.closing - teller - treasury).toFixed(2));
+        const variance = balanceVariance(g.closing, teller + treasury);
         const rows = [
           ['Total amount credited', g.credit],
           ['Total account balance', g.closing],
           ['Tellering balance', teller],
           ['Treasury balance', treasury],
           ['Total Tellering and Treasury', teller + treasury],
-          [variance < 0 ? 'Variance (Loss)' : variance > 0 ? 'Variance (Gain)' : 'Variance (Balanced)', variance]
+          [variance.label, variance.amount]
         ];
-        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Total Balance</caption><tbody>${rows.map(([label, amount], i) => `<tr${i === rows.length - 1 ? ' class="total-row"' : ''}><td>${label}</td><td class="bs-num">${money(amount)}</td></tr>`).join('')}</tbody></table></div></div></div>`;
+        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Variance</caption><tbody>${rows.map(([label, amount], i) => `<tr${i === rows.length - 1 ? ' class="total-row"' : ''}><td>${label}</td><td class="bs-num">${money(amount)}</td></tr>`).join('')}</tbody></table></div><div class="note">Variance = ${varianceFormula}</div></div></div>`;
       }
       // A/C No shows the real account numbers held in each category (first - last), never made-up codes.
       const numsOf = (list) => (list || []).map(a => String(a?.accountNumber || a?.account_number || '').trim()).filter(Boolean).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
@@ -5636,7 +5651,7 @@ function nextPaint() {
       ];
       const bal = (f) => f.opening + f.credit - f.debit;
       const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(catMeta[i][1])}</td><td>${catMeta[i][0]}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal(f) < 0 ? 'balance-negative' : ''}">${money(bal(f))}</td></tr>`).join('');
-      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.opening + g.credit - g.debit)}</td></tr></tbody></table></div></div>${renderCashBalances(cashCategories)}</div>`;
+      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.opening + g.credit - g.debit)}</td></tr></tbody></table></div></div>${renderCashBalances(cashCategories, g.closing)}</div>`;
     }
     const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
     const opFig = (a) => operationalPeriodFigures(a, r);
@@ -6113,7 +6128,7 @@ function nextPaint() {
     const bodyRows = categories.map((c,i) =>
       `<tr><td>${i+1}</td><td>${escapeHtml(c.name)}</td><td>${money(c.totalDebit)}</td><td>${money(c.totalCredit)}</td><td>${money(c.balance)}</td></tr>`
     ).join('');
-    return `<div class="stack"><div class="table-card"><h3>Overall Balance</h3><div class="note">Customers, staff, income and expense accounts.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr></thead><tbody>${bodyRows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td></tr></tbody></table></div></div>${renderCashBalances(cashBalanceCategories({ start: '', end: '' }))}</div>`;
+    return `<div class="stack"><div class="table-card"><h3>Overall Balance</h3><div class="note">Customers, staff, income and expense accounts.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr></thead><tbody>${bodyRows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td></tr></tbody></table></div></div>${renderCashBalances(cashBalanceCategories({ start: '', end: '' }), grandBalance)}</div>`;
   }
 
   function renderBusinessBalance() {
