@@ -3312,6 +3312,8 @@ if (approvalRecord.type === 'float_topup') {
     const roleEl = byId('staffRoleDisplay');
     if (nameEl) nameEl.textContent = activeStaff?.name || '';
     if (roleEl) roleEl.textContent = staffRoleLabels(activeStaff);
+    const tellerEl = byId('staffTellerDisplay');
+    if (tellerEl) tellerEl.textContent = activeStaff ? `Teller ID / Account: ${tellerIdentity(activeStaff)}` : '';
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
     if (byId('btnLogout') && isSupabaseApprovalMode()) {
@@ -3413,7 +3415,7 @@ function hideProcessing() {
         <div class="module-icon">${m.icon}</div>
         <div class="module-title">${m.title}</div>
       </div>`;
-    }).join('') + (currentStaff() ? `<div class="dashboard-staff-id"><span>Teller ID</span><strong>${escapeHtml(tellerIdentity(currentStaff()))}</strong></div>` : '') + (currentStaff() && !hasAssignedRole(currentStaff()) ? `<div class="note" style="grid-column:1/-1;margin-top:12px">No role has been assigned to your staff profile yet, so no sections are available. Ask an Administrative Officer to assign you a role.</div>` : '');
+    }).join('') + (currentStaff() && !hasAssignedRole(currentStaff()) ? `<div class="note" style="grid-column:1/-1;margin-top:12px">No role has been assigned to your staff profile yet, so no sections are available. Ask an Administrative Officer to assign you a role.</div>` : '');
     qq('.module-card').forEach(card => {
       card.onclick = () => {
         const key = card.dataset.module;
