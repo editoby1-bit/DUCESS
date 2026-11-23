@@ -405,6 +405,7 @@
   const ADMIN_SUB_TOOLS = {
     adm_staff:     { base: 'staff_roster',    label: 'Staff Management & Roles' },
     adm_balance:   { base: 'overall_balance', label: 'Account Balance' },
+    adm_total:     { base: 'overall_balance', label: 'Total Balance' },
     aud_cs:        { base: 'overall_balance', label: 'Customer Service / Marketing Audit' },
     aud_tellers:   { base: 'overall_balance', label: 'Tellering / Non-Tellering Audit' },
     aud_types:     { base: 'overall_balance', label: 'Account Types Audit' },
@@ -896,13 +897,34 @@
     return ({ customer: 'customer', staff_salary: 'staff', income: 'income', expense: 'expense', staff_operational: 'tellerng', treasury: 'treasury' })[t] || '';
   }
   const accountsInSegment = (seg) => (state.customers || []).filter(c => accountSegmentOf(c) === seg);
+  const staffBalanceAccounts = () => (state.customers || []).filter(c => ['staff_salary', 'staff_wallet'].includes(c.accountType));
   function staffFirstName(st){ return String(st?.name || '').trim().split(/\s+/)[0] || '—'; }
   // Use the exact staff-management ID; the operational account is separate.
   function tellerIdLabel(st) {
     if (!st) return '—';
     return String(st.staffId || st.staffCode || st.staff_code || st.id || '—');
   }
-  function tellerIdForAccount(c){ return c?.accountType === 'staff_operational' ? tellerIdLabel(staffById(c.linkedStaffId), c.accountNumber) : '—'; }
+  function tellerIdentity(st) {
+    if (!st) return '—';
+    const accountNumber = staffOperationalAccountNumber(st.id);
+    return accountNumber ? `${tellerIdLabel(st)} · ${accountNumber}` : tellerIdLabel(st);
+  }
+
+  function postingStaffId(...references) {
+    for (const reference of references) {
+      const key = String(reference || '').trim().toLowerCase();
+      if (!key) continue;
+      const matches = (state.staff || []).filter(st => [
+        st.id, getStaffBackendId(st), st.staffId, st.staffCode, st.staff_code
+      ].some(value => value && String(value).trim().toLowerCase() === key));
+      if (matches.length === 1) return tellerIdLabel(matches[0]);
+      const byName = (state.staff || []).filter(st => String(st.name || st.full_name || '').trim().toLowerCase() === key);
+      if (byName.length === 1) return tellerIdLabel(byName[0]);
+    }
+    return '—';
+  }
+
+  function tellerIdForAccount(c){ return c?.accountType === 'staff_operational' ? tellerIdentity(staffById(c.linkedStaffId)) : '—'; }
   function tellerBannerHtml(st = currentStaff()) {
     if (!st) return '';
     const no = staffOperationalAccountNumber(st.id);
@@ -1807,6 +1829,8 @@
             approvedBy: req.approvedBy || req.approvedByName || '',
             traceId,
             sourceTransactionType: req.type,
+            postedById: req.requestedBy,
+            approvedByStaffId: req.approvedByStaffId,
             sourceApprovalId: req.id,
             sourceChargeKey
           });
@@ -1835,6 +1859,8 @@
           date: `${p.date || today()}T12:00:00.000Z`,
           postedBy: req.requestedByName || staffName(req.requestedBy) || 'System',
           approvedBy: req.approvedBy || req.approvedByName || '',
+          postedById: req.requestedBy,
+          approvedByStaffId: req.approvedByStaffId,
           sourceApprovalId: req.id
         });
       }
@@ -2451,10 +2477,10 @@ if (approvalRecord.type === 'float_topup') {
 
   // 2026-10-24: Treasury accounts are business accounts with real
   // transactions — refresh the business-account side of these postings.
-  if (approvalRecord.type === 'cash_receipt' || approvalRecord.type === 'inter_staff_credit') {
+  if (['cash_receipt', 'inter_staff_credit', 'intra_bank_transfer'].includes(approvalRecord.type)) {
     const ids = approvalRecord.type === 'cash_receipt'
       ? [enrichedPayload.treasuryAccountId]
-      : [enrichedPayload.sourceAccountId, enrichedPayload.targetAccountId];
+      : [enrichedPayload.sourceAccountId, enrichedPayload.targetAccountId || enrichedPayload.destAccountId];
     for (const id of ids.filter(Boolean)) {
       const c = (state.customers || []).find(x => x.id === id);
       if (c && c.accountType !== 'staff_operational') await syncCustomerFromGateway({ customerId: c.id, accountNumber: c.accountNumber });
@@ -2956,7 +2982,7 @@ if (approvalRecord.type === 'float_topup') {
           // SURGICAL FIX 2026-09-04 (client-confirmed bug): delta was -totalAmount
           // here — a customer credit (deposit, cash coming IN) was reducing the
           // teller's operational balance instead of increasing it. Now +totalAmount.
-          addStaffEntry(req.payload.staffId, 'customer_credit', totalAmount, totalAmount, `Customer credit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z`, chargeBreakdown, totalChargeAmount: totalCharges, chargeTraceId, customerCreditAmount });
+          addStaffEntry(req.payload.staffId, 'customer_credit', totalAmount, totalAmount, `Customer credit ${c.accountNumber}`, { customerId: c.id, sourceApprovalId, date: `${req.payload.date}T12:00:00.000Z`, chargeBreakdown, totalChargeAmount: totalCharges, chargeTraceId, customerCreditAmount });
         }
         if (totalCharges > 0) {
           state.operations.entries ||= [];
@@ -3021,7 +3047,7 @@ if (approvalRecord.type === 'float_topup') {
           // here — a customer debit (withdrawal, cash going OUT) was
           // increasing the teller's operational balance instead of reducing
           // it. Now -amount.
-          addStaffEntry(req.payload.staffId, 'customer_debit', req.payload.amount, -req.payload.amount, `Customer debit ${c.accountNumber}`, { customerId: c.id, date: `${req.payload.date}T12:00:00.000Z` });
+          addStaffEntry(req.payload.staffId, 'customer_debit', req.payload.amount, -req.payload.amount, `Customer debit ${c.accountNumber}`, { customerId: c.id, sourceApprovalId, date: `${req.payload.date}T12:00:00.000Z` });
         }
         break;
       }
@@ -3380,7 +3406,7 @@ function hideProcessing() {
   function renderModules() {
     const current = state.ui.module;
     const moduleOrder = ['customer_service','tellering','cash_officer','approvals','administration'];
-    byId('moduleGrid').innerHTML = (currentStaff() ? `<div class="dashboard-staff-id"><span>Teller ID</span><strong>${escapeHtml(tellerIdLabel(currentStaff()))}</strong></div>` : '') + `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
+    byId('moduleGrid').innerHTML = (currentStaff() ? `<div class="dashboard-staff-id"><span>Teller ID</span><strong>${escapeHtml(tellerIdentity(currentStaff()))}</strong></div>` : '') + `<div class="module-grid-title">DASHBOARD</div><div class="module-hub"><img src="logo.png" alt="Ducess Enterprises" class="module-hub-logo"></div>` + moduleOrder.map((key) => {
       const m = MODULES[key];
       const allowed = moduleAllowed(key);
       return `<div class="module-card ${current===key?'active':''} ${allowed?'':'disabled'}" data-module="${key}" data-module-key="${key}">
@@ -3446,7 +3472,7 @@ function hideProcessing() {
         </div>`;
       }
       if (state.ui.module === 'administration') {
-        const toolBtn = (t) => `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${escapeHtml(t === 'aud_cs' ? 'Customer Service / Marketing' : t === 'aud_tellers' ? 'Tellering / Non-Tellering' : t === 'aud_types' ? 'Account Types' : t === 'aud_customers' ? 'Customer Accounts' : TOOL_LABELS[t])}</button>`;
+        const toolBtn = (t) => `<button class="tool-tab ${state.ui.tool===t?'active':''}" data-tool="${t}" ${hasPermission(t)?'':'disabled'}>${escapeHtml(t === 'aud_cs' ? 'Customer Service / Marketing' : t === 'aud_tellers' ? 'Tellering / Non-Tellering' : t === 'aud_types' ? 'Account Types' : t === 'aud_customers' ? 'Customer Accounts' : ADMIN_SUB_TOOLS[t]?.label || TOOL_LABELS[t])}</button>`;
         state.ui.tellerGroupOpen ||= {};
         const group = (key, label, tools) => {
           const isOpen = !!state.ui.tellerGroupOpen[key] || tools.includes(state.ui.tool);
@@ -3455,7 +3481,7 @@ function hideProcessing() {
         };
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
-          ${group('adm_g', 'Administrative', ['adm_staff','adm_balance'])}
+          ${group('adm_g', 'Administrative', ['adm_staff','adm_balance','adm_total'])}
           ${group('aud_g', 'Audits', ['aud_cs','aud_tellers','aud_types','aud_customers'])}
           ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber','central_close_day'])}
         </div>`;
@@ -3942,7 +3968,7 @@ function hideProcessing() {
         if (filter.to && d > filter.to) return false;
         return true;
       });
-      const rows = events.map((ev, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td>${tellerStatementCells(ev)}<td>${escapeHtml(ev.receivedOrPaidBy || '—')}</td><td>${escapeHtml(ev.postedBy || ev.staffName || '—')}</td><td>${escapeHtml(ev.approvedBy || '—')}</td></tr>`).join('');
+      const rows = events.map((ev, i) => `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td>${tellerStatementCells(ev)}<td>${escapeHtml(ev.receivedOrPaidBy || '—')}</td><td>${escapeHtml(postingStaffId(ev.postedById, ev.postedBy))}</td><td>${escapeHtml(postingStaffId(ev.approvedByStaffId, ev.approvedBy))}</td></tr>`).join('');
       statementHtml = `
         <div class="record-card statement-record-minimal" id="statementPrintArea">
           <div class="lookup-card statement-lookup-minimal"><div class="stack"><div class="info-grid">
@@ -3972,8 +3998,8 @@ function hideProcessing() {
         <td>${tx.type==='credit'?money(tx.amount):''}</td>
         <td>${money(tx.balanceAfter)}</td>
         <td>${escapeHtml(statementReceivedBy(tx) || '—')}</td>
-        <td>${escapeHtml(tx.postedBy || tx.postedById || '—')}</td>
-        <td>${escapeHtml(tx.approvedBy || '—')}</td>
+        <td>${escapeHtml(postingStaffId(tx.postedById, tx.postedBy))}</td>
+        <td>${escapeHtml(postingStaffId(tx.approvedByStaffId, tx.approvedBy))}</td>
       </tr>`).join('');
       statementHtml = `
         <div class="record-card statement-record-minimal" id="statementPrintArea">
@@ -4593,7 +4619,7 @@ function hideProcessing() {
               <div class="nc-cell"><input id="txAcc" class="entry-input" maxlength="12" value="${escapeHtml(String(state.ui.txAccDraft || ''))}" autocomplete="off"></div>
               <div class="nc-cell"><button id="txSearch" class="nc-mini-btn">Search</button></div>
               <div class="nc-cell nc-tag">Teller ID</div>
-              <div class="nc-cell"><div class="display-field" id="txTellerId">${escapeHtml(tellerIdLabel(st))}</div></div>
+              <div class="nc-cell"><div class="display-field" id="txTellerId">${escapeHtml(tellerIdentity(st))}</div></div>
 
               <div class="nc-label">Account Name</div>
               <div class="nc-cell nc-span-4"><div class="display-field" id="txName">—</div></div>
@@ -4858,48 +4884,15 @@ function hideProcessing() {
       const actionDisabled = lockedByOther ? 'disabled' : '';
       const pendingActions = a.status === 'pending' ? `<div class="inline-actions"><button type="button" data-approve="${a.id}" class="success" ${actionDisabled}>Approve</button><button type="button" data-reject="${a.id}" class="danger" ${actionDisabled}>Reject</button></div>` : '';
       const journalActions = a.type.includes('_journal') ? `<div class="stack-actions"><button type="button" data-inspect-journal="${a.id}" class="secondary">Inspect</button>${pendingActions}</div>` : '';
-      const normalActions = a.reviewAction ? `<button type="button" class="secondary tiny-btn" data-inspect-request="${a.id}">View Change</button>${pendingActions}` : !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : a.approvedBy || '—') : '';
+      const normalActions = a.reviewAction ? `<button type="button" class="secondary tiny-btn" data-inspect-request="${a.id}">View Change</button>${pendingActions}` : !a.type.includes('_journal') ? (a.status === 'pending' ? pendingActions : escapeHtml(postingStaffId(a.approvedByStaffId, a.approvedBy))) : '';
       // View removed: the open account's own headings are shown inline below instead of a separate modal.
       const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
         ? approvalAccountHeadingsInline(a)
         : approvalDetails(a);
       return `<tr><td><input type="checkbox" class="approval-select-checkbox" data-approval-select="${a.id}" ${checked} ${disabledAttr}></td><td>${i+1}</td><td>${a.reviewAction ? escapeHtml(a.reviewAction.toUpperCase()) + ' — ' + prettyApprovalType(a.reviewOriginalType) : prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${journalActions}${normalActions}</td></tr>`;
     }).join('');
-    state.ui.codResolutionLimit ||= 10;
-    const codRows=(state.cod||[]).filter(c=>{
-      const codDate = String(c.date || c.businessDate || '').slice(0,10);
-      // COD Resolution visibility must be controlled by the COD record itself,
-      // not by the current open date. If one device has not advanced yet, using
-      // openDate here hides the closed-day evidence and makes resolution vanish.
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(codDate)) return false;
-      // Once a COD record has entered the resolution lifecycle, its own
-      // status controls visibility. Do not re-hide it because a later live
-      // balance recalculation temporarily reads zero/stale values. Resolution
-      // records must remain visible until they are explicitly resolved.
-      if (c.status === 'resolved' || c.status === 'draft') return false;
-      return true;
-    }).slice(0, state.ui.codResolutionLimit || 10).map((c,i)=>{
-      const creditCash = Number(c.totalCreditCash ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'cash'));
-      const creditTransfer = Number(c.totalCreditTransfer ?? approvedCreditTotalForDateByMode(c.staffId, c.date, 'transfer'));
-      const debitCash = Number(c.totalDebitCash ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'cash'));
-      const debitTransfer = Number(c.totalDebitTransfer ?? approvedDebitTotalForDateByMode(c.staffId, c.date, 'transfer'));
-      const formAmount = Number(c.formAmount ?? c.openingBalance ?? getStaffOperationalBalance(c.staffId));
-      const remaining = Number(c.remainingBalance ?? c.runningFloat ?? codRemainingBalance(formAmount, creditCash + creditTransfer, debitCash + debitTransfer));
-      const variance = Number(c.variance ?? Math.abs(remaining));
-      const overdraw = Number(c.overdraw ?? Math.max(0, -remaining));
-      const recomputedVariance = Math.abs(remaining);
-      const recomputedOverdraw = Math.max(0, -remaining);
-      const codResolveId = c.id || c.codSubmissionId || c.cod_submission_id || '';
-      const isAnomaly = remaining < 0;
-      const statusBadge = isAnomaly
-        ? `<span class="badge flagged">Anomaly</span>`
-        : (recomputedVariance > 0 ? `<span class="badge">Variance</span>` : `<span class="badge balanced">Balanced</span>`);
-      return `<tr><td>${i+1}</td><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.staffName || '')}</td><td>${money(formAmount)}</td><td>${money(creditCash + creditTransfer)}</td><td>${money(debitCash + debitTransfer)}</td><td class="${remaining<0?'balance-negative':''}">${money(remaining)}</td><td class="${recomputedVariance>0?'balance-negative':''}">${money(recomputedVariance)}</td><td class="${recomputedOverdraw>0?'balance-negative':''}">${money(recomputedOverdraw)}</td><td>${statusBadge}</td><td>${escapeHtml(c.resolutionNote || c.note || '—')}</td><td>${(canCloseBusinessDay())?`<button data-cod-resolve="${codResolveId}" class="warning">Resolve</button>`:'Awaiting Resolution'}</td></tr>`;
-    }).join('');
-    const codResolutionAllCount = (state.cod||[]).filter(c=>{ const d=String(c.date||c.businessDate||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && c.status!=='resolved' && c.status!=='draft'; }).length;
-    const codResolutionMoreLess = codResolutionAllCount > 0 ? ('<div class="action-row" style="margin-top:8px">' + (codResolutionAllCount > (state.ui.codResolutionLimit||10) ? '<button id="codResolutionMore" class="secondary">Show More</button>' : '') + ((state.ui.codResolutionLimit||10) > 10 ? '<button id="codResolutionLess" class="secondary">Show Less</button>' : '') + '</div>') : '';
     const moreLess = `<div class="action-row">${allRows.length > limit ? `<button id="approvalsMore" class="secondary">Show More</button>`:''}${limit > 20 ? `<button id="approvalsLess" class="secondary">Show Less</button>`:''}</div>`;
-    return `<div class="stack">${codRows?`<div class="table-card"><h3>COD Resolution Queue</h3><div class="note">Any teller who closes the day with a negative operational balance shows here as an <strong>Anomaly</strong> — Treasury/Admin resolves it directly with the staff involved.</div><div class="table-wrap cod-resolution-table-wrap"><table class="table cod-resolution-table"><thead><tr><th>S/N</th><th>Date</th><th>Staff</th><th>Form</th><th>Total Credits</th><th>Total Debits</th><th>Remaining Balance</th><th>Variance</th><th>Overdraw</th><th>Status</th><th>Note</th><th>Action</th></tr></thead><tbody>${codRows}</tbody></table></div>${codResolutionMoreLess}</div>`:''}${subTool ? '' : `<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Administration']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div>`}<div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>${subTool ? escapeHtml(subTool.label) : 'Approval Queue'}</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div></div>`;
+    return `<div class="stack">${subTool ? '' : `<div class="approvals-top-controls"><div class="tool-tabs approvals-sections" id="approvalsSectionTabs">${[['customer_service','Customer Service'],['tellering','Teller'],['non_cash','Non Cash'],['others','Administration']].map(([k,l])=>`<button class="tool-tab ${currentSection===k?'active':''}" data-approval-section="${k}">${l}</button>`).join('')}</div></div>`}<div class="table-card" id="approvalsQueueCard"><div class="action-row" style="justify-content:space-between;align-items:center"><h3>${subTool ? escapeHtml(subTool.label) : 'Approval Queue'}</h3><div class="inline-actions"><button type="button" id="approvalSelectAll" class="secondary tiny-btn">Select Visible Pending</button><button type="button" id="approvalClearSelection" class="secondary tiny-btn">Clear</button><button type="button" id="approvalBulkApprove" class="success tiny-btn">Approve Selected</button><button type="button" id="approvalBulkReject" class="danger tiny-btn">Reject Selected</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Select</th><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No requests yet</td></tr>'}</tbody></table></div>${moreLess}</div></div>`;
   }
 
   function renderApprovalHistory() {
@@ -4912,7 +4905,7 @@ function hideProcessing() {
       const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
         ? approvalAccountHeadingsInline(a)
         : approvalDetails(a);
-      return `<tr><td>${i+1}</td><td>${a.reviewAction ? escapeHtml(a.reviewAction.toUpperCase()) + ' — ' + prettyApprovalType(a.reviewOriginalType) : prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${escapeHtml(a.approvedBy || a.approvedByName || '—')}</td></tr>`;
+      return `<tr><td>${i+1}</td><td>${a.reviewAction ? escapeHtml(a.reviewAction.toUpperCase()) + ' — ' + prettyApprovalType(a.reviewOriginalType) : prettyApprovalType(a.type)}</td><td>${approvalSubmittedBy(a)}</td><td>${detailCell}</td><td>${fmtDate(approvalDisplayDate(a))}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${escapeHtml(postingStaffId(a.approvedByStaffId, a.approvedBy, a.approvedByName))}</td></tr>`;
     }).join('');
     const moreLess = `<div class="action-row">${decided.length > limit ? `<button id="approvalHistoryMore" class="secondary">Show More</button>`:''}${limit > 30 ? `<button id="approvalHistoryLess" class="secondary">Show Less</button>`:''}</div>`;
     return `<div class="stack"><div class="table-card"><h3>Approval History</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Request</th><th>Submitted By</th><th>Details</th><th>Date</th><th>Status</th><th>Decided By</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No decided requests yet</td></tr>'}</tbody></table></div>${moreLess}</div></div>`;
@@ -5589,31 +5582,39 @@ function nextPaint() {
   function renderPeriodBalance(def) {
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: def.preset });
     const head = renderPeriodBar();
-    if (def.report === 'consolidated' || def.report === 'overall') {
+    if (['consolidated', 'overall', 'total'].includes(def.report)) {
       const sumGroup = (accts, itemsOf, balOf) => accts.reduce((acc, a) => { const f = periodFigures(balOf(a), itemsOf(a), r); acc.opening += f.opening; acc.debit += f.debit; acc.credit += f.credit; acc.closing += f.closing; return acc; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
-      const addFig = (x, y) => ({ opening: x.opening + y.opening, debit: x.debit + y.debit, credit: x.credit + y.credit, closing: x.closing + y.closing });
-      const staffWallets = sumGroup((state.staff || []).map(st => { const acc = ensureStaffAccount(st.id); return { acc, wallet: (state.customers || []).find(c => c.id === acc.linkedCustomerId) }; }), x => txItems(x.wallet), x => x.acc.balance);
-      const tellerSeg = accountsInSegment('tellerng').reduce((t, c) => addFig(t, tellerFigures(c.linkedStaffId, r)), { opening: 0, debit: 0, credit: 0, closing: 0 });
       const cats = [
         ["All Customers' Balance", sumGroup(accountsInSegment('customer'), txItems, c => c.balance)],
-        ['All Staff Balance', addFig(staffWallets, sumGroup(accountsInSegment('staff'), txItems, c => c.balance))],
+        ['All Staff Balance', sumGroup(staffBalanceAccounts(), txItems, c => c.balance)],
         ['Income Balance', sumGroup(operationalBalanceAccounts('income'), balanceItems, a => operationalAccountTotals(a).balance)],
         ['Expense Balance', sumGroup(operationalBalanceAccounts('expense'), balanceItems, a => operationalAccountTotals(a).balance)],
-        ['Tellerng Balance', tellerSeg],
-        ['Treasury Balance', sumGroup(accountsInSegment('treasury'), txItems, c => c.balance)],
       ];
       const g = cats.reduce((t, [, f]) => ({ opening: t.opening + f.opening, debit: t.debit + f.debit, credit: t.credit + f.credit, closing: t.closing + f.closing }), { opening: 0, debit: 0, credit: 0, closing: 0 });
+      if (def.report === 'total') {
+        const staffIds = new Set(accountsInSegment('tellerng').map(c => c.linkedStaffId).filter(Boolean));
+        const teller = withApprovalsUpTo(r.end, () => [...staffIds].reduce((sum, id) => sum + getStaffOperationalBalance(id), 0));
+        const treasury = sumGroup(accountsInSegment('treasury'), txItems, c => c.balance).closing;
+        const variance = Number((g.closing - teller - treasury).toFixed(2));
+        const rows = [
+          ['Total amount credited', g.credit],
+          ['Total account balance', g.closing],
+          ['Tellering balance', teller],
+          ['Treasury balance', treasury],
+          ['Total Tellering and Treasury', teller + treasury],
+          [variance < 0 ? 'Variance (Loss)' : variance > 0 ? 'Variance (Gain)' : 'Variance (Balanced)', variance]
+        ];
+        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Total Balance</caption><tbody>${rows.map(([label, amount], i) => `<tr${i === rows.length - 1 ? ' class="total-row"' : ''}><td>${label}</td><td class="bs-num">${money(amount)}</td></tr>`).join('')}</tbody></table></div></div></div>`;
+      }
       // A/C No shows the real account numbers held in each category (first - last), never made-up codes.
       const numsOf = (list) => (list || []).map(a => String(a?.accountNumber || a?.account_number || '').trim()).filter(Boolean).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
       const noRange = (nums) => !nums.length ? '—' : nums.length === 1 || nums[0] === nums[nums.length - 1] ? nums[0] : `${nums[0]} – ${nums[nums.length - 1]}`;
-      const staffNos = numsOf([...accountsInSegment('staff'), ...(state.staff || []).map(st => ensureStaffAccount(st.id))]);
+      const staffNos = numsOf(staffBalanceAccounts());
       const catMeta = [
         ['CUSTOMER ACCOUNT', noRange(numsOf(accountsInSegment('customer')))],
         ['STAFF ACCOUNT', noRange([...new Set(staffNos)])],
         ['INCOME ACCOUNT', noRange(numsOf(operationalBalanceAccounts('income')))],
         ['EXPENSES ACCOUNT', noRange(numsOf(operationalBalanceAccounts('expense')))],
-        ['TELLER ACCOUNT', noRange(numsOf(accountsInSegment('tellerng')))],
-        ['TREASURY ACCOUNT', noRange(numsOf(accountsInSegment('treasury')))],
       ];
       const bal = (f) => f.opening + f.credit - f.debit;
       const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(catMeta[i][1])}</td><td>${catMeta[i][0]}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal(f) < 0 ? 'balance-negative' : ''}">${money(bal(f))}</td></tr>`).join('');
@@ -5697,7 +5698,7 @@ function nextPaint() {
         return { e, run };
       }).filter(x => inRange(x.e.date));
       rows = lines.map(({ e, run }, i) => { const cr = isCredit(e); const amt = Number(e.amount || 0); if (cr) totals.cr += amt; else totals.dr += amt; totals.bal = run;
-        return `<tr><td>${i+1}</td><td>${fmtDate(e.date)}</td><td>${cell(cleanOperationalNote(e.details || e.note))}</td><td class="bs-num">${cr ? '' : money(amt)}</td><td class="bs-num">${cr ? money(amt) : ''}</td><td class="bs-num">${money(run)}</td><td>${cell(e.receivedOrPaidBy)}</td><td>${cell(e.postedBy)}</td><td>${cell(e.approvedBy)}</td></tr>`; }).join('');
+        return `<tr><td>${i+1}</td><td>${fmtDate(e.date)}</td><td>${cell(cleanOperationalNote(e.details || e.note))}</td><td class="bs-num">${cr ? '' : money(amt)}</td><td class="bs-num">${cr ? money(amt) : ''}</td><td class="bs-num">${money(run)}</td><td>${cell(e.receivedOrPaidBy)}</td><td>${cell(postingStaffId(e.postedById, e.postedBy))}</td><td>${cell(postingStaffId(e.approvedByStaffId, e.approvedBy))}</td></tr>`; }).join('');
     } else {
       acct = (state.customers || []).find(c => c.id === id);
       if (!acct) return showToast('Account not found');
@@ -5709,7 +5710,7 @@ function nextPaint() {
         const events = all.filter(ev => inRange(ev.date));
         if (!events.length) { const upTo = all.filter(ev => !f.to || String(ev.date).slice(0, 10) <= f.to); totals.bal = upTo.length ? Number(upTo[upTo.length - 1].runningBalance || 0) : 0; }
         rows = events.map((ev, i) => { const d = Number(ev.delta || 0), amt = Math.abs(d); if (d < 0) totals.dr += amt; else totals.cr += amt; totals.bal = Number(ev.runningBalance || 0);
-          return `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td><td class="bs-num">${d < 0 ? money(amt) : ''}</td><td class="bs-num">${d > 0 ? money(amt) : ''}</td><td class="bs-num">${money(ev.runningBalance)}</td><td>${cell(ev.receivedOrPaidBy)}</td><td>${cell(ev.postedBy || ev.staffName)}</td><td>${cell(ev.approvedBy)}</td></tr>`; }).join('');
+          return `<tr><td>${i+1}</td><td>${fmtDate(`${String(ev.date).slice(0,10)}T12:00:00.000Z`)}</td><td>${escapeHtml(ev.type || '')}${ev.details ? ` — ${escapeHtml(ev.details)}` : ''}</td><td class="bs-num">${d < 0 ? money(amt) : ''}</td><td class="bs-num">${d > 0 ? money(amt) : ''}</td><td class="bs-num">${money(ev.runningBalance)}</td><td>${cell(ev.receivedOrPaidBy)}</td><td>${cell(postingStaffId(ev.postedById, ev.postedBy))}</td><td>${cell(postingStaffId(ev.approvedByStaffId, ev.approvedBy))}</td></tr>`; }).join('');
       } else {
         const txs = (acct.transactions || []).filter(tx => inRange(tx.date));
         if (!txs.length) {
@@ -5718,7 +5719,7 @@ function nextPaint() {
           totals.bal = upTo.length ? Number(upTo[upTo.length - 1].balanceAfter || 0) : ((acct.transactions || []).length ? 0 : Number(acct.balance || 0));
         }
         rows = txs.map((tx, i) => { const amt = Number(tx.amount || 0); if (tx.type === 'debit') totals.dr += amt; else if (tx.type === 'credit') totals.cr += amt; totals.bal = Number(tx.balanceAfter || 0);
-          return `<tr><td>${i+1}</td><td>${fmtDate(tx.date)}</td><td>${cell(tx.details)}</td><td class="bs-num">${tx.type === 'debit' ? money(amt) : ''}</td><td class="bs-num">${tx.type === 'credit' ? money(amt) : ''}</td><td class="bs-num">${money(tx.balanceAfter)}</td><td>${cell(statementReceivedBy(tx))}</td><td>${cell(tx.postedBy || tx.postedById)}</td><td>${cell(tx.approvedBy)}</td></tr>`; }).join('');
+          return `<tr><td>${i+1}</td><td>${fmtDate(tx.date)}</td><td>${cell(tx.details)}</td><td class="bs-num">${tx.type === 'debit' ? money(amt) : ''}</td><td class="bs-num">${tx.type === 'credit' ? money(amt) : ''}</td><td class="bs-num">${money(tx.balanceAfter)}</td><td>${cell(statementReceivedBy(tx))}</td><td>${cell(postingStaffId(tx.postedById, tx.postedBy))}</td><td>${cell(postingStaffId(tx.approvedByStaffId, tx.approvedBy))}</td></tr>`; }).join('');
       }
     }
     const today = fmtDate(`${dateOnly(businessDate())}T12:00:00.000Z`);
@@ -5738,7 +5739,7 @@ function nextPaint() {
         <div class="table-wrap bs-wrap"><table class="table bs-table bs-stmt-table">
           <thead>
             <tr class="bs-band"><th colspan="2">Address</th><td>${cell(address)}</td><th>Gender</th><td>${cell(gender)}</td><td colspan="4"></td></tr>
-            <tr class="bs-band"><th colspan="2">A/C Name</th><td>${cell(acct.name)}</td><th>A/C No</th><td>${cell(acct.accountNumber || acct.account_number)}</td><td colspan="2"></td><th>Date</th><td>${today}</td></tr>
+            <tr class="bs-band"><th colspan="2">A/C Name</th><td>${cell(acct.name)}</td><th>A/C No</th><td>${cell(acct.accountType === 'staff_operational' ? tellerIdForAccount(acct) : acct.accountNumber || acct.account_number)}</td><td colspan="2"></td><th>Date</th><td>${today}</td></tr>
             <tr class="bs-cols"><th>S/N</th><th>Date</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th><th>Received/Paid By</th><th>Posted By</th><th>Approved By</th></tr>
           </thead>
           <tbody>${bfRow}${rows || `<tr><td colspan="9">${f.from || f.to ? 'No entries in these dates' : 'No entries on this account yet'}</td></tr>`}<tr class="total-row"><td colspan="3">TOTAL</td><td class="bs-num">${money(totals.dr)}</td><td class="bs-num">${money(totals.cr)}</td><td class="bs-num">${money(totals.bal)}</td><td colspan="3"></td></tr></tbody>
@@ -5831,7 +5832,7 @@ function nextPaint() {
     const staffRole = (id) => (state.staff || []).find(s => s.id === id)?.role || '';
     const groups = [
       ['Customer Account', (state.customers || []).filter(c => String(c.accountType || 'customer') === 'customer'), 'aud_customers'],
-      ['Staff Account', (state.customers || []).filter(c => c.accountType === 'staff_salary'), 'aud_types'],
+      ['Staff Account', (state.customers || []).filter(c => c.accountType === 'staff_salary'), 'aud_customers:staff_salary'],
       ['Income Account', state.operations.incomeAccounts || [], 'operational_accounts'],
       ['Expenses Account', state.operations.expenseAccounts || [], 'operational_accounts'],
       ['Teller Account', (state.customers || []).filter(c => c.accountType === 'staff_operational'), 'aud_tellers'],
@@ -5864,6 +5865,7 @@ function nextPaint() {
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: 'daily' });
     const bar = renderPeriodBar();
     if (tool === 'adm_staff') return renderStaffManagement();
+    if (tool === 'adm_total') return renderPeriodBalance({ report: 'total', preset: 'daily' });
     if (tool === 'adm_balance') return renderPeriodBalance({ report: 'overall', label: 'Account Balance', preset: 'daily' });
     if (tool === 'aud_cs') {
       const rows = auditCountsByType(r);
@@ -5872,10 +5874,11 @@ function nextPaint() {
     }
     if (tool === 'aud_tellers') {
       let T = { opening: 0, received: 0, withdrawn: 0, closing: 0 };
-      const rows = (state.staff || []).filter(st => staffOperationalAccountNumber(st.id)).map((st, i) => {
+      const rows = accountsInSegment('tellerng').filter(account => account.linkedStaffId).map((account, i) => {
+        const st = staffById(account.linkedStaffId) || { id: account.linkedStaffId, name: account.name };
         const x = tellerPeriodRow(st, r);
         T.opening += x.openingRaw; T.received += x.received; T.withdrawn += x.withdrawn; T.closing += x.closing;
-        return `<tr><td>${i+1}</td><td>${escapeHtml(st.name || '')} <span class="muted">(${escapeHtml(staffOperationalAccountNumber(st.id))})</span></td><td>${money(x.openingRaw)}</td><td>${money(x.received)}</td><td>${money(x.withdrawn)}</td><td class="${x.closing<0?'balance-negative':''}">${money(x.closing)}</td><td><button class="secondary tiny-btn" data-staff-ledger="${st.id}">Review</button></td></tr>`;
+        return `<tr><td>${i+1}</td><td>${escapeHtml(st.name || '')} <span class="muted">(${escapeHtml(tellerIdentity(st))})</span></td><td>${money(x.openingRaw)}</td><td>${money(x.received)}</td><td>${money(x.withdrawn)}</td><td class="${x.closing<0?'balance-negative':''}">${money(x.closing)}</td><td><button class="secondary tiny-btn" data-bs-statement="cust:${escapeHtml(account.id)}">Review</button></td></tr>`;
       }).join('');
       return `<div class="stack">${bar}<div class="table-card"><h3>Tellering / Non-Tellering</h3><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Teller</th><th>Opening Cash</th><th>Cash Received</th><th>Cash Withdrawal</th><th>Balance</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No staff with an operational account</td></tr>'}${rows ? `<tr class="total-row"><td colspan="2"><strong>Total</strong></td><td><strong>${money(T.opening)}</strong></td><td><strong>${money(T.received)}</strong></td><td><strong>${money(T.withdrawn)}</strong></td><td><strong>${money(T.closing)}</strong></td><td></td></tr>` : ''}</tbody></table></div></div></div>`;
     }
@@ -5890,7 +5893,7 @@ function nextPaint() {
       const ops = (state.customers || []).filter(c => c.accountType === 'staff_operational' && c.linkedStaffId);
       const rows = [
         ['Customer Account', acctSum((state.customers || []).filter(c => String(c.accountType || 'customer') === 'customer')), 'aud_customers'],
-        ['Staff Account', acctSum((state.customers || []).filter(c => c.accountType === 'staff_salary')), 'aud_types'],
+        ['Staff Account', acctSum((state.customers || []).filter(c => c.accountType === 'staff_salary')), 'aud_customers:staff_salary'],
         ['Income Account', opSum(operationalBalanceAccounts('income')), 'operational_accounts'],
         ['Expenses Account', opSum(operationalBalanceAccounts('expense')), 'operational_accounts'],
         ['Teller Account', tellerSum(ops), 'aud_tellers'],
@@ -5901,13 +5904,14 @@ function nextPaint() {
     }
     if (tool === 'aud_customers') {
       const search = String(state.ui.periodBalanceSearch || '').trim().toLowerCase();
-      const kind = state.ui.audAccountKind === 'treasury' ? 'treasury' : 'customer';
+      const kind = ['treasury', 'staff_salary'].includes(state.ui.audAccountKind) ? state.ui.audAccountKind : 'customer';
+      const title = { treasury: 'Treasury', staff_salary: 'Staff', customer: 'Customer' }[kind];
       const list = (state.customers || []).filter(c => String(c.accountType || 'customer') === kind)
         .filter(c => !search || [c.name, c.accountNumber, c.phone].some(v => String(v || '').toLowerCase().includes(search)))
         .sort((a, b) => String(a.accountNumber || '').localeCompare(String(b.accountNumber || ''), undefined, { numeric: true }));
       let T = { dr: 0, cr: 0, bal: 0 };
       const rows = list.map((c, i) => { const f = periodFigures(c.balance, txItems(c), r); T.dr += f.debit; T.cr += f.credit; T.bal += f.closing; return `<tr><td>${i+1}</td><td>${escapeHtml(c.name || '—')}${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(String(c.accountNumber || '—'))}</td><td>${money(f.debit)}</td><td>${money(f.credit)}</td><td>${money(f.closing)}</td></tr>`; }).join('');
-      return `<div class="stack">${bar}<div class="table-card"><h3>${kind === 'treasury' ? 'Treasury Account' : 'Customer Account'}</h3><div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>A/C Name</th><th>A/C No</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No ${kind === 'treasury' ? 'Treasury' : 'customer'} accounts</td></tr>`}${rows ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td></tr>` : ''}</tbody></table></div></div></div>`;
+      return `<div class="stack">${bar}<div class="table-card"><h3>${title} Account</h3><div class="form-grid one" style="margin:6px 0 10px"><div class="field"><label>Search Account</label><input id="periodBalanceSearch" class="entry-input" value="${escapeHtml(state.ui.periodBalanceSearch || '')}"></div></div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>A/C Name</th><th>A/C No</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No ${title.toLowerCase()} accounts</td></tr>`}${rows ? `<tr class="total-row"><td colspan="3"><strong>Total</strong></td><td><strong>${money(T.dr)}</strong></td><td><strong>${money(T.cr)}</strong></td><td><strong>${money(T.bal)}</strong></td></tr>` : ''}</tbody></table></div></div></div>`;
     }
     if (tool === 'ict_access') return renderStaffRoster();
     // ICT: backup + checklists
@@ -5971,7 +5975,7 @@ function nextPaint() {
 
   function bindAdminSub(tool) {
     qq('[data-adm-review]').forEach(btn => btn.onclick = () => { const [tool, kind] = btn.dataset.admReview.split(':'); state.ui.tool = tool; state.ui.audAccountKind = kind || ''; save(); renderWorkspace(); });
-    if (['adm_balance','aud_cs','aud_tellers','aud_types','aud_customers'].includes(tool)) bindPeriodBalance();
+    if (['adm_balance','adm_total','aud_cs','aud_tellers','aud_types','aud_customers'].includes(tool)) bindPeriodBalance();
     if (tool === 'ict_access') { bindStaffDirectory(); return; }
     if (tool === 'adm_staff') {
       if (!adminSessionLoaded.profiles) { loadStaffProfiles(); }
@@ -6056,37 +6060,18 @@ function nextPaint() {
   }
 
   function renderOverallBalance() {
-    // Overall Balance is a rollup of the OTHER balance categories — not another
-    // per-account or staff-balance listing. Each row here is a category total.
+    // Overall Balance rolls up the four account categories.
     let customerDebit = 0, customerCredit = 0, customerBalance = 0;
-    let treasuryDebit = 0, treasuryCredit = 0, treasuryBalance = 0;
-    (state.customers || []).filter(c => String(c.accountType || '') === 'treasury').forEach(c => {
-      treasuryCredit += (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s,tx)=>s+Number(tx.amount||0),0);
-      treasuryDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s,tx)=>s+Number(tx.amount||0),0);
-      treasuryBalance += Number(c.balance||0);
-    });
     accountsInSegment('customer').forEach(c => {
       customerCredit += (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s,tx)=>s+Number(tx.amount||0),0);
       customerDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s,tx)=>s+Number(tx.amount||0),0);
       customerBalance += Number(c.balance||0);
     });
     let staffDebit = 0, staffCredit = 0, staffBalance = 0;
-    (state.staff || []).forEach(s => {
-      const acc = ensureStaffAccount(s.id);
-      const wallet = (state.customers || []).find(c => c.id === acc.linkedCustomerId);
-      staffCredit += (wallet?.transactions || []).filter(tx => tx.type === 'credit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
-      staffDebit += (wallet?.transactions || []).filter(tx => tx.type === 'debit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
-      staffBalance += Number(acc.balance||0);
-    });
-    accountsInSegment('staff').forEach(c => {
+    staffBalanceAccounts().forEach(c => {
       staffCredit += (c.transactions || []).filter(tx => tx.type === 'credit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
       staffDebit += (c.transactions || []).filter(tx => tx.type === 'debit').reduce((s2,tx)=>s2+Number(tx.amount||0),0);
       staffBalance += Number(c.balance||0);
-    });
-    let tellerDebit = 0, tellerCredit = 0, tellerBalance = 0;
-    accountsInSegment('tellerng').forEach(c => {
-      const f = tellerFigures(c.linkedStaffId, { start: '', end: '' });
-      tellerDebit += f.debit; tellerCredit += f.credit; tellerBalance += f.closing;
     });
     let incomeDebit = 0, incomeCredit = 0, incomeBalance = 0;
     operationalBalanceAccounts('income').forEach(a => {
@@ -6100,11 +6085,9 @@ function nextPaint() {
     });
     const categories = [
       { name: "All Customers' Balance", totalDebit: customerDebit, totalCredit: customerCredit, balance: customerBalance },
-      { name: 'Treasury Balance', totalDebit: treasuryDebit, totalCredit: treasuryCredit, balance: treasuryBalance },
       { name: 'All Staff Balance', totalDebit: staffDebit, totalCredit: staffCredit, balance: staffBalance },
       { name: 'Income Balance', totalDebit: incomeDebit, totalCredit: incomeCredit, balance: incomeBalance },
-      { name: 'Expense Balance', totalDebit: expenseDebit, totalCredit: expenseCredit, balance: expenseBalance },
-      { name: 'Tellerng Balance', totalDebit: tellerDebit, totalCredit: tellerCredit, balance: tellerBalance }
+      { name: 'Expense Balance', totalDebit: expenseDebit, totalCredit: expenseCredit, balance: expenseBalance }
     ];
     const grandDebit = categories.reduce((s,c)=>s+c.totalDebit,0);
     const grandCredit = categories.reduce((s,c)=>s+c.totalCredit,0);
@@ -6112,7 +6095,7 @@ function nextPaint() {
     const bodyRows = categories.map((c,i) =>
       `<tr><td>${i+1}</td><td>${escapeHtml(c.name)}</td><td>${money(c.totalDebit)}</td><td>${money(c.totalCredit)}</td><td>${money(c.balance)}</td></tr>`
     ).join('');
-    return `<div class="stack"><div class="table-card"><h3>Overall Balance</h3><div class="note">The company's entire truth — the balance of every other balance category, rolled up into one business total.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr></thead><tbody>${bodyRows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td></tr></tbody></table></div></div></div>`;
+    return `<div class="stack"><div class="table-card"><h3>Overall Balance</h3><div class="note">Customers, staff, income and expense accounts.</div><div class="table-wrap"><table class="table"><thead><tr><th>S/N</th><th>Balance Category</th><th>Total Debit</th><th>Total Credit</th><th>Balance</th></tr></thead><tbody>${bodyRows}<tr class="total-row"><td colspan="2"><strong>Overall Balance of the Business</strong></td><td><strong>${money(grandDebit)}</strong></td><td><strong>${money(grandCredit)}</strong></td><td><strong>${money(grandBalance)}</strong></td></tr></tbody></table></div></div></div>`;
   }
 
   function renderBusinessBalance() {
@@ -6147,7 +6130,7 @@ function nextPaint() {
           <div class="kpi compact-page-kpi"><div class="label">Net Operational</div><div class="number">${money(income.reduce((s,e)=>s+Number(e.amount||0),0)-expense.reduce((s,e)=>s+Number(e.amount||0),0))}</div></div>
           <div class="kpi compact-page-kpi"><div class="label">Entries</div><div class="number">${filtered.length}</div></div>
         </div>
-        <div class="table-card"><h3>Operational Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Amount</th><th>Note</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.operationalEntriesLimit || 20).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.accountName || '')}</td><td>${escapeHtml(e.kind || '')}</td><td>${money(e.amount)}</td><td>${escapeHtml(cleanOperationalNote(e.note || e.details) || '—')}</td><td>${escapeHtml(e.postedBy || '')}</td><td>${escapeHtml(e.approvedBy || '')}</td></tr>`).join('') || '<tr><td colspan="7">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.operationalEntriesLimit || 20) ? `<button id="operationalMore" class="secondary">Show More</button>` : ''}${(state.ui.operationalEntriesLimit || 20) > 20 ? `<button id="operationalLess" class="secondary">Show Less</button>` : ''}</div></div>
+        <div class="table-card"><h3>Operational Entries</h3><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Amount</th><th>Note</th><th>Posted By</th><th>Approved By</th></tr></thead><tbody>${filtered.slice(0,state.ui.operationalEntriesLimit || 20).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.accountName || '')}</td><td>${escapeHtml(e.kind || '')}</td><td>${money(e.amount)}</td><td>${escapeHtml(cleanOperationalNote(e.note || e.details) || '—')}</td><td>${escapeHtml(postingStaffId(e.postedById, e.postedBy))}</td><td>${escapeHtml(postingStaffId(e.approvedByStaffId, e.approvedBy))}</td></tr>`).join('') || '<tr><td colspan="7">No entries</td></tr>'}</tbody></table></div><div class="action-row">${filtered.length > (state.ui.operationalEntriesLimit || 20) ? `<button id="operationalMore" class="secondary">Show More</button>` : ''}${(state.ui.operationalEntriesLimit || 20) > 20 ? `<button id="operationalLess" class="secondary">Show Less</button>` : ''}</div></div>
       </div>`;
   }
 
@@ -6175,8 +6158,8 @@ function nextPaint() {
         details: cleanOperationalNote(e.details || e.note) || '',
         balanceAfter: runningBalance,
         receivedOrPaidBy: e.receivedOrPaidBy || e.postedBy || '—',
-        postedBy: e.postedBy || '—',
-        approvedBy: e.approvedBy || '—'
+        postedBy: postingStaffId(e.postedById, e.postedBy),
+        approvedBy: postingStaffId(e.approvedByStaffId, e.approvedBy)
       };
     });
   }
@@ -6304,8 +6287,8 @@ function nextPaint() {
         details: cleanOperationalNote(e.details || e.note) || '',
         balanceAfter: Number(e.balanceAfter || 0),
         receivedOrPaidBy: e.receivedBy || e.receivedOrPaidBy || e.postedBy || '',
-        postedBy: e.postedBy || '',
-        approvedBy: e.approvedBy || ''
+        postedBy: postingStaffId(e.postedById, e.postedBy),
+        approvedBy: postingStaffId(e.approvedByStaffId, e.approvedBy)
       };
     });
   }
@@ -6426,6 +6409,8 @@ function staffLedgerEvents(staffId) {
       if (ctxReq) {
         const rp = ctxReq.payload || {};
         event.receivedOrPaidBy = event.receivedOrPaidBy || rp.receivedOrPaidBy || rp.receivedBy || rp.paidBy || rp.paidTo || rp.receivedFromName || rp.collectorName || '';
+        event.postedById ||= ctxReq.requestedBy;
+        event.approvedByStaffId ||= ctxReq.approvedByStaffId;
         event.postedBy = event.postedBy || ctxReq.requestedByName || staffName(ctxReq.requestedBy) || '';
         event.approvedBy = event.approvedBy || ctxReq.approvedBy || ctxReq.approvedByName || '';
       }
@@ -6436,8 +6421,12 @@ function staffLedgerEvents(staffId) {
       seen.add(key);
       events.push(event);
     };
+    const approved = postingApprovals().filter(req => String(req.status || '').toLowerCase() === 'approved');
+    const approvedForStaff = new Map(approved.filter(req => (req.payload?.staffId || req.payload?.staff_id) === staffId).map(req => [req.id, req]));
     (acc.entries || []).forEach(entry => {
       const type = String(entry.type || '').toLowerCase();
+      const source = approvedForStaff.get(entry.sourceApprovalId || entry.approvalRequestId);
+      if (source && (source.type === type || (type === 'approved_form' && source.type === 'float_declaration'))) return;
       const amount = Number(entry.amount || 0);
       const date = entry.formDate || entry.floatDate || String(entry.date || '').slice(0,10) || businessDate();
       if (['approved_form','approved_float'].includes(type)) addEvent({ key: entry.id || `form-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: entry.note || `Approved FORM for ${date}`, runningType: 'form' });
@@ -6451,7 +6440,7 @@ function staffLedgerEvents(staffId) {
       else if (['customer_debit_journal'].includes(type)) addEvent({ key: entry.id || `debit-journal-${date}-${amount}`, date, type: 'Journal Form', amount, delta: -amount, details: entry.note || 'Debit journal form', runningType: 'debit' });
       else if (['debt_repayment','wallet_fund','wallet_funding'].includes(type)) addEvent({ key: entry.id || `${type}-${date}-${amount}`, date, type: type === 'debt_repayment' ? 'Debt Repayment' : 'Wallet', amount, delta: 0, details: entry.note || type.replace(/_/g,' '), runningType: 'other' });
     });
-    postingApprovals().filter(r => String(r.status || '').toLowerCase() === 'approved').forEach(req => {
+    approved.forEach(req => {
       const payload = req.payload || {};
       ctxReq = req;
       const date = payload.date || payload.float_date || String(req.approvedAt || req.requestedAt || '').slice(0,10) || businessDate();
@@ -6472,13 +6461,10 @@ function staffLedgerEvents(staffId) {
           addEvent({ key: req.id || `inter-credit-${date}-${amount}`, date, type: 'Operational Credit', amount, delta: amount, details: `Credited by ${payload.staffName || 'Treasury'}${(payload.note || payload.details) ? ' • ' + (payload.note || payload.details) : ''}`, runningType: 'form' });
         }
         // SURGICAL ADDITION 2026-09-09: the ACTING staff who issued this
-        // funding (via Non Cash, locked to their own account — see
-        // applyStaffAccountLock) needs it on their own statement too — a
+        // funding via Non Cash needs it on their own statement too — a
         // non-balance-affecting audit line ("I funded this account"), not
         // just visible on the receiving side above. This is what makes the
-        // acting staff's own My Statement actually diverge from anyone
-        // else's based on what THEY did, instead of staying silent on
-        // every Non Cash action they perform.
+        // acting staff's own My Statement shows the transfer they submitted.
         // SURGICAL FIX 2026-10-22 (client): money the teller sends OUT of
         // their own operational account (e.g. the Till handed to Treasury)
         // was only a zero-amount note here, so the statement balance never
@@ -6843,7 +6829,7 @@ function staffLedgerEvents(staffId) {
         return entries.map((entry, n) => {
           const c = state.customers.find(c => c.id === (entry.customerId || p.customerId)) || {};
           const data = { ...c, ...p, ...entry, ...(p.patch || {}) };
-          const approvedName = req.status === 'approved' ? (req.approvedBy || req.approvedByName || '—') : '';
+          const approvedName = req.status === 'approved' ? postingStaffId(req.approvedByStaffId, req.approvedBy, req.approvedByName) : '';
           const approvedCell = approvedName ? escapeHtml(approvedName) : `<span class="wr-state">${escapeHtml(r.status)}</span>`;
           const changeable = canChangeReviewWork(req);
           const editable = changeable && (['account_opening','account_maintenance','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','operational_entry'].includes(req.type) || (req.status === 'pending' && ['cash_receipt','inter_staff_credit'].includes(req.type)));
@@ -6875,7 +6861,7 @@ function staffLedgerEvents(staffId) {
     const count = (k) => inRange.filter(r => r.status === k).length;
     const label = f.mode === 'range' ? `${range.from ? fmtDate(`${range.from}T12:00:00.000Z`) : 'Start'} – ${range.to ? fmtDate(`${range.to}T12:00:00.000Z`) : 'Today'}` : fmtDate(`${range.from}T12:00:00.000Z`);
     const bar = `<div class="action-inline balance-filters-row wr-filters">
-      ${isAdminStaff(viewer) ? `<label class="inline-field"><span>Review Staff</span><select id="rvmStaff">${state.staff.map(x => `<option value="${escapeHtml(x.id)}" ${x.id === st.id ? 'selected' : ''}>${escapeHtml(x.name)} — ${escapeHtml(tellerIdLabel(x))}</option>`).join('')}</select></label>` : ''}
+      ${isAdminStaff(viewer) ? `<label class="inline-field"><span>Review Staff</span><select id="rvmStaff">${state.staff.map(x => `<option value="${escapeHtml(x.id)}" ${x.id === st.id ? 'selected' : ''}>${escapeHtml(x.name)} — ${escapeHtml(tellerIdentity(x))}</option>`).join('')}</select></label>` : ''}
       <button class="filter-chip ${f.mode === 'today' ? 'active' : 'secondary'}" id="rvmToday">Today</button>
       <label class="inline-field"><span>From</span><input id="rvmFrom" type="date" lang="en-GB" value="${escapeHtml(f.from || '')}"></label>
       <label class="inline-field"><span>To</span><input id="rvmTo" type="date" lang="en-GB" value="${escapeHtml(f.to || '')}"></label>
@@ -6924,7 +6910,7 @@ function staffLedgerEvents(staffId) {
       <div class="stack">
         <div class="form-card">
           <h3>${def.title}</h3>
-          ${isAdminStaff(viewer) ? `<label class="inline-field"><span>Review Staff</span><select id="reviewStaffSelect">${state.staff.map(s => `<option value="${escapeHtml(s.id)}" ${s.id === st.id ? 'selected' : ''}>${escapeHtml(s.name)} — ${escapeHtml(tellerIdLabel(s))}</option>`).join('')}</select></label>` : ''}
+          ${isAdminStaff(viewer) ? `<label class="inline-field"><span>Review Staff</span><select id="reviewStaffSelect">${state.staff.map(s => `<option value="${escapeHtml(s.id)}" ${s.id === st.id ? 'selected' : ''}>${escapeHtml(s.name)} — ${escapeHtml(tellerIdentity(s))}</option>`).join('')}</select></label>` : ''}
           ${showTeller ? tellerBannerHtml(st) : ''}
           <div class="kpi-row wrap">
             <div class="kpi"><div class="label">Staff</div><div class="number">${escapeHtml(st.name || '')}</div></div>
@@ -7855,27 +7841,6 @@ function normalizeStaffLedgerEntryType(row) {
   // That two-step is what keeps the acting staff as the accountable
   // issuer instead of letting money jump straight from an arbitrary
   // account into a staff account with nobody's name on it.
-  // Returns the staff's own operational account record, or null if they
-  // don't have one. 2026-10-24 (client): staff without one (Treasury
-  // officers) fund a staff account from a business Treasury account instead
-  // — the Debit side stays open and is checked to be a Treasury account.
-  function applyStaffAccountLock(draft) {
-    const dest = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
-    if (!dest || dest.accountType !== 'staff_operational') return null;
-    const st = currentStaff();
-    const mine = (state.customers || []).find(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id);
-    if (!mine) return null;
-    draft.sourceId = mine.id;
-    draft.sourceAcct = mine.accountNumber || mine.account_number || '';
-    draft.sourceName = mine.name || mine.displayName || mine.display_name || '';
-    // A staff operational account's real spendable balance is NOT its
-    // customer.balance field (that only tracks real debits ever posted to
-    // it) — it's the live aggregate from getStaffOperationalBalance (same
-    // figure shown everywhere else as Till/Treasury/Teller balance).
-    draft.sourceBalance = getStaffOperationalBalance(st.id);
-    return mine;
-  }
-
   // SURGICAL ADDITION 2026-10-01 (client-reported "Admin does not exist in
   // Supabase"): staff wallets (the 4000-series accounts) live only inside
   // the app, not in the Supabase customers table, so a Non Cash to/from
@@ -7889,9 +7854,8 @@ function normalizeStaffLedgerEntryType(row) {
     const sourceAccount = draft.sourceId ? (state.customers || []).find(c => c.id === draft.sourceId) : null;
     const destAccount = draft.destId ? (state.customers || []).find(c => c.id === draft.destId) : null;
     const st = currentStaff();
-    const sourceLocked = !!(destAccount && destAccount.accountType === 'staff_operational' && (state.customers || []).some(c => c.accountType === 'staff_operational' && c.linkedStaffId === st?.id));
-    const myTellerId = tellerIdLabel(st);
-    const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? 'Teller' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
+    const myTellerId = tellerIdentity(st);
+    const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? `Teller · ${tellerIdForAccount(c)}` : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
     const amountVal = escapeHtml(String(draft.amount || ''));
     // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
     // the client's sheet — the two top-level headings of the form are Debit
@@ -7906,12 +7870,11 @@ function normalizeStaffLedgerEntryType(row) {
           <div class="nc-grid">
             <div class="nc-head">Debit</div>
             <div class="nc-label">Account Number</div>
-            <div class="nc-cell"><input id="itrSourceAcct" class="entry-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" autocomplete="off" ${sourceLocked ? 'disabled' : ''}></div>
-            <div class="nc-cell"><button id="itrLookupSource" class="nc-mini-btn" ${sourceLocked ? 'disabled' : ''}>Search</button></div>
+            <div class="nc-cell"><input id="itrSourceAcct" class="entry-input" maxlength="12" value="${escapeHtml(String(draft.sourceAcct || ''))}" autocomplete="off"></div>
+            <div class="nc-cell"><button id="itrLookupSource" class="nc-mini-btn">Search</button></div>
             <div class="nc-cell nc-tag">Teller ID</div>
             <div class="nc-cell"><div class="display-field" id="itrTellerId">${escapeHtml(myTellerId)}</div></div>
 
-            <div id="itrSourceLockNote" class="note nc-span-all" style="${sourceLocked ? '' : 'display:none'}">Crediting a staff account always debits <strong>your own</strong> operational account — locked so you stay the accountable issuer. To fund it with someone else's money, first move that money into your own account with a separate Non Cash entry, then fund the staff account from there.</div>
 
             <div class="nc-label">Account Name</div>
             <div class="nc-cell nc-span-4"><div id="itrSourceName" class="display-field">${draft.sourceName ? `<strong>${escapeHtml(draft.sourceName)}</strong>` : ''}</div></div>
@@ -7931,7 +7894,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-label nc-label-grey">Amount Paid</div>
             <div class="nc-cell"><input id="itrAmount" class="entry-input" type="text" inputmode="decimal" value="${amountVal}"></div>
             <div class="nc-cell nc-tag">Account Type</div>
-            <div class="nc-cell nc-span-2"><div class="display-field" id="itrSourceType">${typeOf(sourceAccount)}</div></div>
+            <div class="nc-cell nc-span-2"><div class="display-field" id="itrSourceType">${escapeHtml(typeOf(sourceAccount))}</div></div>
 
             <div class="nc-head">Credit</div>
             <div class="nc-label">Account Number</div>
@@ -7959,7 +7922,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-label nc-label-grey">Amount Received</div>
             <div class="nc-cell"><div class="display-field" id="itrAmountReceived">${escapeHtml(formatAmountText(draft.amount || ''))}</div></div>
             <div class="nc-cell nc-tag">Account Type</div>
-            <div class="nc-cell"><div class="display-field" id="itrDestType">${typeOf(destAccount)}</div></div>
+            <div class="nc-cell"><div class="display-field" id="itrDestType">${escapeHtml(typeOf(destAccount))}</div></div>
           </div>
         </div>
       </div>`;
@@ -7983,23 +7946,13 @@ function normalizeStaffLedgerEntryType(row) {
       }
       const statusElId = isDest ? 'itrDestStatus' : 'itrSourceStatus';
       const typeElId = isDest ? 'itrDestType' : 'itrSourceType';
-      const typeLabel = (c) => c.accountType === 'staff_operational' ? 'Teller' : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
+      const typeLabel = (c) => c.accountType === 'staff_operational' ? `Teller · ${tellerIdForAccount(c)}` : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))));
       if (match) {
         draft[idKey] = match.id;
         draft[nameKey] = match.name || match.full_name || match.display_name || acctNum;
         // A staff operational account's spendable balance is its live
         // operational balance, not the customer balance field.
         draft[balanceKey] = match.accountType === 'staff_operational' ? getStaffOperationalBalance(match.linkedStaffId) : Number(match.balance || 0);
-        // A destination that turns out to be a staff operational account
-        // force-locks the Debit side to the acting staff's own account —
-        // that changes the shape of the form (disabled field + note), so
-        // it needs a full re-render, not just the two DOM boxes below.
-        if (isDest && match.accountType === 'staff_operational') {
-          applyStaffAccountLock(draft);
-          save();
-          renderWorkspace();
-          return;
-        }
         if (byId(nameElId)) byId(nameElId).innerHTML = `<strong>${escapeHtml(draft[nameKey])}</strong>`;
         if (byId(balanceElId)) byId(balanceElId).innerHTML = balanceHtml(draft[balanceKey]);
         setAccountStatusChip(byId(statusElId), match);
@@ -8027,13 +7980,7 @@ function normalizeStaffLedgerEntryType(row) {
       draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; draft.destBalance = 0;
       if (byId('itrDestName')) byId('itrDestName').innerHTML = '';
       if (byId('itrDestBalance')) byId('itrDestBalance').innerHTML = '';
-      // The destination just changed, so any staff-account lock from a
-      // PREVIOUS destination is stale until the next lookup re-evaluates
-      // it — release it now rather than leave a disabled Debit field
-      // pointing at the wrong context.
-      if (byId('itrSourceAcct')) byId('itrSourceAcct').disabled = false;
-      if (byId('itrLookupSource')) byId('itrLookupSource').disabled = false;
-      if (byId('itrSourceLockNote')) byId('itrSourceLockNote').style.display = 'none';
+
     };
     if (sourceInput) sourceInput.onkeyup = (e) => {
       if (e.key !== 'Enter') return;
@@ -8067,23 +8014,21 @@ function normalizeStaffLedgerEntryType(row) {
       if (!draft.destId) return showToast('Look up the destination account first');
       const destAccount = (state.customers || []).find(c => c.id === draft.destId);
       const isStaffFunding = destAccount?.accountType === 'staff_operational';
-      // Re-apply the lock right before submit (not just on lookup) so a
-      // stale draft — e.g. reloaded from a saved session — can never
-      // slip an arbitrary source past this check.
-      const lockedToOwn = isStaffFunding && !!applyStaffAccountLock(draft);
       if (!draft.sourceId) return showToast('Look up the source account first');
       const srcAccount = (state.customers || []).find(c => c.id === draft.sourceId);
-      if (isStaffFunding && !lockedToOwn && srcAccount?.accountType !== 'treasury') return showToast('Fund a staff account from a Treasury account');
+      if (!srcAccount || !destAccount) return showToast('Look up both accounts first');
+      draft.sourceAcct = srcAccount.accountNumber || srcAccount.account_number;
+      draft.destAcct = destAccount.accountNumber || destAccount.account_number;
       // Money leaving a staff operational account (e.g. the Till handed to a
       // Treasury account) goes the same way as staff funding, so the staff
       // balance goes down with it.
       const viaStaffFunding = isStaffFunding || srcAccount?.accountType === 'staff_operational';
-      if (srcAccount?.accountType === 'staff_operational') draft.sourceBalance = getStaffOperationalBalance(srcAccount.linkedStaffId);
+      draft.sourceBalance = srcAccount.accountType === 'staff_operational' ? getStaffOperationalBalance(srcAccount.linkedStaffId) : Number(srcAccount.balance || 0);
       if (isLocalOnlyStaffAccount(srcAccount) || isLocalOnlyStaffAccount(destAccount)) return showToast(STAFF_WALLET_NON_CASH_MSG);
       if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if (viaStaffFunding && amount > Number(draft.sourceBalance || 0) + 0.01) {
+      if ((viaStaffFunding || srcAccount.accountType === 'treasury') && amount > draft.sourceBalance + 0.01) {
         return showToast(`Amount exceeds the available balance (${money(draft.sourceBalance || 0)})`);
       }
       const st = currentStaff();
@@ -9729,12 +9674,6 @@ function normalizeStaffLedgerEntryType(row) {
         }
       });
     });
-    qq('[data-cod-resolve]').forEach(btn => btn.onclick = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const codId = btn.dataset.codResolve || btn.getAttribute('data-cod-resolve') || '';
-      openCODResolutionModal(codId);
-    });
     const more = byId('approvalsMore');
     if (more) more.onclick = () => { state.ui.approvalsLimit = (state.ui.approvalsLimit || 20) + 20; save(); renderWorkspace(); };
     const less = byId('approvalsLess');
@@ -9745,10 +9684,7 @@ function normalizeStaffLedgerEntryType(row) {
     if (historyLess) historyLess.onclick = () => { state.ui.approvalHistoryLimit = Math.max(30, (state.ui.approvalHistoryLimit || 30) - 30); save(); renderWorkspace(); };
     const codDate = byId('codAdminDate');
     if (codDate) codDate.onchange = () => { state.ui.codAdminDate = codDate.value || businessDate(); save(); renderWorkspace(); };
-    const codResolutionMore = byId('codResolutionMore');
-    if (codResolutionMore) codResolutionMore.onclick = () => { state.ui.codResolutionLimit = (state.ui.codResolutionLimit||10)+10; save(); renderWorkspace(); };
-    const codResolutionLess = byId('codResolutionLess');
-    if (codResolutionLess) codResolutionLess.onclick = () => { state.ui.codResolutionLimit = Math.max(10,(state.ui.codResolutionLimit||10)-10); save(); renderWorkspace(); };
+
     const approvalsCentralCloseDayBtn = byId('approvalsCentralCloseDayBtn');
     if (approvalsCentralCloseDayBtn) approvalsCentralCloseDayBtn.onclick = () => openCODModal();
     qq('[data-approval-section]').forEach(btn => btn.onclick = ()=>{ state.ui.approvalsSection = btn.dataset.approvalSection; save(); renderWorkspace(); smoothScrollToOpenedSegment('#approvalsSectionTabs'); });
@@ -10303,7 +10239,7 @@ function normalizeStaffLedgerEntryType(row) {
 
   function openCustomerSearchModal(list) {
     list = sortedSearchAccounts(list);
-    const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick="${c.id}">${escapeHtml(c.name || '')}</button>${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
+    const renderRows = arr => arr.map(c=>`<tr class="customer-search-row" data-pick-row="${c.id}"><td>${escapeHtml(c.accountNumber || '')}</td><td><button type="button" class="customer-name-pick" data-pick="${c.id}">${escapeHtml(c.name || '')}</button>${c.accountType === 'staff_operational' ? ` <small>${escapeHtml(tellerIdLabel(staffById(c.linkedStaffId)))}</small>` : ''}${c.closed ? ' <span class="badge rejected">Closed</span>' : ''}</td><td>${escapeHtml(c.phone || '')}</td><td class="customer-search-action-cell"><button type="button" class="secondary tiny-btn customer-pick-btn" data-pick="${c.id}">Select</button></td></tr>`).join('');
     openModal('Account Search', `<div class="stack customer-search-modal"><input id="modalCustomerSearch" class="entry-input"><div class="table-wrap customer-search-table-wrap"><table class="table customer-search-table"><thead><tr><th>Account Number</th><th>Name</th><th>Phone</th><th class="customer-search-action-head">Action</th></tr></thead><tbody id="modalCustomerRows">${renderRows(list)}</tbody></table></div></div>`, [{label:'Close', className:'secondary', onClick: closeModal}]);
     const pickCustomer = (id) => { state.ui.selectedCustomerId = id; save(); closeModal(); applySelectedCustomerToActiveTool(); };
     const bindPicks = () => {
@@ -10314,7 +10250,7 @@ function normalizeStaffLedgerEntryType(row) {
     const search = byId('modalCustomerSearch');
     if (search) search.oninput = () => {
       const qv = search.value.trim().toLowerCase();
-      const filtered = !qv ? list : list.filter(c => String(c.accountNumber).includes(qv) || c.name.toLowerCase().includes(qv));
+      const filtered = !qv ? list : list.filter(c => [c.accountNumber, c.name, c.accountType === 'staff_operational' ? tellerIdForAccount(c) : ''].some(value => String(value || '').toLowerCase().includes(qv)));
       byId('modalCustomerRows').innerHTML = renderRows(filtered); bindPicks();
     };
   }
@@ -10745,8 +10681,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       amount: Number(t.amount || 0),
       balanceAfter: Number(t.balanceAfter || 0),
       receivedOrPaidBy: t.receivedOrPaidBy || t.receivedBy || t.postedBy || '',
-      postedBy: t.postedBy || t.postedById || '',
-      approvedBy: t.approvedBy || ''
+      postedBy: postingStaffId(t.postedById, t.postedBy),
+      approvedBy: postingStaffId(t.approvedByStaffId, t.approvedBy)
     }));
     const extras = (state.businessExtras || []).map(e => ({
       ...e,
@@ -10760,8 +10696,8 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       amount: Number(e.amount || 0),
       balanceAfter: Number(e.balanceAfter || 0),
       receivedOrPaidBy: e.receivedOrPaidBy || e.receivedBy || e.postedBy || '',
-      postedBy: e.postedBy || '',
-      approvedBy: e.approvedBy || ''
+      postedBy: postingStaffId(e.postedById, e.postedBy),
+      approvedBy: postingStaffId(e.approvedByStaffId, e.approvedBy)
     }));
     return [...txRows, ...extras].sort((a,b)=>new Date(b.date)-new Date(a.date));
   }
@@ -10978,21 +10914,12 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
         draft.destAcct = c.accountNumber || '';
         draft.destName = c.name || '';
         draft.destId = c.id;
-        draft.destBalance = Number(c.balance || 0);
-        // Picking a staff operational account via Search locks the Debit
-        // side the same way typing+Enter does (see applyStaffAccountLock)
-        // — this needs a full re-render since it changes the form shape.
-        if (c.accountType === 'staff_operational') {
-          applyStaffAccountLock(draft);
-          save();
-          renderWorkspace();
-          return;
-        }
+        draft.destBalance = c.accountType === 'staff_operational' ? getStaffOperationalBalance(c.linkedStaffId) : Number(c.balance || 0);
       } else {
         draft.sourceAcct = c.accountNumber || '';
         draft.sourceName = c.name || '';
         draft.sourceId = c.id;
-        draft.sourceBalance = Number(c.balance || 0);
+        draft.sourceBalance = c.accountType === 'staff_operational' ? getStaffOperationalBalance(c.linkedStaffId) : Number(c.balance || 0);
       }
       // Full re-render so Name, Balance, Account Status and Account Type
       // all refresh together from the draft.
@@ -11005,7 +10932,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       draft.sourceAcct = c.accountNumber || '';
       draft.sourceName = c.name || '';
       draft.sourceId = c.id;
-      draft.sourceBalance = Number(c.balance || 0);
+      draft.sourceBalance = c.accountType === 'staff_operational' ? getStaffOperationalBalance(c.linkedStaffId) : Number(c.balance || 0);
       state.ui.nonCashSearchTarget = '';
       save();
       renderWorkspace();
