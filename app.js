@@ -5632,7 +5632,12 @@ function nextPaint() {
       if (def.report === 'total') {
         const [[, { closing: teller }], [, { closing: treasury }]] = cashCategories;
         const variance = balanceVariance(g.closing, teller + treasury);
-        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Variance</caption><thead><tr><th>Consolidated Balance</th><th>Tellering and Treasury Total Balance</th><th>Variance</th></tr></thead><tbody><tr class="total-row"><td class="bs-num">${money(g.closing)}</td><td class="bs-num">${money(teller + treasury)}</td><td class="bs-num">${money(variance.amount)}</td></tr></tbody></table></div><div class="note">${variance.label} = ${varianceFormula}</div></div></div>`;
+        const rows = [
+          ['Consolidated Balance', g.closing],
+          ['Tellering and Treasury Total Balance', teller + treasury],
+          [variance.label, variance.amount]
+        ];
+        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Variance</caption><tbody>${rows.map(([label, amount], i) => `<tr${i === rows.length - 1 ? ' class="total-row"' : ''}><td>${label}</td><td class="bs-num">${money(amount)}</td></tr>`).join('')}</tbody></table></div><div class="note">Variance = ${varianceFormula}</div></div></div>`;
       }
       // A/C No shows the real account numbers held in each category (first - last), never made-up codes.
       const numsOf = (list) => (list || []).map(a => String(a?.accountNumber || a?.account_number || '').trim()).filter(Boolean).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
