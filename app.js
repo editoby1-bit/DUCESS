@@ -3313,7 +3313,9 @@ if (approvalRecord.type === 'float_topup') {
     if (nameEl) nameEl.textContent = activeStaff?.name || '';
     if (roleEl) roleEl.textContent = staffRoleLabels(activeStaff);
     const tellerEl = byId('staffTellerDisplay');
-    if (tellerEl) tellerEl.textContent = activeStaff ? `Teller ID / Account: ${tellerIdentity(activeStaff)}` : '';
+    if (tellerEl) tellerEl.textContent = activeStaff ? `Teller ID: ${tellerIdLabel(activeStaff)}` : '';
+    const accountEl = byId('staffAccountDisplay');
+    if (accountEl) accountEl.textContent = activeStaff ? `Account Number: ${staffOperationalAccountNumber(activeStaff.id) || '—'}` : '';
     byId('btnCOD').onclick = () => canCloseBusinessDay() ? confirmAction(`Close business date ${businessDate()}? This will open ${nextDate(businessDate())}.`, openCODModal) : showToast('Only Approval Officer or Admin can close day');
     byId('btnCOD').disabled = !canCloseBusinessDay();
     if (byId('btnLogout') && isSupabaseApprovalMode()) {
@@ -3623,6 +3625,7 @@ function hideProcessing() {
         if (nextTool === 'approval_others') state.ui.approvalsSection = 'others';
         if (APPROVAL_SUB_TOOLS[nextTool]) state.ui.approvalsSection = APPROVAL_SUB_TOOLS[nextTool].section;
         if (BALANCE_SUB_TOOLS[nextTool]) state.ui.balancePeriodFilter = { preset: BALANCE_SUB_TOOLS[nextTool].preset, from: '', to: '' };
+        if (['adm_balance', 'adm_total'].includes(nextTool)) state.ui.balancePeriodFilter = { preset: 'all', from: '', to: '' };
       }
       if (state.ui.tool === 'check_balance') state.ui.checkBalanceLoaded = false;
       state.ui.modalToggleTool = state.ui.tool && ['my_close_day','central_close_day'].includes(state.ui.tool) ? state.ui.tool : null;
@@ -5528,8 +5531,7 @@ function nextPaint() {
   const balanceItems = (a) => a.accountType === 'income' || a.accountType === 'expense' ? txItems(a) : opItems(a.id);
   const operationalPeriodFigures = (a, r) => periodFigures(operationalAccountTotals(a).balance, balanceItems(a), r);
 
-  function renderPeriodBar() {
-    const f = state.ui.balancePeriodFilter || { preset: 'daily', from: '', to: '' };
+  function renderPeriodBar(f = state.ui.balancePeriodFilter || { preset: 'daily', from: '', to: '' }) {
     const r = balancePeriodRange(f);
     const presets = [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly'],['all','All']];
     const label = r.preset === 'all' ? 'All dates' : `${r.start ? fmtDate(r.start) : '…'} – ${r.end ? fmtDate(r.end) : '…'}`;
@@ -5537,7 +5539,7 @@ function nextPaint() {
   }
 
   // 2026-11-16 (client): every balance report is drawn like the "Account Balances" sheet:
-  // title bar, S/N | A/C NO | A/C NAME | DESCRIPTION | DR | CR | BALANCE | ACTION (Statement),
+  // title bar, S/N | A/C NO | A/C NAME | DR | CR | BALANCE | ACTION (Statement),
   // and a total row. Income/expense reports can include legacy operational accounts.
   function periodAccountsTable(title, accounts, r, opts = {}) {
     let dr = 0, cr = 0, balance = 0;
@@ -5547,9 +5549,9 @@ function nextPaint() {
       // Client rule: Balance = balance brought forward + Total CR - Total DR (the B/F is not a column on the sheet).
       const bal = f.opening + f.credit - f.debit;
       dr += f.debit; cr += f.credit; balance += bal;
-      return `<tr><td>${i+1}</td><td>${escapeHtml(a.accountNumber || a.account_number || '—')}</td><td>${escapeHtml(a.name || '—')}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal < 0 ? 'balance-negative' : ''}">${money(bal)}</td><td class="bs-act"><button type="button" class="secondary tiny-btn" data-bs-statement="${kind}:${escapeHtml(a.id)}">Statement</button></td></tr>`;
+      return `<tr><td>${i+1}</td><td>${escapeHtml(a.accountNumber || a.account_number || '—')}</td><td>${escapeHtml(a.name || '—')}</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal < 0 ? 'balance-negative' : ''}">${money(bal)}</td><td class="bs-act"><button type="button" class="secondary tiny-btn" data-bs-statement="${kind}:${escapeHtml(a.id)}">Statement</button></td></tr>`;
     }).join('');
-    return `<div class="table-card bs-card">${opts.extra || ''}<div class="table-wrap"><table class="table bs-table"><caption class="bs-title">${escapeHtml(title)}</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th><th>Action</th></tr></thead><tbody>${rows || `<tr><td colspan="8">${opts.empty || 'No accounts found'}</td></tr>`}${accounts.length ? `<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(dr)}</td><td class="bs-num">${money(cr)}</td><td class="bs-num">${money(balance)}</td><td></td></tr>` : ''}</tbody></table></div></div>`;
+    return `<div class="table-card bs-card">${opts.extra || ''}<div class="table-wrap"><table class="table bs-table"><caption class="bs-title">${escapeHtml(title)}</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Action</th></tr></thead><tbody>${rows || `<tr><td colspan="7">${opts.empty || 'No accounts found'}</td></tr>`}${accounts.length ? `<tr class="total-row"><td colspan="3">Total</td><td class="bs-num">${money(dr)}</td><td class="bs-num">${money(cr)}</td><td class="bs-num">${money(balance)}</td><td></td></tr>` : ''}</tbody></table></div></div>`;
   }
 
   // Teller figures are rebuilt from approved requests up to a date, using the
@@ -5614,8 +5616,9 @@ function nextPaint() {
   }
 
   function renderPeriodBalance(def) {
-    const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: def.preset });
-    const head = renderPeriodBar();
+    const filter = state.ui.balancePeriodFilter || { preset: def.preset };
+    const r = balancePeriodRange(filter);
+    const head = renderPeriodBar(filter);
     if (['consolidated', 'overall', 'total'].includes(def.report)) {
       const sumGroup = (accts, itemsOf, balOf) => accts.reduce((acc, a) => { const f = periodFigures(balOf(a), itemsOf(a), r); acc.opening += f.opening; acc.debit += f.debit; acc.credit += f.credit; acc.closing += f.closing; return acc; }, { opening: 0, debit: 0, credit: 0, closing: 0 });
       const cats = [
@@ -5629,15 +5632,7 @@ function nextPaint() {
       if (def.report === 'total') {
         const [[, { closing: teller }], [, { closing: treasury }]] = cashCategories;
         const variance = balanceVariance(g.closing, teller + treasury);
-        const rows = [
-          ['Total amount credited', g.credit],
-          ['Total account balance', g.closing],
-          ['Tellering balance', teller],
-          ['Treasury balance', treasury],
-          ['Total Tellering and Treasury', teller + treasury],
-          [variance.label, variance.amount]
-        ];
-        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Variance</caption><tbody>${rows.map(([label, amount], i) => `<tr${i === rows.length - 1 ? ' class="total-row"' : ''}><td>${label}</td><td class="bs-num">${money(amount)}</td></tr>`).join('')}</tbody></table></div><div class="note">Variance = ${varianceFormula}</div></div></div>`;
+        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Variance</caption><thead><tr><th>Consolidated Balance</th><th>Tellering and Treasury Total Balance</th><th>Variance</th></tr></thead><tbody><tr class="total-row"><td class="bs-num">${money(g.closing)}</td><td class="bs-num">${money(teller + treasury)}</td><td class="bs-num">${money(variance.amount)}</td></tr></tbody></table></div><div class="note">${variance.label} = ${varianceFormula}</div></div></div>`;
       }
       // A/C No shows the real account numbers held in each category (first - last), never made-up codes.
       const numsOf = (list) => (list || []).map(a => String(a?.accountNumber || a?.account_number || '').trim()).filter(Boolean).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
@@ -5650,8 +5645,8 @@ function nextPaint() {
         ['EXPENSES ACCOUNT', noRange(numsOf(operationalBalanceAccounts('expense')))],
       ];
       const bal = (f) => f.opening + f.credit - f.debit;
-      const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(catMeta[i][1])}</td><td>${catMeta[i][0]}</td><td>Total CR - Total DR</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal(f) < 0 ? 'balance-negative' : ''}">${money(bal(f))}</td></tr>`).join('');
-      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Description</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="4">Total CR - Total DR</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.opening + g.credit - g.debit)}</td></tr></tbody></table></div></div>${renderCashBalances(cashCategories, g.closing)}</div>`;
+      const rows = cats.map(([, f], i) => `<tr><td>${i+1}</td><td>${escapeHtml(catMeta[i][1])}</td><td>${catMeta[i][0]}</td><td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${bal(f) < 0 ? 'balance-negative' : ''}">${money(bal(f))}</td></tr>`).join('');
+      return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Consolidated Trial Balance</caption><thead><tr><th>S/N</th><th>A/C No</th><th>A/C Name</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td colspan="3">Total</td><td class="bs-num">${money(g.debit)}</td><td class="bs-num">${money(g.credit)}</td><td class="bs-num">${money(g.closing)}</td></tr></tbody></table></div>${!g.debit && !g.credit && r.preset !== 'all' ? '<div class="note">No debit or credit entries in this period. Select All to see totals across dates.</div>' : ''}</div>${renderCashBalances(cashCategories, g.closing)}</div>`;
     }
     const sortAccSeg = (list) => [...(list || [])].sort((x, y) => String(x.accountNumber || '').localeCompare(String(y.accountNumber || ''), undefined, { numeric: true }));
     const opFig = (a) => operationalPeriodFigures(a, r);
@@ -5898,8 +5893,8 @@ function nextPaint() {
     const r = balancePeriodRange(state.ui.balancePeriodFilter || { preset: 'daily' });
     const bar = renderPeriodBar();
     if (tool === 'adm_staff') return renderStaffManagement();
-    if (tool === 'adm_total') return renderPeriodBalance({ report: 'total', preset: 'daily' });
-    if (tool === 'adm_balance') return renderPeriodBalance({ report: 'overall', label: 'Account Balance', preset: 'daily' });
+    if (tool === 'adm_total') return renderPeriodBalance({ report: 'total', preset: 'all' });
+    if (tool === 'adm_balance') return renderPeriodBalance({ report: 'overall', label: 'Account Balance', preset: 'all' });
     if (tool === 'aud_cs') {
       const rows = auditCountsByType(r);
       const t = rows.reduce((a, x) => ({ before: a.before + x.before, fresh: a.fresh + x.fresh, total: a.total + x.total }), { before: 0, fresh: 0, total: 0 });
