@@ -897,7 +897,7 @@
     return ({ customer: 'customer', staff_salary: 'staff', income: 'income', expense: 'expense', staff_operational: 'tellerng', treasury: 'treasury' })[t] || '';
   }
   const accountsInSegment = (seg) => (state.customers || []).filter(c => accountSegmentOf(c) === seg);
-  const staffBalanceAccounts = () => (state.customers || []).filter(c => ['staff_salary', 'staff_wallet'].includes(c.accountType));
+  const staffBalanceAccounts = () => accountsInSegment('staff');
   function staffFirstName(st){ return String(st?.name || '').trim().split(/\s+/)[0] || '—'; }
   // Use the exact staff-management ID; the operational account is separate.
   function tellerIdLabel(st) {
@@ -5883,7 +5883,7 @@ function nextPaint() {
   function tellerPeriodRow(st, r) {
     const opening = r.start ? withApprovalsUpTo(dayBefore(r.start), () => getStaffOperationalBalance(st.id)) : 0;
     const closing = withApprovalsUpTo(r.end, () => getStaffOperationalBalance(st.id));
-    const mine = postingApprovals().filter(a => a.status === 'approved' && a.payload?.staffId === st.id && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
+    const mine = postingApprovals().filter(a => a.status === 'approved' && cashPostingStaffId(a) === st.id && inPeriod(approvalBusinessDate(a.type, a.payload || {}), r));
     const amt = (a) => a.type.endsWith('_journal') ? Number(a.payload?.formAmount || 0) : Number(a.payload?.amount || 0);
     const received = mine.filter(a => a.type === 'customer_credit' || a.type === 'customer_credit_journal').reduce((t, a) => t + amt(a), 0);
     const withdrawn = mine.filter(a => a.type === 'customer_debit' || a.type === 'customer_debit_journal').reduce((t, a) => t + amt(a), 0);
@@ -6455,11 +6455,12 @@ function staffLedgerEvents(staffId) {
       events.push(event);
     };
     const approved = postingApprovals().filter(req => String(req.status || '').toLowerCase() === 'approved');
-    const approvedForStaff = new Map(approved.filter(req => (req.payload?.staffId || req.payload?.staff_id) === staffId).map(req => [req.id, req]));
+    const approvedById = new Map(approved.map(req => [req.id, req]));
     (acc.entries || []).forEach(entry => {
       const type = String(entry.type || '').toLowerCase();
-      const source = approvedForStaff.get(entry.sourceApprovalId || entry.approvalRequestId);
-      if (source && (source.type === type || (type === 'approved_form' && source.type === 'float_declaration'))) return;
+      const source = approvedById.get(entry.sourceApprovalId || entry.approvalRequestId);
+      if (source && source.type === type && (type.endsWith('_journal') || cashPostingStaffId(source) === staffId)) return;
+      if (source?.type === 'float_declaration' && type === 'approved_form' && cashPostingStaffId(source) === staffId) return;
       const amount = Number(entry.amount || 0);
       const date = entry.formDate || entry.floatDate || String(entry.date || '').slice(0,10) || businessDate();
       if (['approved_form','approved_float'].includes(type)) addEvent({ key: entry.id || `form-${date}-${amount}`, date, type: 'FORM', amount, delta: amount, details: entry.note || `Approved FORM for ${date}`, runningType: 'form' });
@@ -6535,11 +6536,11 @@ function staffLedgerEvents(staffId) {
         const amount = Number(payload.amount || 0);
         addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Customer Debit', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
       }
-      if (req.type === 'customer_credit_journal' && payload.staffId === staffId) {
+      if (req.type === 'customer_credit_journal' && cashPostingStaffId(req) === staffId) {
         const formAmount = Number(payload.formAmount || 0);
         addEvent({ key: req.id || `credit-journal-${date}`, date, type: 'Credit Journal', amount: formAmount, delta: formAmount, details: `Credit journal (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'credit' });
       }
-      if (req.type === 'customer_debit_journal' && payload.staffId === staffId) {
+      if (req.type === 'customer_debit_journal' && cashPostingStaffId(req) === staffId) {
         const formAmount = Number(payload.formAmount || 0);
         addEvent({ key: req.id || `debit-journal-${date}`, date, type: 'Debit Journal', amount: formAmount, delta: -formAmount, details: `Debit journal (${(payload.rows || payload.entries || []).length} entries)`, runningType: 'debit' });
       }
@@ -8533,6 +8534,14 @@ function normalizeStaffLedgerEntryType(row) {
     return getStaffOperationalBreakdown(staffId, excludeDateStr).variance;
   }
 
+  function cashPostingStaffId(request) {
+    const payload = request.payload || {};
+    if (request.type === 'customer_credit_journal' || request.type === 'customer_debit_journal') {
+      return payload.fundingLeg?.accountId ? null : (payload.fundingStaffId || payload.staffId);
+    }
+    return payload.staffId || payload.staff_id;
+  }
+
   function getStaffOperationalBreakdown(staffId, excludeDateStr) {
     // Cash = total funded to this teller's operational account by Treasury (approved credits).
     // Always all-time, regardless of excludeDateStr — Treasury can fund a teller multiple
@@ -8580,7 +8589,7 @@ function normalizeStaffLedgerEntryType(row) {
         .filter(r => r.status === 'approved' && r.type === 'inter_staff_credit' && r.payload?.sourceAccountId === opAccount.id)
         .reduce((s, r) => s + Number(r.payload?.amount || 0), 0);
     const postingCash = postingApprovals()
-      .filter(r => r.status === 'approved' && r.payload?.staffId === staffId &&
+      .filter(r => r.status === 'approved' && cashPostingStaffId(r) === staffId &&
         ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type) &&
         (!excludeDateStr || r.payload?.date !== excludeDateStr))
       .reduce((s, r) => {
@@ -10433,22 +10442,22 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
 
   function approvedCreditTotalForDateByMode(staffId, dateStr, mode) {
     return postingApprovals()
-      .filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
+      .filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && cashPostingStaffId(r) === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedDebitTotalForDateByMode(staffId, dateStr, mode) {
     return postingApprovals()
-      .filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr)
+      .filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && cashPostingStaffId(r) === staffId && r.payload?.date === dateStr)
       .reduce((sum, record) => sum + approvalModeAmount(record, mode), 0);
   }
 
   function approvedCreditTotalForDate(staffId, dateStr) {
-    return postingApprovals().filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_credit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
+    return postingApprovals().filter(r => ['customer_credit','customer_credit_journal'].includes(r.type) && r.status === 'approved' && cashPostingStaffId(r) === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_credit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }
 
   function approvedDebitTotalForDate(staffId, dateStr) {
-    return postingApprovals().filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && r.payload?.staffId === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_debit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
+    return postingApprovals().filter(r => ['customer_debit','customer_debit_journal'].includes(r.type) && r.status === 'approved' && cashPostingStaffId(r) === staffId && r.payload?.date === dateStr).reduce((s,r)=> s + (r.type === 'customer_debit_journal' ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }
 
   function pendingPostedFloatImpactForDate(staffId, dateStr) {
