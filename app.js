@@ -3499,9 +3499,10 @@ function hideProcessing() {
         };
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
-          ${group('adm_g', 'Administrative', ['adm_staff','adm_balance','adm_total','admin_review'])}
+          ${group('adm_g', 'Administrative', ['adm_staff','adm_balance','adm_total'])}
           ${group('aud_g', 'Audits', ['aud_cs','aud_tellers','aud_types','aud_customers'])}
           ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber','central_close_day'])}
+          ${toolBtn('admin_review')}
         </div>`;
       }
       if (state.ui.module === 'approvals') {
