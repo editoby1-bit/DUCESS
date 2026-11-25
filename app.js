@@ -6782,7 +6782,7 @@ function staffLedgerEvents(staffId) {
   async function openWorkReviewAction(requestId, action) {
     const req = state.approvals.find(r => r.id === requestId);
     if (!req || !canChangeReviewWork(req)) return showToast('Only your own pending or approved work can be changed.');
-    if (!gateway.approvals?.getWorkReviewContext) return showToast('Sign in online to edit or reverse work.');
+    if (!gateway?.approvals?.getWorkReviewContext) return showToast('Sign in online to edit or reverse work.');
     showProcessing('Loading work record…');
     let result;
     try { result = await withRequestTimeout(gateway.approvals.getWorkReviewContext(requestId)); }
@@ -6893,7 +6893,7 @@ function staffLedgerEvents(staffId) {
   }
   function openReviewSheetModal(tool) {
     const viewer = currentStaff();
-    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? staffById(state.ui.reviewStaffId) : viewer;
+    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? (staffById(state.ui.reviewStaffId) || viewer) : viewer;
     const sub = REVIEW_SUB_TOOLS[tool] || null;
     const baseTool = sub ? sub.base : tool;
     const def = STAFF_REVIEW_DEFS[baseTool];
@@ -6933,7 +6933,7 @@ function staffLedgerEvents(staffId) {
 
   function renderStaffReview(tool) {
     const viewer = currentStaff();
-    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? staffById(state.ui.reviewStaffId) : viewer;
+    const st = isAdminStaff(viewer) && state.ui.reviewStaffId ? (staffById(state.ui.reviewStaffId) || viewer) : viewer;
     const sub = REVIEW_SUB_TOOLS[tool] || null;
     const baseTool = sub ? sub.base : tool;
     const def = STAFF_REVIEW_DEFS[baseTool];
@@ -6978,6 +6978,7 @@ function staffLedgerEvents(staffId) {
       </div>`;
   }
   function bindStaffReview() {
+    bindReviewSheetActions();
     if (byId('reviewStaffSelect') && isAdminStaff()) byId('reviewStaffSelect').onchange = e => {
       state.ui.reviewStaffId = e.target.value; state.ui.tool = reviewLandingTool(staffById(e.target.value)); save(); renderWorkspace();
     };
