@@ -1742,10 +1742,10 @@ if (inserted.error) {
       const bookOnly = payload.bookOnly === true;
       if (bookOnly) {
         const account = await postingAccountKind(payload.customerId, payload.accountNumber);
-        const valid = (type === 'customer_debit' && account?.type === 'customer' && String(payload.details || '').trim())
+        const valid = (type === 'customer_debit' && account?.type === 'customer')
           || (type === 'customer_credit' && account?.type === 'income');
         if (!valid || !Number.isFinite(Number(payload.amount)) || Number(payload.amount) <= 0) {
-          return defaultResult.err('INVALID_BOOK_POSTING', 'Check the account type, amount and charge description.');
+          return defaultResult.err('INVALID_BOOK_POSTING', 'Check the account type and amount.');
         }
       }
       const expectedEntryCount = entries.length + (hasFundingLeg ? 1 : 0);

@@ -5609,12 +5609,8 @@ function nextPaint() {
       }), { debit: 0, credit: 0, closing: 0 })]);
   }
 
-  const varianceFormula = 'Consolidated total − (Tellering + Treasury total)';
-
   function balanceVariance(consolidated, cashTotal) {
-    const amount = Number((consolidated - cashTotal).toFixed(2));
-    const status = amount < 0 ? 'Loss' : amount > 0 ? 'Gain' : 'Balanced';
-    return { amount, label: `Variance (${status})` };
+    return Number((consolidated - cashTotal).toFixed(2));
   }
 
   function renderCashBalances(categories, consolidated) {
@@ -5626,7 +5622,7 @@ function nextPaint() {
     const variance = balanceVariance(consolidated, total.closing);
     const cells = f => `<td class="bs-num">${money(f.debit)}</td><td class="bs-num">${money(f.credit)}</td><td class="bs-num ${f.closing < 0 ? 'balance-negative' : ''}">${money(f.closing)}</td>`;
     const rows = categories.map(([label, f]) => `<tr><td>${label}</td>${cells(f)}</tr>`).join('');
-    return `<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Tellering and Treasury</caption><thead><tr><th>Account</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td>Total Tellering and Treasury</td>${cells(total)}</tr></tbody></table></div><div class="note"><strong>${variance.label}</strong> = ${varianceFormula} = <strong>${money(variance.amount)}</strong></div></div>`;
+    return `<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Tellering and Treasury</caption><thead><tr><th>Account</th><th>DR</th><th>CR</th><th>Balance</th></tr></thead><tbody>${rows}<tr class="total-row"><td>Total Tellering and Treasury</td>${cells(total)}</tr></tbody></table></div><div class="note"><strong>Variance</strong> <strong>${money(variance)}</strong></div></div>`;
   }
 
   function renderPeriodBalance(def) {
@@ -5649,9 +5645,9 @@ function nextPaint() {
         const rows = [
           ['Consolidated Balance', g.closing],
           ['Tellering and Treasury Total Balance', teller + treasury],
-          [variance.label, variance.amount]
+          ['Variance', variance]
         ];
-        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Variance</caption><tbody>${rows.map(([label, amount], i) => `<tr${i === rows.length - 1 ? ' class="total-row"' : ''}><td>${label}</td><td class="bs-num">${money(amount)}</td></tr>`).join('')}</tbody></table></div><div class="note">Variance = ${varianceFormula}</div></div></div>`;
+        return `<div class="stack">${head}<div class="table-card bs-card"><div class="table-wrap"><table class="table bs-table"><caption class="bs-title">Variance</caption><tbody>${rows.map(([label, amount], i) => `<tr${i === rows.length - 1 ? ' class="total-row"' : ''}><td>${label}</td><td class="bs-num">${money(amount)}</td></tr>`).join('')}</tbody></table></div></div></div>`;
       }
       // A/C No shows the real account numbers held in each category (first - last), never made-up codes.
       const numsOf = (list) => (list || []).map(a => String(a?.accountNumber || a?.account_number || '').trim()).filter(Boolean).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
@@ -9401,9 +9397,8 @@ function normalizeStaffLedgerEntryType(row) {
       // Snapshot form values NOW before confirmAction closes the modal (blur events
       // can fire during modal close and re-populate state from DOM values).
       const _details = String(byId('txDetails')?.value || '').trim();
-      if (manualCharge && !_details) return showToast('Enter the reason for the customer charge.');
       const _counterparty = String(byId('txCounterparty')?.value || '').trim();
-      confirmAction(manualCharge ? 'Has the charge been explained to the customer? Submit the debit for approval?' : `Submit single ${kind} request for approval?`, async () => {
+      confirmAction(`Submit single ${kind} request for approval?`, async () => {
         if (byId('txManualCharge')) byId('txManualCharge').checked = false;
         // Wipe state and DOM immediately — before the network call — so no interim
         // render (from realtime events etc.) can ever restore old values.
