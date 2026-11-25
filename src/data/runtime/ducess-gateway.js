@@ -1236,7 +1236,7 @@ function subscribeRealtime() {
   // against the balance as it stands INCLUDING earlier lines of the same posting
   // plan, so two debits in one request can't together overdraw. Expense/income
   // book accounts are not money-holding accounts and are exempt.
-  if (txType === 'debit' && !['expense', 'income'].includes(String(accountSummary.accountType || ''))) {
+  if (txType === 'debit' && (requestRow?.payload?.pairedPosting || !['expense', 'income'].includes(String(accountSummary.accountType || '')))) {
     const planKey = String(accountSummary.accountId);
     const planRunning = options.plan?.runningBalances;
     const available = planRunning && planRunning.has(planKey) ? planRunning.get(planKey) : currentBalance;
@@ -1468,6 +1468,16 @@ if (inserted.error) {
       // Intra-bank transfer: debit source, credit destination, non-cash
       if (type === 'intra_bank_transfer') {
         const amount = normalizeNumber(payload.amount);
+        if (payload.pairedPosting) {
+          const source = await postingAccountKind(payload.sourceAccountId, payload.sourceAccountNumber);
+          const destination = await postingAccountKind(payload.destAccountId, payload.destAccountNumber);
+          const expected = { 'customer:income': 'Charge Customer', 'income:expense': 'Allocate Expense', 'expense:treasury': 'Pay Expense' };
+          if (!source || !destination || source.id === destination.id || amount <= 0 ||
+              expected[`${source.type}:${destination.type}`] !== payload.pairedPosting) {
+            return defaultResult.err('INVALID_PAIRED_POSTING', 'The selected accounts do not match this paired posting.');
+          }
+        }
+        const destinationType = payload.pairedPosting === 'Pay Expense' ? 'debit' : 'credit';
         // Debit source customer
         const debitResult = await postSingleCustomerTransaction(requestRow, {
           customerId: payload.sourceAccountId, accountNumber: payload.sourceAccountNumber,
@@ -1479,10 +1489,10 @@ if (inserted.error) {
         // Credit destination customer
         const creditResult = await postSingleCustomerTransaction(requestRow, {
           customerId: payload.destAccountId, accountNumber: payload.destAccountNumber,
-          customerName: payload.destAccountName, amount, txType: 'credit',
+          customerName: payload.destAccountName, amount, txType: destinationType,
           details: payload.details || `Transfer from ${payload.sourceAccountName || payload.sourceAccountNumber}`,
           paymentMode: 'transfer'
-        }, 'credit', approver, { skipExistingCheck: true, plan });
+        }, destinationType, approver, { skipExistingCheck: true, plan });
         if (!creditResult.ok) return creditResult;
         return defaultResult.ok({ posted: true, requestType: type, transactions: [debitResult.data, creditResult.data], cashLedger: null, decisionNote: decisionNote || '' });
       }
@@ -2061,7 +2071,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         const requestPayload = requestRow?.payload || {};
         const isStaffCreditDebit = (requestRow?.request_type === 'customer_credit' || requestRow?.request_type === 'customer_debit') && (requestPayload.accountType === 'staff' || requestPayload.accountType === 'staff_wallet');
         const isStaffJournal = (requestRow?.request_type === 'customer_credit_journal' || requestRow?.request_type === 'customer_debit_journal') && Array.isArray(requestPayload.rows) && requestPayload.rows.length > 0 && requestPayload.rows.some(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
-        if (!isStaffCreditDebit && !isStaffJournal) {
+        if (!requestPayload.pairedPosting && !isStaffCreditDebit && !isStaffJournal) {
           const { data, error: rpcError } = await client.rpc(approvalPostingRpc, {
             p_request_id: payload.requestId,
             p_approved_by_staff_id: approver.staffId,
@@ -2116,7 +2126,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           decisionNote,
         }
       };
-      if (plan.transactions.length || plan.ledger) return commitPostingPlan(payload.requestId, plan, approver, decisionNote, postingMeta, auditEntry);
+      if (plan.transactions.length || plan.ledger) return commitPostingPlan(payload.requestId, plan, approver, decisionNote, postingMeta, auditEntry, requestRow.payload?.pairedPosting);
 
       const approvalResult = await markApprovalDecision(payload.requestId, 'approved', approver, decisionNote, postingMeta);
       if (!approvalResult.ok) return approvalResult;
@@ -2140,10 +2150,13 @@ return defaultResult.ok(normalizeApprovalRecord(data));
       const code = String(error?.code || ''); const msg = String(error?.message || '').toLowerCase();
       return code === 'PGRST202' || code === '42883' || msg.includes('could not find the function');
     }
-    async function commitPostingPlan(requestId, plan, approver, decisionNote, postingMeta, auditEntry) {
+    async function commitPostingPlan(requestId, plan, approver, decisionNote, postingMeta, auditEntry, pairedPosting) {
       const current = await getApprovalRequestById(requestId);
       if (!current.ok) return current;
       if (!current.data || current.data.status !== 'pending') return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
+      if ((current.data.payload?.pairedPosting || '') !== (pairedPosting || '')) {
+        return defaultResult.err('PAIRED_REQUEST_CHANGED', 'The request changed. Reload it before approving.');
+      }
       const mergedPayload = mergeApprovalPayload(current.data.payload, postingMeta);
       const auditRow = {
         actor_staff_id: auditEntry.actorStaffId || null,
@@ -2153,8 +2166,9 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         metadata: clone(auditEntry.metadata || {}),
         created_at: new Date().toISOString(),
       };
-      if (commitRpcAvailable) {
-        const { data, error: rpcError } = await client.rpc('ducess_commit_posting', {
+      const paired = Boolean(current.data.payload?.pairedPosting);
+      if (commitRpcAvailable || paired) {
+        const { data, error: rpcError } = await client.rpc(paired ? 'ducess_commit_paired_posting' : 'ducess_commit_posting', {
           p_request_id: requestId,
           p_transactions: plan.transactions.map(t => ({ row: t.row, delta: t.delta, seed_balance: t.seedBalance })),
           p_ledger: plan.ledger || null,
@@ -2166,6 +2180,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
           if (/APPROVAL_NOT_PENDING/.test(rpcError.message || '')) return defaultResult.err('APPROVAL_NOT_PENDING', 'Approval request is no longer pending.');
           return defaultResult.err('POSTING_COMMIT_FAILED', 'Posting was not saved and nothing was posted. Please try again.', rpcError);
         }
+        if (paired) return defaultResult.err('ATOMIC_POSTING_REQUIRED', 'This posting requires the 2026-11-25-paired-posting.sql database migration.');
         commitRpcAvailable = false;
       }
       const running = new Map();

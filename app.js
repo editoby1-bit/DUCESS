@@ -2785,6 +2785,18 @@ if (approvalRecord.type === 'float_topup') {
       const reqDate = approvalBusinessDate(req.type, req.payload || {});
       if (isBusinessDateClosed(reqDate)) return showToast(businessDateClosedMessage(reqDate));
     }
+    if (req.payload?.pairedPosting && ['intra_bank_transfer', 'inter_staff_credit'].includes(req.type)) {
+      const source = state.customers.find(c => c.id === req.payload.sourceAccountId);
+      const destination = state.customers.find(c => c.id === (req.payload.destAccountId || req.payload.targetAccountId));
+      const amount = Number(req.payload.amount);
+      const kind = pairedPostingKind(source, destination);
+      const available = kind === 'Hand Over Cash' ? getStaffOperationalBalance(source.linkedStaffId) : Number(source?.balance || 0);
+      if (!source || !destination || source === destination || kind !== req.payload.pairedPosting ||
+          !Number.isFinite(amount) || amount <= 0 || available < amount ||
+          (kind === 'Pay Expense' && Number(destination.balance || 0) < amount)) {
+        return showToast('The paired posting could not be approved. Check both accounts and their available balances.');
+      }
+    }
     req.status = 'approved';
     req.approvedAt = new Date().toISOString();
     req.approvedBy = currentStaff()?.name || 'System';
@@ -2865,7 +2877,7 @@ if (approvalRecord.type === 'float_topup') {
         }
         if (dst) {
           dst.transactions ||= [];
-          dst.transactions.push(txObj('credit', transferAmount, transferDetails, req.requestedByName, req.requestedBy, currentStaff()?.name || '', src?.name || req.payload.sourceAccountName || '', req.payload.date));
+          dst.transactions.push(txObj(req.payload.pairedPosting === 'Pay Expense' ? 'debit' : 'credit', transferAmount, transferDetails, req.requestedByName, req.requestedBy, currentStaff()?.name || '', src?.name || req.payload.sourceAccountName || '', req.payload.date));
           recalcCustomerBalance(dst);
         }
         break;
@@ -5003,7 +5015,7 @@ function hideProcessing() {
 
   function requestSummary(a) {
     const p = a.payload || {};
-    if (a.type === 'intra_bank_transfer') return `Non cash: ${money(p.amount)} from ${escapeHtml(p.sourceAccountName||p.sourceAccountNumber||'—')} → ${escapeHtml(p.destAccountName||p.destAccountNumber||'—')} • ${p.date}`;
+    if (a.type === 'intra_bank_transfer') return `${escapeHtml(p.pairedPosting || 'Non cash')}: ${money(p.amount)} from ${escapeHtml(p.sourceAccountName||p.sourceAccountNumber||'—')} → ${escapeHtml(p.destAccountName||p.destAccountNumber||'—')} • ${p.date}`;
     if (a.type === 'cash_receipt') return `${money(p.amount)} received by ${escapeHtml(p.staffName || 'Treasury')}${p.treasuryAccountName || p.treasuryAccountNumber ? ` into ${escapeHtml(p.treasuryAccountName || p.treasuryAccountNumber)}` : ''} • ${p.date}`;
     if (a.type === 'inter_staff_credit') return `${money(p.amount)} to ${escapeHtml(p.targetAccountName || p.targetAccountNumber || 'staff account')}${p.collectorName ? ` • Received from ${escapeHtml(p.collectorName)}` : ''} • ${p.date}`;
     if (a.type === 'float_topup') return `${money(p.amount)} to ${escapeHtml(p.staffName || 'staff')} for ${p.date}`;
@@ -7800,7 +7812,7 @@ function normalizeStaffLedgerEntryType(row) {
       const accountId = byId('staffCreditAccount')?.value;
       if (!accountId) return showToast('Select a staff account');
       const amount = Number(byId('staffCreditAmount')?.value || 0);
-      if (!(amount > 0)) return showToast('Enter a valid amount');
+      if (!Number.isFinite(amount) || amount <= 0) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
       const note = (byId('staffCreditNote')?.value || '').trim();
       const targetAccount = (state.customers || []).find(c => c.id === accountId);
@@ -7883,6 +7895,16 @@ function normalizeStaffLedgerEntryType(row) {
   const STAFF_WALLET_NON_CASH_MSG = 'That is an internal staff wallet, not a bank account — use the staff member\'s Teller (T) account. Open one via Account Opening if they don\'t have it.';
   const isLocalOnlyStaffAccount = (c) => !!c && (c.accountType === 'staff_wallet' || c.accountType === 'staff');
 
+  function pairedPostingKind(source, destination) {
+    const route = `${source?.accountType || 'customer'}:${destination?.accountType || 'customer'}`;
+    return {
+      'customer:income': 'Charge Customer',
+      'income:expense': 'Allocate Expense',
+      'expense:treasury': 'Pay Expense',
+      'staff_operational:treasury': 'Hand Over Cash'
+    }[route] || '';
+  }
+
   function renderIntraTransfer() {
     const draft = state.ui.intraTransferDraft ||= {};
     const sourceAccount = draft.sourceId ? (state.customers || []).find(c => c.id === draft.sourceId) : null;
@@ -7891,6 +7913,7 @@ function normalizeStaffLedgerEntryType(row) {
     const myTellerId = tellerIdentity(st);
     const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? `Teller · ${tellerIdForAccount(c)}` : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
     const amountVal = escapeHtml(String(draft.amount || ''));
+    const pairedKind = sourceAccount && destAccount ? pairedPostingKind(sourceAccount, destAccount) : '';
     // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
     // the client's sheet — the two top-level headings of the form are Debit
     // and Credit. The sheet's side column ("Non Cash Posting / Debit To
@@ -7930,7 +7953,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-cell nc-tag">Account Type</div>
             <div class="nc-cell nc-span-2"><div class="display-field" id="itrSourceType">${escapeHtml(typeOf(sourceAccount))}</div></div>
 
-            <div class="nc-head">Credit</div>
+            <div class="nc-head">${pairedKind === 'Pay Expense' ? 'Debit Treasury' : 'Credit'}</div>
             <div class="nc-label">Account Number</div>
             <div class="nc-cell"><input id="itrDestAcct" class="entry-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" autocomplete="off"></div>
             <div class="nc-cell"><button id="itrLookupDest" class="nc-mini-btn">Search</button></div>
@@ -7951,7 +7974,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-cell"><input id="itrReceivedBy" class="entry-input" value="${escapeHtml(String(draft.receivedBy || ''))}"></div>
             <div class="nc-cell nc-tag">Account Status</div>
             <div class="nc-cell nc-status-cell">${accountStatusChip(destAccount, 'itrDestStatus')}</div>
-            <div class="nc-cell nc-post-cell"><button id="submitIntraTransfer" class="nc-post-btn">Post</button></div>
+            <div class="nc-cell nc-post-cell"><button id="submitIntraTransfer" class="nc-post-btn">${escapeHtml(pairedKind || 'Post')}</button></div>
 
             <div class="nc-label nc-label-grey">Amount Received</div>
             <div class="nc-cell"><div class="display-field" id="itrAmountReceived">${escapeHtml(formatAmountText(draft.amount || ''))}</div></div>
@@ -7991,6 +8014,9 @@ function normalizeStaffLedgerEntryType(row) {
         if (byId(balanceElId)) byId(balanceElId).innerHTML = balanceHtml(draft[balanceKey]);
         setAccountStatusChip(byId(statusElId), match);
         if (byId(typeElId)) byId(typeElId).textContent = typeLabel(match);
+        const source = state.customers.find(c => c.id === draft.sourceId);
+        const destination = state.customers.find(c => c.id === draft.destId);
+        if (source && destination) renderWorkspace();
       } else {
         if (byId(nameElId)) byId(nameElId).innerHTML = `<span style="color:var(--accent-red)">Account not found</span>`;
         if (byId(balanceElId)) byId(balanceElId).innerHTML = '';
@@ -8057,12 +8083,13 @@ function normalizeStaffLedgerEntryType(row) {
       // Treasury account) goes the same way as staff funding, so the staff
       // balance goes down with it.
       const viaStaffFunding = isStaffFunding || srcAccount?.accountType === 'staff_operational';
+      const pairedPosting = pairedPostingKind(srcAccount, destAccount);
       draft.sourceBalance = srcAccount.accountType === 'staff_operational' ? getStaffOperationalBalance(srcAccount.linkedStaffId) : Number(srcAccount.balance || 0);
       if (isLocalOnlyStaffAccount(srcAccount) || isLocalOnlyStaffAccount(destAccount)) return showToast(STAFF_WALLET_NON_CASH_MSG);
       if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if ((viaStaffFunding || srcAccount.accountType === 'treasury') && amount > draft.sourceBalance + 0.01) {
+      if ((pairedPosting || viaStaffFunding || srcAccount.accountType === 'treasury') && amount > draft.sourceBalance + (pairedPosting ? 0 : 0.01)) {
         return showToast(`Amount exceeds the available balance (${money(draft.sourceBalance || 0)})`);
       }
       const st = currentStaff();
@@ -8070,7 +8097,13 @@ function normalizeStaffLedgerEntryType(row) {
       const paidBy = (byId('itrPaidBy')?.value || '').trim();
       const receivedBy = (byId('itrReceivedBy')?.value || '').trim();
       const destDetails = (byId('itrDestDetails')?.value || '').trim();
-      confirmAction(`Debit To Credit Entry: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
+      if (pairedPosting === 'Pay Expense' && amount > Number(destAccount.balance || 0)) {
+        return showToast('The Treasury account has insufficient funds.');
+      }
+      const confirmation = pairedPosting === 'Pay Expense'
+        ? `Pay ${money(amount)} and debit both ${draft.sourceName} and ${draft.destName}?`
+        : `${pairedPosting || 'Debit To Credit Entry'}: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`;
+      confirmAction(confirmation, async () => {
         showProcessing('Submitting Debit To Credit Entry...'); await nextPaint();
         try {
           // Staff-account funding submits as 'inter_staff_credit' (not
@@ -8098,13 +8131,13 @@ function normalizeStaffLedgerEntryType(row) {
                 amount, paymentMode: 'transfer', date: businessDate(), note: details,
                 fundingSource: srcAccount?.accountType === 'staff_operational' ? 'treasury_balance' : 'account',
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
-                collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy, destDetails
+                collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy, destDetails, pairedPosting
               })
             : await submitApprovalThroughGateway('intra_bank_transfer', {
                 staffId: st.id, staffName: st.name, date: businessDate(),
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
                 destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
-                amount, details, destDetails, paidBy, receivedBy
+                amount, details, destDetails, paidBy, receivedBy, pairedPosting
               });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
           if (viaStaffFunding) {
