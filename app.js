@@ -2609,7 +2609,7 @@ if (approvalRecord.type === 'float_topup') {
             requestedByStaffId: getStaffBackendId(staff),
             businessDate: payload.date,
             requestedByName: staff?.name || 'System',
-            customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, paymentMode: payload.paymentMode, staffId: payload.staffId, date: payload.date, customerCreditAmount: payload.customerCreditAmount, chargeBreakdown: payload.chargeBreakdown, totalChargeAmount: payload.totalChargeAmount, commissionAmount: payload.commissionAmount, chargeTraceId: payload.chargeTraceId || payload.commissionTraceId, commissionTraceId: payload.commissionTraceId
+            customerId: payload.customerId, customerName: payload.customerName, accountNumber: payload.accountNumber, receivedOrPaidBy: payload.receivedOrPaidBy, payoutSource: payload.payoutSource, paymentMode: payload.paymentMode, ...(payload.bookOnly === true ? { bookOnly: true } : {}), staffId: payload.staffId, date: payload.date, customerCreditAmount: payload.customerCreditAmount, chargeBreakdown: payload.chargeBreakdown, totalChargeAmount: payload.totalChargeAmount, commissionAmount: payload.commissionAmount, chargeTraceId: payload.chargeTraceId || payload.commissionTraceId, commissionTraceId: payload.commissionTraceId
           });
         } else if ((type === 'customer_credit_journal' || type === 'customer_debit_journal') && gateway.accounts?.submitJournalEntries && !(payload.rows || []).some(row => row.accountType === 'staff' || row.accountType === 'staff_wallet')) {
           return await gateway.accounts.submitJournalEntries({
@@ -2990,7 +2990,7 @@ if (approvalRecord.type === 'float_topup') {
         // Only a genuinely direct posting draws on the daily FORM here — rows
         // dispatched from a journal (sourceRowKey !== 'direct') already get a
         // single lump FORM deduction posted once, in the journal case below.
-        if (sourceRowKey === 'direct') {
+        if (sourceRowKey === 'direct' && !req.payload.bookOnly) {
           // SURGICAL FIX 2026-09-04 (client-confirmed bug): delta was -totalAmount
           // here — a customer credit (deposit, cash coming IN) was reducing the
           // teller's operational balance instead of increasing it. Now +totalAmount.
@@ -4647,6 +4647,8 @@ function hideProcessing() {
 
               <div class="nc-label">Description</div>
               <div class="nc-cell nc-span-4"><input id="txDetails" class="entry-input" value="${escapeHtml(String(state.ui.txDetailsDraft || ''))}"></div>
+
+              ${isCreditKind ? '' : '<label class="nc-label nc-span-all"><input type="checkbox" id="txManualCharge"> Customer charge (no cash payout)</label>'}
 
               <div class="nc-label nc-label-grey">${isCreditKind ? 'Received By' : 'Paid By'}</div>
               <div class="nc-cell"><input id="txCounterparty" class="entry-input" value="${escapeHtml(String(state.ui.txCounterpartyDraft || ''))}"></div>
@@ -6540,11 +6542,11 @@ function staffLedgerEvents(staffId) {
       // SURGICAL FIX 2026-09-04 (client-confirmed bug): see the matching
       // comment above — customer_credit / customer_credit_journal now
       // correctly add to the running balance instead of subtracting.
-      if (req.type === 'customer_credit' && payload.staffId === staffId) {
+      if (req.type === 'customer_credit' && cashPostingStaffId(req) === staffId) {
         const amount = Number(payload.amount || 0);
         addEvent({ key: req.id || `credit-approval-${date}-${amount}`, date, type: 'Customer Credit', amount, delta: amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer credit', runningType: 'credit' });
       }
-      if (req.type === 'customer_debit' && payload.staffId === staffId) {
+      if (req.type === 'customer_debit' && cashPostingStaffId(req) === staffId) {
         const amount = Number(payload.amount || 0);
         addEvent({ key: req.id || `debit-approval-${date}-${amount}`, date, type: 'Customer Debit', amount, delta: -amount, details: `${payload.accountNumber || ''} ${payload.customerName || ''} ${payload.details || ''}`.trim() || 'Customer debit', runningType: 'debit' });
       }
@@ -7913,7 +7915,6 @@ function normalizeStaffLedgerEntryType(row) {
     const myTellerId = tellerIdentity(st);
     const typeOf = (c) => c ? (c.accountType === 'staff_operational' ? `Teller · ${tellerIdForAccount(c)}` : (c.accountType === 'staff_salary' ? 'Staff Salary' : (c.accountType === 'expense' ? 'Expense' : (c.accountType === 'income' ? 'Income' : (c.accountType === 'treasury' ? 'Treasury' : 'Customer'))))) : '—';
     const amountVal = escapeHtml(String(draft.amount || ''));
-    const pairedKind = sourceAccount && destAccount ? pairedPostingKind(sourceAccount, destAccount) : '';
     // SURGICAL FIX 2026-09-28 (client-confirmed paper design): laid out as
     // the client's sheet — the two top-level headings of the form are Debit
     // and Credit. The sheet's side column ("Non Cash Posting / Debit To
@@ -7953,7 +7954,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-cell nc-tag">Account Type</div>
             <div class="nc-cell nc-span-2"><div class="display-field" id="itrSourceType">${escapeHtml(typeOf(sourceAccount))}</div></div>
 
-            <div class="nc-head">${pairedKind === 'Pay Expense' ? 'Debit Treasury' : 'Credit'}</div>
+            <div class="nc-head">Credit</div>
             <div class="nc-label">Account Number</div>
             <div class="nc-cell"><input id="itrDestAcct" class="entry-input" maxlength="12" value="${escapeHtml(String(draft.destAcct || ''))}" autocomplete="off"></div>
             <div class="nc-cell"><button id="itrLookupDest" class="nc-mini-btn">Search</button></div>
@@ -7974,7 +7975,7 @@ function normalizeStaffLedgerEntryType(row) {
             <div class="nc-cell"><input id="itrReceivedBy" class="entry-input" value="${escapeHtml(String(draft.receivedBy || ''))}"></div>
             <div class="nc-cell nc-tag">Account Status</div>
             <div class="nc-cell nc-status-cell">${accountStatusChip(destAccount, 'itrDestStatus')}</div>
-            <div class="nc-cell nc-post-cell"><button id="submitIntraTransfer" class="nc-post-btn">${escapeHtml(pairedKind || 'Post')}</button></div>
+            <div class="nc-cell nc-post-cell"><button id="submitIntraTransfer" class="nc-post-btn">Post</button></div>
 
             <div class="nc-label nc-label-grey">Amount Received</div>
             <div class="nc-cell"><div class="display-field" id="itrAmountReceived">${escapeHtml(formatAmountText(draft.amount || ''))}</div></div>
@@ -8083,13 +8084,15 @@ function normalizeStaffLedgerEntryType(row) {
       // Treasury account) goes the same way as staff funding, so the staff
       // balance goes down with it.
       const viaStaffFunding = isStaffFunding || srcAccount?.accountType === 'staff_operational';
-      const pairedPosting = pairedPostingKind(srcAccount, destAccount);
+      if (pairedPostingKind(srcAccount, destAccount) === 'Charge Customer') {
+        return showToast('Post a Customer Charge in Debit and record the Income credit separately.');
+      }
       draft.sourceBalance = srcAccount.accountType === 'staff_operational' ? getStaffOperationalBalance(srcAccount.linkedStaffId) : Number(srcAccount.balance || 0);
       if (isLocalOnlyStaffAccount(srcAccount) || isLocalOnlyStaffAccount(destAccount)) return showToast(STAFF_WALLET_NON_CASH_MSG);
       if (draft.sourceId === draft.destId) return showToast('Source and destination must be different accounts');
       if (!(amount > 0)) return showToast('Enter a valid amount');
       if (isBusinessDateClosed(businessDate())) return showToast(businessDateClosedMessage(businessDate()));
-      if ((pairedPosting || viaStaffFunding || srcAccount.accountType === 'treasury') && amount > draft.sourceBalance + (pairedPosting ? 0 : 0.01)) {
+      if ((viaStaffFunding || srcAccount.accountType === 'treasury') && amount > draft.sourceBalance + 0.01) {
         return showToast(`Amount exceeds the available balance (${money(draft.sourceBalance || 0)})`);
       }
       const st = currentStaff();
@@ -8097,13 +8100,7 @@ function normalizeStaffLedgerEntryType(row) {
       const paidBy = (byId('itrPaidBy')?.value || '').trim();
       const receivedBy = (byId('itrReceivedBy')?.value || '').trim();
       const destDetails = (byId('itrDestDetails')?.value || '').trim();
-      if (pairedPosting === 'Pay Expense' && amount > Number(destAccount.balance || 0)) {
-        return showToast('The Treasury account has insufficient funds.');
-      }
-      const confirmation = pairedPosting === 'Pay Expense'
-        ? `Pay ${money(amount)} and debit both ${draft.sourceName} and ${draft.destName}?`
-        : `${pairedPosting || 'Debit To Credit Entry'}: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`;
-      confirmAction(confirmation, async () => {
+      confirmAction(`Debit To Credit Entry: ${money(amount)} from ${draft.sourceName} → ${draft.destName}?`, async () => {
         showProcessing('Submitting Debit To Credit Entry...'); await nextPaint();
         try {
           // Staff-account funding submits as 'inter_staff_credit' (not
@@ -8131,13 +8128,13 @@ function normalizeStaffLedgerEntryType(row) {
                 amount, paymentMode: 'transfer', date: businessDate(), note: details,
                 fundingSource: srcAccount?.accountType === 'staff_operational' ? 'treasury_balance' : 'account',
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
-                collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy, destDetails, pairedPosting
+                collectorId: '', collectorName: '', journalNumber, paidBy, receivedBy, destDetails
               })
             : await submitApprovalThroughGateway('intra_bank_transfer', {
                 staffId: st.id, staffName: st.name, date: businessDate(),
                 sourceAccountId: draft.sourceId, sourceAccountNumber: draft.sourceAcct, sourceAccountName: draft.sourceName,
                 destAccountId: draft.destId, destAccountNumber: draft.destAcct, destAccountName: draft.destName,
-                amount, details, destDetails, paidBy, receivedBy, pairedPosting
+                amount, details, destDetails, paidBy, receivedBy
               });
           if (!result?.ok) return showToast(result?.error?.message || 'Unable to submit non cash transaction');
           if (viaStaffFunding) {
@@ -8569,6 +8566,7 @@ function normalizeStaffLedgerEntryType(row) {
 
   function cashPostingStaffId(request) {
     const payload = request.payload || {};
+    if (payload.bookOnly === true) return null;
     if (request.type === 'customer_credit_journal' || request.type === 'customer_debit_journal') {
       return payload.fundingLeg?.accountId ? null : (payload.fundingStaffId || payload.staffId);
     }
@@ -9380,28 +9378,33 @@ function normalizeStaffLedgerEntryType(row) {
       // the teller's current balance (Opening Cash + Cash Received - Cash
       // Withdrawal) — not only out of Opening Cash/funding. Cash collected
       // from today's credits can be paid out on a debit.
+      const manualCharge = kind === 'debit' && Boolean(byId('txManualCharge')?.checked);
       const tillNow = getTillBreakdown(staff.id, businessDate()).till;
-      if (kind === 'debit' && tillNow <= 0) return showToast('No cash in your Till to pay out — post a credit or receive a transfer first');
+      if (kind === 'debit' && !manualCharge && tillNow <= 0) return showToast('No cash in your Till to pay out — post a credit or receive a transfer first');
       const accountNumberInput = String(byId('txAcc')?.value || '').trim();
       const customer = getCustomerByAccountNo(accountNumberInput);
       if (!accountNumberInput || !customer) return showToast('Search for customer first');
       if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast(customer.closed ? 'Closed account cannot accept transactions' : 'Frozen account cannot accept transactions'); }
       const amount = Number(byId('txAmount').value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
-      if (kind === 'debit' && amount > tillNow + 0.01) return showToast(`Debit exceeds your Till (${money(tillNow)})`);
+      if (kind === 'debit' && !manualCharge && amount > tillNow + 0.01) return showToast(`Debit exceeds your Till (${money(tillNow)})`);
       // 2026-11-02 (client): an account with no money must not be debited.
       if (kind === 'debit' && !['expense','income','staff_operational'].includes(String(customer.accountType || 'customer')) && amount > Number(customer.balance || 0) + 0.01) {
         return showToast(`Insufficient funds — account balance is ${money(customer.balance || 0)}`);
       }
-      const mode = selectedMode();
-      const chargeBreakdown = kind === 'credit' ? collectChargeBreakdownFromUi('single', amount) : [];
+      if (manualCharge && (customer.accountType || 'customer') !== 'customer') return showToast('Choose a customer account.');
+      const bookOnly = manualCharge || (kind === 'credit' && customer.accountType === 'income');
+      const mode = bookOnly ? 'transfer' : selectedMode();
+      const chargeBreakdown = kind === 'credit' && !bookOnly ? collectChargeBreakdownFromUi('single', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       const customerCreditAmount = kind === 'credit' ? Math.max(0, amount - totalChargeAmount) : amount;
       // Snapshot form values NOW before confirmAction closes the modal (blur events
       // can fire during modal close and re-populate state from DOM values).
       const _details = String(byId('txDetails')?.value || '').trim();
+      if (manualCharge && !_details) return showToast('Enter the reason for the customer charge.');
       const _counterparty = String(byId('txCounterparty')?.value || '').trim();
-      confirmAction(`Submit single ${kind} request for approval?`, async () => {
+      confirmAction(manualCharge ? 'Has the charge been explained to the customer? Submit the debit for approval?' : `Submit single ${kind} request for approval?`, async () => {
+        if (byId('txManualCharge')) byId('txManualCharge').checked = false;
         // Wipe state and DOM immediately — before the network call — so no interim
         // render (from realtime events etc.) can ever restore old values.
         state.ui.txAccDraft = '';
@@ -9441,6 +9444,7 @@ function normalizeStaffLedgerEntryType(row) {
             receivedOrPaidBy: _counterparty,
             payoutSource: mode,
             paymentMode: mode,
+            ...(bookOnly ? { bookOnly: true } : {}),
             staffId: staff.id,
             date: businessDate()
           });
@@ -10497,7 +10501,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
     return (state.approvals||[])
       .filter(r => ['customer_credit','customer_debit','customer_credit_journal','customer_debit_journal'].includes(r.type)
         && r.status === 'pending'
-        && r.payload?.staffId === staffId
+        && cashPostingStaffId(r) === staffId
         && r.payload?.date === dateStr)
       .reduce((s,r)=> s + (r.type.endsWith('_journal') ? Number(r.payload?.formAmount || 0) : Number(r.payload?.amount || 0)), 0);
   }

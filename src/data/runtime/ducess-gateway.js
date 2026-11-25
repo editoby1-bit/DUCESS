@@ -1739,6 +1739,15 @@ if (inserted.error) {
       // either think a partial post happened, or (worse) skip the funding
       // leg forever after the rows already posted once.
       const hasFundingLeg = isJournal && !!(payload.fundingLeg && payload.fundingLeg.accountId);
+      const bookOnly = payload.bookOnly === true;
+      if (bookOnly) {
+        const account = await postingAccountKind(payload.customerId, payload.accountNumber);
+        const valid = (type === 'customer_debit' && account?.type === 'customer' && String(payload.details || '').trim())
+          || (type === 'customer_credit' && account?.type === 'income');
+        if (!valid || !Number.isFinite(Number(payload.amount)) || Number(payload.amount) <= 0) {
+          return defaultResult.err('INVALID_BOOK_POSTING', 'Check the account type, amount and charge description.');
+        }
+      }
       const expectedEntryCount = entries.length + (hasFundingLeg ? 1 : 0);
 
       // Staff account transactions are handled entirely by local state (applyRequest).
@@ -1802,7 +1811,7 @@ if (inserted.error) {
       // — skip the staff cash ledger entry entirely in that case. Otherwise
       // post it against fundingStaffId (falling back to staffId) exactly
       // as before.
-      if (!hasFundingLeg) {
+      if (!hasFundingLeg && !bookOnly) {
         const ledgerResult = await insertStaffCashLedgerEntry({
           approvalRequestId: requestRow.id,
           staffId: (isJournal && payload.fundingStaffId) ? payload.fundingStaffId : (payload.staffId || payload.requestedByStaffId || requestRow.requested_by_staff_id || null),
@@ -2071,7 +2080,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         const requestPayload = requestRow?.payload || {};
         const isStaffCreditDebit = (requestRow?.request_type === 'customer_credit' || requestRow?.request_type === 'customer_debit') && (requestPayload.accountType === 'staff' || requestPayload.accountType === 'staff_wallet');
         const isStaffJournal = (requestRow?.request_type === 'customer_credit_journal' || requestRow?.request_type === 'customer_debit_journal') && Array.isArray(requestPayload.rows) && requestPayload.rows.length > 0 && requestPayload.rows.some(r => r.accountType === 'staff' || r.accountType === 'staff_wallet');
-        if (!requestPayload.pairedPosting && !isStaffCreditDebit && !isStaffJournal) {
+        if (!requestPayload.pairedPosting && !requestPayload.bookOnly && !isStaffCreditDebit && !isStaffJournal) {
           const { data, error: rpcError } = await client.rpc(approvalPostingRpc, {
             p_request_id: payload.requestId,
             p_approved_by_staff_id: approver.staffId,
