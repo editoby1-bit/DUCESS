@@ -273,7 +273,7 @@
       // Teller and Overall Balance moved to Approval -> Daily/Weekly/
       // Monthly/Yearly Balances. Income & Expense Balance stays here too
       // because it also carries the Create Account / Post into Account forms.
-      tools: ['central_close_day','cash_receipt','staff_credit','operational_posting','operational_accounts','staff_roster','transaction_summary','permissions']
+      tools: ['admin_review','central_close_day','cash_receipt','staff_credit','operational_posting','operational_accounts','staff_roster','transaction_summary','permissions']
     },
     balances: {
       title: 'Balances',
@@ -301,6 +301,7 @@
     work_review: 'Work Review',
     teller_review: 'Tellerng Review',
     approval_review: 'Approval Review',
+    admin_review: 'ADMIN WORK REVIEW',
     treasury_review: 'Treasury Review',
     account_opening: 'Account Opening',
     account_maintenance: 'Account Maintenance',
@@ -1178,6 +1179,7 @@
 
   function hasPermission(tool, staff=currentStaff()) {
     if (!staff) return false;
+    if (tool === 'admin_review') return staffHasRole(staff, 'admin_officer');
     if (APPROVAL_SUB_TOOLS[tool]) return hasPermission(APPROVAL_SUB_TOOLS[tool].base, staff);
     if (REVIEW_SUB_TOOLS[tool]) return hasPermission(REVIEW_SUB_TOOLS[tool].base, staff);
     if (ADMIN_SUB_TOOLS[tool]) return staffHasRole(staff, 'admin_officer') || hasPermission(ADMIN_SUB_TOOLS[tool].base, staff);
@@ -3497,7 +3499,7 @@ function hideProcessing() {
         };
         return `<div class="tool-columns tellering-mixed-columns tellering-tools-only">
           <button class="tool-tab ${state.ui.tool==='check_balance'?'active':''}" data-tool="check_balance">${TOOL_LABELS.check_balance}</button>
-          ${group('adm_g', 'Administrative', ['adm_staff','adm_balance','adm_total'])}
+          ${group('adm_g', 'Administrative', ['adm_staff','adm_balance','adm_total','admin_review'])}
           ${group('aud_g', 'Audits', ['aud_cs','aud_tellers','aud_types','aud_customers'])}
           ${group('ict_g', 'ICT Unit', ['ict_access','ict_backup','ict_security','ict_network','ict_cyber','central_close_day'])}
         </div>`;
@@ -3605,6 +3607,7 @@ function hideProcessing() {
         state.ui.tool = null;
       } else {
         state.ui.tool = nextTool;
+        if (nextTool === 'admin_review') state.ui.reviewStaffId = '';
         state.ui.audAccountKind = '';
         if (nextTool === 'staff_directory') {
           // Always re-fetch fresh on entry — a newly approved staff_salary
@@ -3697,7 +3700,7 @@ function hideProcessing() {
       case 'check_balance': return renderCheckBalance();
       case 'my_statement': return renderMyStatement();
       case 'my_approvals': return renderMyApprovals();
-      case 'work_review': case 'teller_review': case 'approval_review': case 'treasury_review': return renderStaffReview(tool);
+      case 'work_review': case 'teller_review': case 'approval_review': case 'treasury_review': case 'admin_review': return renderStaffReview(tool);
       case 'account_opening': return renderAccountOpening();
       case 'account_maintenance': return renderAccountMaintenance();
       case 'account_reactivation': return renderAccountReactivation();
@@ -4007,7 +4010,7 @@ function hideProcessing() {
         if (filter.from && d < filter.from) return false;
         if (filter.to && d > filter.to) return false;
         return true;
-      }).map((tx, i) => `<tr>
+      }).sort(byTransactionDate).map((tx, i) => `<tr>
         <td>${i+1}</td>
         <td>${fmtDate(tx.date)}</td>
         <td>${escapeHtml(tx.details || '')}</td>
@@ -4918,7 +4921,7 @@ function hideProcessing() {
     const allTypes = ['work_review_change','account_opening','account_maintenance','account_reactivation','cash_receipt','inter_staff_credit','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','float_topup','operational_entry','create_operational_account','close_of_day','temp_grant','wallet_fund','debt_repayment'];
     const decided = (state.approvals || [])
       .filter(a => allTypes.includes(a.type) && a.status !== 'pending' && !isApprovalRoutedAway(a))
-      .sort((a, b) => new Date(approvalDisplayDate(b) || 0) - new Date(approvalDisplayDate(a) || 0));
+      .sort((a, b) => new Date(approvalDisplayDate(a) || 0) - new Date(approvalDisplayDate(b) || 0) || byApprovalPostingTime(a, b));
     const limit = state.ui.approvalHistoryLimit || 30;
     const rows = decided.slice(0, limit).map((a, i) => {
       const detailCell = ['account_opening','account_maintenance','account_reactivation'].includes(a.type)
@@ -6181,7 +6184,7 @@ function nextPaint() {
   function getOperationalFilteredRows() {
     const rawOperational = filterByDate(state.operations.entries || [], state.ui.operationalFilter || { preset: 'daily', from: '', to: '' });
     const kindFilter = state.ui.operationalType || 'all';
-    return rawOperational.filter(e => kindFilter==='all' ? true : e.kind===kindFilter);
+    return rawOperational.filter(e => kindFilter==='all' ? true : e.kind===kindFilter).sort(byTransactionDate);
   }
 
   function buildOperationalStatementRows() {
@@ -6315,7 +6318,7 @@ function nextPaint() {
   }
 
   function buildBusinessStatementRows() {
-    const filtered = [...getBusinessFilteredRows()].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const filtered = getBusinessFilteredRows();
     return filtered.map((e, idx) => {
       const txType = String(e.type || e.kind || '').toLowerCase();
       const normalizedType = txType === 'credit' || txType === 'debit'
@@ -6461,6 +6464,7 @@ function staffLedgerEvents(staffId) {
         const source = (acc.entries || []).find(entry => entry.id === key);
         if (source) { event.postedBy ||= source.postedBy || ''; event.approvedBy ||= source.approvedBy || ''; event.receivedOrPaidBy ||= source.receivedOrPaidBy || ''; }
       }
+      if (ctxReq) event.postedAt = ctxReq.approvedAt || ctxReq.requestedAt;
       seen.add(key);
       events.push(event);
     };
@@ -6564,7 +6568,7 @@ function staffLedgerEvents(staffId) {
     // the teller's crediting/debiting operations as the mirror of the
     // customer's entry (see the side rules below).
     let running = 0;
-    return events.sort((a,b)=> new Date(`${a.date}T12:00:00Z`) - new Date(`${b.date}T12:00:00Z`)).map(event => {
+    return events.sort((a, b) => byTransactionDate(a, b) || new Date(a.postedAt || 0) - new Date(b.postedAt || 0)).map(event => {
       const affects = ['form','credit','debit'].includes(event.runningType) && Number(event.delta || 0) !== 0;
       if (affects) running += Number(event.delta || 0);
       // Client (2026-10-22): funding moves between staff accounts are shown
@@ -6577,7 +6581,7 @@ function staffLedgerEvents(staffId) {
       const isFunding = event.runningType === 'form';
       const side = !affects ? '' : (isFunding ? (Number(event.delta) > 0 ? 'credit' : 'debit') : (Number(event.delta) > 0 ? 'debit' : 'credit'));
       return { ...event, side, runningBalance: running, staffName: staff.name || staffId };
-    }).map((event, seq) => ({ ...event, seq })).reverse(); // newest first; seq keeps same-day order
+    }).map((event, seq) => ({ ...event, seq }));
   }
 
   // SURGICAL ADDITION 2026-09-04 (client request): "every staff will have
@@ -6717,9 +6721,11 @@ function staffLedgerEvents(staffId) {
     work_review:     { title: 'Work Review',     sheet: 'Customer Service Work Review Format', mode: 'submitted', cod: false },
     teller_review:   { title: 'Tellerng Review', sheet: 'Teller Work Review Format',           mode: 'submitted', cod: true },
     treasury_review: { title: 'Treasury Review', sheet: 'Treasury Work Review Format',         mode: 'submitted', cod: true },
-    approval_review: { title: 'Approval Review', sheet: 'Approval Work Review Format',         mode: 'decided',   cod: false }
+    approval_review: { title: 'Approval Review', sheet: 'Approval Work Review Format',         mode: 'decided',   cod: false },
+    admin_review:    { title: TOOL_LABELS.admin_review, mode: 'all', cod: false }
   };
   function reviewToolFor(st) {
+    if (staffHasRole(st, 'admin_officer')) return 'admin_review';
     if (staffHasRole(st, 'customer_service')) return 'work_review';
     if (staffHasRole(st, 'teller')) return 'teller_review';
     if (staffHasRole(st, 'cash_officer')) return 'treasury_review';
@@ -6758,12 +6764,11 @@ function staffLedgerEvents(staffId) {
     const rows = [];
     const reqAmount = (r) => { const p = r.payload || {}; return Number(p.amount || p.formAmount || 0); };
     (state.approvals || []).forEach(r => {
-      if (def.mode === 'submitted') {
-        const mine = isMe(r.requestedBy) || isMe(r.requestedByStaffId) || (!r.requestedBy && r.requestedByName && r.requestedByName === st.name);
-        if (!mine) return;
+      const submittedByStaff = isMe(r.requestedBy) || isMe(r.requestedByStaffId) || (!r.requestedBy && r.requestedByName && r.requestedByName === st.name);
+      if (def.mode !== 'decided' && submittedByStaff) {
         const at = r.requestedAt || '';
         rows.push({ request: r, at, date: dateOnly(at), activity: prettyApprovalType(r.type),  amount: reqAmount(r), status: r.status || 'pending', other: r.status === 'pending' ? '—' : (r.approvedBy || r.approvedByName || '—') });
-      } else {
+      } else if (def.mode !== 'submitted') {
         if (!['approved', 'rejected'].includes(String(r.status || ''))) return;
         const mine = (r.approvedBy && r.approvedBy === st.name) || isMe(r.approvedByStaffId);
         if (!mine) return;
@@ -6771,7 +6776,7 @@ function staffLedgerEvents(staffId) {
         rows.push({ request: r, at, date: dateOnly(at), activity: prettyApprovalType(r.type),  amount: reqAmount(r), status: r.status, other: r.requestedByName || staffName(r.requestedBy) || '—' });
       }
     });
-    return rows.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    return rows.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
   }
   function canChangeReviewWork(req) {
     const st = currentStaff();
@@ -6855,8 +6860,8 @@ function staffLedgerEvents(staffId) {
     const heads = isCs ? ['S/N','A/C No','A/C Name','Address','Phone No','NIN','BVN','Approved By','Action'] : ['S/N','Transaction Type','A/C No','A/C Name','Description','Received/Paid By','Amount','Approved By','Action'];
     const staticAct = '<td class="wr-act-cell"><div class="wr-actions"><span class="wr-off">Reverse</span><span class="wr-off">Edit</span></div></td>';
     const blankRow = (n, show) => `<tr class="wr-row wr-blank"><th scope="row" class="wr-sn">${show ? n : ''}</th>${'<td></td>'.repeat(cols - 2)}${staticAct}</tr>`;
-    const body = secs.map(([heading, types, key]) => {
-      const customerWork = types.every(t => RV_CUSTOMER_WORK_TYPES.includes(t));
+    const body = secs.length ? secs.map(([heading, types, key]) => {
+      const customerWork = baseTool !== 'admin_review' && types.every(t => RV_CUSTOMER_WORK_TYPES.includes(t));
       const items = inRange.filter(r => types.includes(itemType(r)));
       let rows = items.map((r, i) => {
         const req = r.request, p = req.payload || {};
@@ -6888,7 +6893,7 @@ function staffLedgerEvents(staffId) {
       const per = isCs ? 1 : 2;
       for (let n = items.length + 1; n <= Math.max(3, items.length); n++) rows += blankRow(n, true) + (per > 1 ? blankRow(n, false) : '');
       return `<tr class="wr-section" ${key ? `data-wr-sec="${key}"` : ''}><th colspan="2">${escapeHtml(heading)}</th><td colspan="${cols - 2}"></td></tr>${rows}`;
-    }).join('');
+    }).join('') : `<tr><td colspan="${cols}">No work items in this period.</td></tr>`;
     return `<div class="wr-sheet"><div class="table-wrap wr-wrap"><table class="table wr-table"><caption class="wr-title">${escapeHtml(def.sheet || def.title)}</caption><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
   }
   function openReviewSheetModal(tool) {
@@ -7135,7 +7140,7 @@ function staffLedgerEvents(staffId) {
               side: delta ? (/^customer_(credit|debit)/.test(entryType) ? (delta > 0 ? 'debit' : 'credit') : (delta > 0 ? 'credit' : 'debit')) : '',
               details: row.note || '—'
             };
-          }).sort((a,b)=> new Date(`${staffLedgerDisplayDate(b)}T12:00:00Z`) - new Date(`${staffLedgerDisplayDate(a)}T12:00:00Z`));
+          }).sort((a,b)=> new Date(`${staffLedgerDisplayDate(a)}T12:00:00Z`) - new Date(`${staffLedgerDisplayDate(b)}T12:00:00Z`));
 
           // Update modal content
           const modalBody = document.querySelector('.modal-body, .modal .stack')?.closest('.modal-body') || document.querySelector('.modal-body');
@@ -7254,8 +7259,12 @@ function normalizeStaffLedgerEntryType(row) {
   function allApprovedCustomerTx(kind) {
     return flattenCustomerTx().filter(t => t.type === kind);
   }
+  function byTransactionDate(a, b) {
+    return new Date(a.date || 0) - new Date(b.date || 0) ||
+      new Date(a.createdAt || a.date || 0) - new Date(b.createdAt || b.date || 0);
+  }
   function flattenCustomerTx() {
-    return state.customers.flatMap(customer => (customer.transactions||[]).map(tx => ({ ...tx, customer })) ).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    return state.customers.flatMap(customer => (customer.transactions||[]).map(tx => ({ ...tx, customer })) ).sort(byTransactionDate);
   }
 
   
@@ -7338,7 +7347,7 @@ function normalizeStaffLedgerEntryType(row) {
       case 'check_balance': bindCheckBalance(); break;
       case 'my_statement': bindMyStatement(); break;
       case 'my_approvals': bindMyApprovals(); break;
-      case 'work_review': case 'teller_review': case 'approval_review': case 'treasury_review': bindStaffReview(); break;
+      case 'work_review': case 'teller_review': case 'approval_review': case 'treasury_review': case 'admin_review': bindStaffReview(); break;
       case 'account_opening': bindAccountOpening(); break;
       case 'account_maintenance': bindMaintenance('maintenance'); break;
       case 'account_reactivation': bindMaintenance('reactivation'); break;
@@ -8155,6 +8164,10 @@ function normalizeStaffLedgerEntryType(row) {
     };
   }
 
+  function byApprovalPostingTime(a, b) {
+    return new Date(a.approvedAt || a.requestedAt || 0) - new Date(b.approvedAt || b.requestedAt || 0);
+  }
+
   function renderTransactionSummary() {
     const filter = state.ui.txSummaryFilter ||= { date: businessDate(), period: 'day' };
     const categories = [
@@ -8205,14 +8218,14 @@ function normalizeStaffLedgerEntryType(row) {
         const d = r.payload?.date || String(r.approvedAt||'').slice(0,10);
         if (d !== filterDate) return false;
         return cat && matchesAny(r, cat);
-      });
+      }).sort(byApprovalPostingTime);
 
       if (filtered.length === 0) {
         detailRows = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">No transactions for this date</td></tr>`;
       } else if (activeKey === 'customer') {
         // For customer view: compute running balance per account
         // Build a map of all approved transactions per account (all time, sorted by date)
-        const allApproved = approvals.filter(r => r.status === 'approved');
+        const allApproved = approvals.filter(r => r.status === 'approved').sort(byApprovalPostingTime);
         const balanceMap = {}; // accountId -> running balance up to (not including) filterDate
         const todayTxMap = {}; // accountId -> [{amount, type, date, req}] for filterDate
 
@@ -8251,17 +8264,17 @@ function normalizeStaffLedgerEntryType(row) {
           let running = balanceMap[accountId] || 0;
           txList.forEach((tx, idx) => {
             running += tx.isCredit ? tx.amount : -tx.amount;
-            rows.push(`<tr>
+            rows.push({ approvedAt: tx.approvedAt, html: `<tr>
               <td>${acctNum}</td>
               <td>${escapeHtml(acctName)}</td>
               <td>${tx.type.replace(/_/g,' ')}</td>
               <td class="${tx.isCredit?'':'balance-negative'}">${tx.isCredit?'+':'-'}${money(tx.amount)}</td>
               <td class="${running<0?'balance-negative':''}">${money(running)}</td>
               <td style="white-space:nowrap">${fmtDateTime(tx.approvedAt) || tx.date}</td>
-            </tr>`);
+            </tr>` });
           });
         });
-        detailRows = rows.length ? rows.join('') : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">No customer transactions for this date</td></tr>`;
+        detailRows = rows.length ? rows.sort(byApprovalPostingTime).map(row => row.html).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">No customer transactions for this date</td></tr>`;
         if (rows.length) {
           const totalCredit = Object.values(todayTxMap).flat().filter(t=>t.isCredit).reduce((s,t)=>s+t.amount,0);
           const totalDebit = Object.values(todayTxMap).flat().filter(t=>!t.isCredit).reduce((s,t)=>s+t.amount,0);
@@ -10746,6 +10759,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
   function flattenBusinessEntries() {
     const txRows = flattenCustomerTx().map(t => ({
       date: t.date,
+      createdAt: t.createdAt,
       accountNumber: t.customer?.accountNumber || '',
       accountName: t.customer?.name || t.accountName || t.customerName || t.customer?.accountNumber || '',
       details: t.details || t.note || '',
@@ -10774,7 +10788,7 @@ function syncApprovedFormFromApprovalRecord(approvalRecord) {
       postedBy: postingStaffId(e.postedById, e.postedBy),
       approvedBy: postingStaffId(e.approvedByStaffId, e.approvedBy)
     }));
-    return [...txRows, ...extras].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    return [...txRows, ...extras].sort(byTransactionDate);
   }
 
   function renderBalanceFilters(kind) {

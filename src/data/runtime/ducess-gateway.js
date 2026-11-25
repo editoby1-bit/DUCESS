@@ -141,6 +141,7 @@ const ROLE_DEFAULT_TOOLS = {
       // 2026-11-09: keep who received/paid the money so the statement can show it.
       ...(rawTx.receivedOrPaidBy || rawTx.received_or_paid_by ? { receivedOrPaidBy: rawTx.receivedOrPaidBy || rawTx.received_or_paid_by } : {}),
       date: rawTx.date || rawTx.effective_at || rawTx.created_at || new Date().toISOString(),
+      ...(rawTx.createdAt || rawTx.created_at ? { createdAt: rawTx.createdAt || rawTx.created_at } : {}),
       balanceAfter: rawTx.balanceAfter ?? rawTx.balance_after ?? null,
       // Fix B 2026-10-22: summary ("brought forward") rows keep their markers.
       ...(rawTx.__bf ? { __bf: true, __count: Number(rawTx.__count || 1) } : {}),
@@ -721,7 +722,7 @@ async function submitDebtRepayment(_payload) {
         if (fromDate && time < fromDate) return false;
         if (toDate && time > toDate + 86399999) return false;
         return true;
-      }).sort((a, b) => new Date(b.date) - new Date(a.date));
+      }).sort((a, b) => new Date(a.date) - new Date(b.date));
       if (payload.limit && payload.limit > 0) filtered = filtered.slice(0, payload.limit);
       return defaultResult.ok(filtered);
     }
@@ -3512,7 +3513,7 @@ return defaultResult.ok(normalizeApprovalRecord(data));
         if (fromDate && time < fromDate) return false;
         if (toDate && time > toDate + 86399999) return false;
         return true;
-      }).sort((a, b) => new Date(b.date) - new Date(a.date));
+      }).sort((a, b) => new Date(a.date) - new Date(b.date));
       if (payload.limit && payload.limit > 0) entries = entries.slice(0, payload.limit);
       return defaultResult.ok(entries);
     }
