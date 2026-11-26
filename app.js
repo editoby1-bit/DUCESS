@@ -9426,9 +9426,9 @@ function normalizeStaffLedgerEntryType(row) {
         return showToast(`Insufficient funds — account balance is ${money(customer.balance || 0)}`);
       }
       if (manualCharge && (customer.accountType || 'customer') !== 'customer') return showToast('Choose a customer account.');
-      const bookOnly = manualCharge || (kind === 'credit' && customer.accountType === 'income');
+      const bookOnly = manualCharge;
       const mode = bookOnly ? 'transfer' : selectedMode();
-      const chargeBreakdown = kind === 'credit' && !bookOnly ? collectChargeBreakdownFromUi('single', amount) : [];
+      const chargeBreakdown = kind === 'credit' && customer.accountType !== 'income' ? collectChargeBreakdownFromUi('single', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       const customerCreditAmount = kind === 'credit' ? Math.max(0, amount - totalChargeAmount) : amount;
       // Snapshot form values NOW before confirmAction closes the modal (blur events
