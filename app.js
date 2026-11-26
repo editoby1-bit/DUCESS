@@ -1337,6 +1337,26 @@
     recalcStaffBalance(staffId);
   }
 
+  function bindAccountNumberLookup(input, lookup) {
+    if (!input) return;
+    let timer;
+    const updateDraft = input.oninput;
+    input.oninput = (event) => {
+      clearTimeout(timer);
+      updateDraft?.call(input, event);
+      const number = input.value.trim();
+      if (!number || input.dataset.restoring === '1') return;
+      timer = setTimeout(() => {
+        if (input.isConnected && input.value.trim() === number && getCustomerByAccountNo(number)) lookup(true);
+      }, 250);
+    };
+    input.onkeyup = (event) => {
+      if (event.key !== 'Enter') return;
+      clearTimeout(timer);
+      lookup(false);
+    };
+  }
+
   function getCustomerByAccountNo(accountNumber) {
     const key = String(accountNumber || '').trim();
     const customer = state.customers.find(c => String(c.accountNumber || '') === key);
@@ -4354,7 +4374,7 @@ function hideProcessing() {
     // Enter'd exact account number (matches the app-wide convention: Enter
     // does a quick exact lookup, the Search BUTTON opens the full picker —
     // see openJournalFundSearchModal below).
-    const refreshFundDisplay = () => {
+    const refreshFundDisplay = (quiet = false) => {
       const typedAcc = String(byId('jpmFundAcc')?.value || '').trim();
       const found = typedAcc ? getCustomerByAccountNo(typedAcc) : null;
       if (byId('jpmFundName')) byId('jpmFundName').textContent = found?.name || '—';
@@ -4362,13 +4382,17 @@ function hideProcessing() {
       setAccountStatusChip(byId('jpmFundStatus'), found);
       if (byId('jpmFundBalance')) byId('jpmFundBalance').textContent = money(balanceFor(found));
       if (byId('jpmFundType')) byId('jpmFundType').textContent = found ? accountTypeLabel(found.accountType) : '—';
-      if (!found) showToast('Account not found');
+      if (!found && !quiet) showToast('Account not found');
     };
     if (byId('jpmFundSearchBtn')) byId('jpmFundSearchBtn').onclick = () => {
       const currentTyped = String(byId('jpmFundAcc')?.value || '').trim();
       openJournalFundSearchModal(state.customers, record, currentTyped);
     };
-    if (byId('jpmFundAcc')) byId('jpmFundAcc').onkeyup = (e) => { if (e.key === 'Enter') refreshFundDisplay(); };
+    const fundingInput = byId('jpmFundAcc');
+    if (fundingInput) {
+      fundingInput.oninput = () => refreshFundDisplay(true);
+      fundingInput.onkeyup = event => { if (event.key === 'Enter') refreshFundDisplay(); };
+    }
   }
 
   // SURGICAL ADDITION 2026-09-24 (client-reported bug fix): a browsable
@@ -6765,13 +6789,14 @@ function staffLedgerEvents(staffId) {
     const rows = [];
     const reqAmount = (r) => { const p = r.payload || {}; return Number(p.amount || p.formAmount || 0); };
     (state.approvals || []).forEach(r => {
-      const submittedByStaff = isMe(r.requestedBy) || isMe(r.requestedByStaffId) || (!r.requestedBy && r.requestedByName && r.requestedByName === st.name);
+      const submitterId = r.requestedByStaffId || r.requestedBy;
+      const submittedByStaff = submitterId ? isMe(submitterId) : r.requestedByName === st.name;
       if (def.mode !== 'decided' && submittedByStaff) {
         const at = r.requestedAt || '';
         rows.push({ request: r, at, date: dateOnly(at), activity: prettyApprovalType(r.type),  amount: reqAmount(r), status: r.status || 'pending', other: r.status === 'pending' ? '—' : (r.approvedBy || r.approvedByName || '—') });
       } else if (def.mode !== 'submitted') {
         if (!['approved', 'rejected'].includes(String(r.status || ''))) return;
-        const mine = (r.approvedBy && r.approvedBy === st.name) || isMe(r.approvedByStaffId);
+        const mine = r.approvedByStaffId ? isMe(r.approvedByStaffId) : (r.approvedBy || r.approvedByName) === st.name;
         if (!mine) return;
         const at = r.approvedAt || r.requestedAt || '';
         rows.push({ request: r, at, date: dateOnly(at), activity: prettyApprovalType(r.type),  amount: reqAmount(r), status: r.status, other: r.requestedByName || staffName(r.requestedBy) || '—' });
@@ -6889,7 +6914,7 @@ function staffLedgerEvents(staffId) {
           const action = `<td class="wr-act-cell"><div class="wr-actions"><button type="button" class="wr-act danger tiny-btn" data-review-reverse="${escapeHtml(req.id)}" ${reversible ? '' : 'disabled title="Previous values or a supported database posting are required for reversal"'}>Reverse</button><button type="button" class="wr-act secondary tiny-btn" data-review-edit="${escapeHtml(req.id)}" ${editable ? '' : 'disabled title="Use Reverse followed by a new request for this work"'}>Edit</button></div>${req.reviewAction ? `<span class="wr-note">${escapeHtml(req.reviewAction)} ${req.status === 'approved' ? 'approved' : 'requested'}</span>` : ''}${req.payload?.__reviewResolved ? '<span class="wr-note">Correction completed</span>' : ''}</td>`;
           const sn = `<th scope="row" class="wr-sn">${n ? '' : `<button type="button" class="wr-sn-btn" data-review-request="${escapeHtml(req.id)}" title="View">${i + 1}</button>`}</th>`;
           const receivedOrSubmittedBy = adminOpening
-            ? postingStaffId(req.requestedByStaffId, req.requestedBy, req.requestedByName)
+            ? postingStaffId(req.requestedByStaffId || req.requestedBy || req.requestedByName)
             : (data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—');
           if (customerWork) return `<tr class="wr-row">${sn}<td>${escapeHtml(data.accountNumber || data.generatedAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.fullName || data.name || '—')}</td><td>${escapeHtml(data.address || '—')}</td><td>${escapeHtml(data.phone || '—')}</td><td>${escapeHtml(data.nin || '—')}</td><td>${escapeHtml(data.bvn || '—')}</td><td>${approvedCell}</td>${action}</tr>`;
           return `<tr class="wr-row">${sn}<td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(receivedOrSubmittedBy)}</td><td class="wr-amt">${money(entry.amount || p.formAmount || 0)}</td><td>${approvedCell}</td>${action}</tr>`;
@@ -7512,15 +7537,15 @@ function normalizeStaffLedgerEntryType(row) {
       lookupFill(byId('workspace'), c);
     };
     byId('lookupBtn').onclick = () => openCustomerSearchModal(state.customers);
-    // SURGICAL FIX 2026-09-03: client does not want the account fetched
-    // live as-you-type or on blur/tab — only on explicit Enter. Typing now
-    // only clears a stale display when the field is emptied; doLookup()
-    // itself runs solely from the Enter keyup below.
-    byId('lookupAcc').oninput = () => {
-      const v = (byId('lookupAcc')?.value || '').trim();
-      if (!v) doLookup(true);
+    const accountInput = byId('lookupAcc');
+    accountInput.oninput = () => {
+      state.ui.checkBalanceLoaded = false;
+      state.ui.accountStatementGenerated = false;
+      state.ui.selectedCustomerId = null;
+      hidePhoto();
+      lookupFill(byId('workspace'), null);
     };
-    byId('lookupAcc').onkeyup = (e) => { if (e.key === "Enter") doLookup(false); };
+    bindAccountNumberLookup(accountInput, doLookup);
     byId('openStatementBtn').onclick = () => { state.ui.tool = 'account_statement'; renderWorkspace(); };
     const photoBtn = byId('searchPhotoBtn'); if (photoBtn) photoBtn.onclick = ()=> {
       const row = byId('checkBalancePhotoRow');
@@ -7812,12 +7837,11 @@ function normalizeStaffLedgerEntryType(row) {
         draft.sourceBalance = Number(match.balance || 0);
         if (byId('staffCreditSourceInfo')) byId('staffCreditSourceInfo').innerHTML = `<strong>${escapeHtml(draft.sourceName)}</strong> <span class="journal-cell-label">Balance: </span>${balanceHtml(draft.sourceBalance)}`;
       };
-      // Enter-to-fetch only, same as every other account number field.
       sourceAccInput.oninput = () => {
         draft.sourceAcct = sourceAccInput.value; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0;
         if (byId('staffCreditSourceInfo')) byId('staffCreditSourceInfo').innerHTML = '';
       };
-      sourceAccInput.onkeyup = (e) => { if (e.key === 'Enter') lookupSourceAcct(); };
+      bindAccountNumberLookup(sourceAccInput, lookupSourceAcct);
       if (byId('staffCreditSourceSearch')) byId('staffCreditSourceSearch').onclick = () => { state.ui.nonCashSearchTarget = 'staffCreditSource'; openCustomerSearchModal(state.customers); };
     }
     const submitBtn = byId('submitStaffCredit');
@@ -8038,33 +8062,29 @@ function normalizeStaffLedgerEntryType(row) {
       }
     };
 
-    // SURGICAL FIX 2026-09-03 (client correction, supersedes the 2026-08-28
-    // addition below): client does not want the account fetched live as
-    // you type — only on explicit Enter, same as every other account
-    // number field in the app. Typing now only persists the draft and
-    // clears the stale name/id/balance when the number is edited;
-    // lookupAcct() runs solely from the Enter keyup handlers below.
     if (sourceInput) sourceInput.oninput = () => {
       draft.sourceAcct = sourceInput.value; draft.sourceName = ''; draft.sourceId = ''; draft.sourceBalance = 0;
       if (byId('itrSourceName')) byId('itrSourceName').innerHTML = '';
       if (byId('itrSourceBalance')) byId('itrSourceBalance').innerHTML = '';
+      setAccountStatusChip(byId('itrSourceStatus'), null);
+      if (byId('itrSourceType')) byId('itrSourceType').textContent = '—';
     };
     if (destInput) destInput.oninput = () => {
       draft.destAcct = destInput.value; draft.destName = ''; draft.destId = ''; draft.destBalance = 0;
       if (byId('itrDestName')) byId('itrDestName').innerHTML = '';
       if (byId('itrDestBalance')) byId('itrDestBalance').innerHTML = '';
+      setAccountStatusChip(byId('itrDestStatus'), null);
+      if (byId('itrDestType')) byId('itrDestType').textContent = '—';
 
     };
-    if (sourceInput) sourceInput.onkeyup = (e) => {
-      if (e.key !== 'Enter') return;
+    bindAccountNumberLookup(sourceInput, () => {
       const v = sourceInput.value.trim();
       if (v) lookupAcct(v, 'itrSourceName', 'sourceId', 'sourceName', 'itrSourceBalance', 'sourceBalance', false);
-    };
-    if (destInput) destInput.onkeyup = (e) => {
-      if (e.key !== 'Enter') return;
+    });
+    bindAccountNumberLookup(destInput, () => {
       const v = destInput.value.trim();
       if (v) lookupAcct(v, 'itrDestName', 'destId', 'destName', 'itrDestBalance', 'destBalance', true);
-    };
+    });
     // Amount Received on the Credit side is always the same figure as
     // Amount Paid on the Debit side (one transfer), so it just mirrors it.
     if (amtInput) { bindAmountCommaFormatting('itrAmount'); amtInput.addEventListener('input', () => { draft.amount = amtInput.value; if (byId('itrAmountReceived')) byId('itrAmountReceived').textContent = formatAmountText(amtInput.value); }); }
@@ -8433,16 +8453,18 @@ function normalizeStaffLedgerEntryType(row) {
     };
     const accInput = byId(`${prefix}Acc`);
     if (accInput) {
-      // SURGICAL FIX 2026-09-03: client does not want the account fetched
-      // live as-you-type — only on explicit Enter. oninput now only
-      // persists the draft account number; doLookup() runs solely from
-      // the Enter keyup below.
       accInput.oninput = () => {
         const v = (accInput.value || '').trim();
+        if (draft.accountNumber !== v) {
+          Object.keys(draft).forEach(k => delete draft[k]);
+          state.ui.selectedCustomerId = null;
+          detailIds.forEach(id => { const field = byId(id); if (field) field.value = ''; });
+          setDetailsEditable(false);
+        }
         draft.accountNumber = v;
         save();
       };
-      accInput.onkeyup = (e) => { if (e.key === 'Enter') doLookup(false); };
+      bindAccountNumberLookup(accInput, doLookup);
     }
     const searchBtn = byId(`${prefix}Search`);
     if (searchBtn) searchBtn.onclick = () => openCustomerSearchModal(state.customers);
@@ -9037,22 +9059,17 @@ function normalizeStaffLedgerEntryType(row) {
         state.ui.collapsedJournals[visibilityKey] = false;
         save();
       };
-      // SURGICAL FIX 2026-09-03: client does not want the account fetched
-      // live as-you-type or on blur/tab — only on explicit Enter. oninput
-      // and onchange now do draft persistence (and clearing when the field
-      // is emptied) only; searchSingle() runs solely from the Enter keyup
-      // below.
       byId('txAcc').oninput = () => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
-        if (!v) { clearSingleCustomer(); return; }
+        if (!v || String(getSelectedCustomer()?.accountNumber || '') !== v) clearSingleCustomer();
       };
       byId('txAcc').onchange = () => {
         const v = (byId('txAcc').value || '').trim();
         state.ui.txAccDraft = v;
         if (!v) { clearSingleCustomer(); return; }
       };
-      byId('txAcc').onkeyup = e => { if(e.key==='Enter') searchSingle(); };
+      bindAccountNumberLookup(byId('txAcc'), quiet => searchSingle({ quiet }));
     }
 
     if (byId('txApplyCharges')) byId('txApplyCharges').onchange = () => {
@@ -9156,7 +9173,7 @@ function normalizeStaffLedgerEntryType(row) {
         state.ui.journalAccDraft = v;
         if (!v) { clearJournalCustomer(); return; }
       };
-      byId('journalAcc').onkeyup = e => { if(e.key==='Enter') searchJournal(); };
+      bindAccountNumberLookup(byId('journalAcc'), quiet => searchJournal({ quiet }));
     }
 
     if (byId('journalApplyCharges')) byId('journalApplyCharges').onchange = () => {
@@ -10015,7 +10032,7 @@ function normalizeStaffLedgerEntryType(row) {
         }
       };
       customerAcctInput.oninput = () => { selectedCustomer = null; if (customerInfo) customerInfo.innerHTML = ''; };
-      customerAcctInput.onkeyup = (e) => { if (e.key === 'Enter') lookupCustomer(); };
+      bindAccountNumberLookup(customerAcctInput, lookupCustomer);
     }
   }
 
