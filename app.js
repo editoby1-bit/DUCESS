@@ -6858,10 +6858,12 @@ function staffLedgerEvents(staffId) {
     } else secs.push(...extras);
     const isCs = baseTool === 'work_review' || (subKey ? RV_CUSTOMER_WORK_TYPES.includes(secs[0]?.[1]?.[0]) : false);
     const cols = 9;
-    const heads = isCs ? ['S/N','A/C No','A/C Name','Address','Phone No','NIN','BVN','Approved By','Action'] : ['S/N','Transaction Type','A/C No','A/C Name','Description','Received/Paid By','Amount','Approved By','Action'];
+    const openingOnly = baseTool === 'admin_review' && secs.length === 1 && secs[0][1].includes('account_opening');
+    const heads = isCs ? ['S/N','A/C No','A/C Name','Address','Phone No','NIN','BVN','Approved By','Action'] : ['S/N','Transaction Type','A/C No','A/C Name','Description',openingOnly ? 'Submitted By' : 'Received/Paid By','Amount','Approved By','Action'];
     const staticAct = '<td class="wr-act-cell"><div class="wr-actions"><span class="wr-off">Reverse</span><span class="wr-off">Edit</span></div></td>';
     const blankRow = (n, show) => `<tr class="wr-row wr-blank"><th scope="row" class="wr-sn">${show ? n : ''}</th>${'<td></td>'.repeat(cols - 2)}${staticAct}</tr>`;
     const body = secs.length ? secs.map(([heading, types, key]) => {
+      const adminOpening = baseTool === 'admin_review' && types.includes('account_opening');
       const customerWork = baseTool !== 'admin_review' && types.every(t => RV_CUSTOMER_WORK_TYPES.includes(t));
       const items = inRange.filter(r => types.includes(itemType(r)));
       let rows = items.map((r, i) => {
@@ -6886,14 +6888,17 @@ function staffLedgerEvents(staffId) {
           const reversible = changeable && (req.status === 'pending' || (['account_opening','account_maintenance','account_reactivation','account_block','account_closure','customer_credit','customer_debit','customer_credit_journal','customer_debit_journal','intra_bank_transfer','cash_receipt','inter_staff_credit','operational_entry'].includes(req.type) && (req.type !== 'account_maintenance' || req.payload?.__reviewBefore)));
           const action = `<td class="wr-act-cell"><div class="wr-actions"><button type="button" class="wr-act danger tiny-btn" data-review-reverse="${escapeHtml(req.id)}" ${reversible ? '' : 'disabled title="Previous values or a supported database posting are required for reversal"'}>Reverse</button><button type="button" class="wr-act secondary tiny-btn" data-review-edit="${escapeHtml(req.id)}" ${editable ? '' : 'disabled title="Use Reverse followed by a new request for this work"'}>Edit</button></div>${req.reviewAction ? `<span class="wr-note">${escapeHtml(req.reviewAction)} ${req.status === 'approved' ? 'approved' : 'requested'}</span>` : ''}${req.payload?.__reviewResolved ? '<span class="wr-note">Correction completed</span>' : ''}</td>`;
           const sn = `<th scope="row" class="wr-sn">${n ? '' : `<button type="button" class="wr-sn-btn" data-review-request="${escapeHtml(req.id)}" title="View">${i + 1}</button>`}</th>`;
+          const receivedOrSubmittedBy = adminOpening
+            ? postingStaffId(req.requestedByStaffId, req.requestedBy, req.requestedByName)
+            : (data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—');
           if (customerWork) return `<tr class="wr-row">${sn}<td>${escapeHtml(data.accountNumber || data.generatedAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.fullName || data.name || '—')}</td><td>${escapeHtml(data.address || '—')}</td><td>${escapeHtml(data.phone || '—')}</td><td>${escapeHtml(data.nin || '—')}</td><td>${escapeHtml(data.bvn || '—')}</td><td>${approvedCell}</td>${action}</tr>`;
-          return `<tr class="wr-row">${sn}<td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(data.receivedOrPaidBy || data.counterparty || p.staffName || req.requestedByName || '—')}</td><td class="wr-amt">${money(entry.amount || p.formAmount || 0)}</td><td>${approvedCell}</td>${action}</tr>`;
+          return `<tr class="wr-row">${sn}<td>${escapeHtml(entry.type || (type.includes('debit') ? 'debit' : type.includes('credit') ? 'credit' : prettyApprovalType(type)))}</td><td>${escapeHtml(data.accountNumber || data.fromAccountNumber || '—')}</td><td>${escapeHtml(data.customerName || data.name || '—')}</td><td>${escapeHtml(data.details || data.description || data.note || '—')}</td><td>${escapeHtml(receivedOrSubmittedBy)}</td><td class="wr-amt">${money(entry.amount || p.formAmount || 0)}</td><td>${approvedCell}</td>${action}</tr>`;
         }).join('');
       }).join('');
       // Like the sheet, every section always shows at least slots 1, 2 and 3.
       const per = isCs ? 1 : 2;
       for (let n = items.length + 1; n <= Math.max(3, items.length); n++) rows += blankRow(n, true) + (per > 1 ? blankRow(n, false) : '');
-      return `<tr class="wr-section" ${key ? `data-wr-sec="${key}"` : ''}><th colspan="2">${escapeHtml(heading)}</th><td colspan="${cols - 2}"></td></tr>${rows}`;
+      return `<tr class="wr-section" ${key ? `data-wr-sec="${key}"` : ''}><th colspan="2">${escapeHtml(heading)}</th>${adminOpening && !openingOnly ? '<td colspan="3"></td><th>Submitted By</th><td colspan="3"></td>' : `<td colspan="${cols - 2}"></td>`}</tr>${rows}`;
     }).join('') : `<tr><td colspan="${cols}">No work items in this period.</td></tr>`;
     return `<div class="wr-sheet"><div class="table-wrap wr-wrap"><table class="table wr-table"><caption class="wr-title">${escapeHtml(def.sheet || def.title)}</caption><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
   }
