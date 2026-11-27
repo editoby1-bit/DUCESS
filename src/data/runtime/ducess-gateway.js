@@ -1744,7 +1744,8 @@ if (inserted.error) {
       if (bookOnly) {
         const account = await postingAccountKind(payload.customerId, payload.accountNumber);
         const valid = (type === 'customer_debit' && account?.type === 'customer')
-          || (type === 'customer_credit' && account?.type === 'income');
+          || (type === 'customer_credit' && account?.type === 'income')
+          || (account?.type === 'treasury' && ['customer_debit', 'customer_credit'].includes(type));
         if (!valid || !Number.isFinite(Number(payload.amount)) || Number(payload.amount) <= 0) {
           return defaultResult.err('INVALID_BOOK_POSTING', 'Check the account type and amount.');
         }

@@ -9413,22 +9413,26 @@ function normalizeStaffLedgerEntryType(row) {
       // from today's credits can be paid out on a debit.
       const manualCharge = kind === 'debit' && Boolean(byId('txManualCharge')?.checked);
       const tillNow = getTillBreakdown(staff.id, businessDate()).till;
-      if (kind === 'debit' && !manualCharge && tillNow <= 0) return showToast('No cash in your Till to pay out — post a credit or receive a transfer first');
       const accountNumberInput = String(byId('txAcc')?.value || '').trim();
       const customer = getCustomerByAccountNo(accountNumberInput);
       if (!accountNumberInput || !customer) return showToast('Search for customer first');
+      const treasuryPosting = customer.accountType === 'treasury';
+      if (treasuryPosting && !staffHasRole(staff, 'cash_officer') && !isAdminStaff(staff)) {
+        return showToast('Only Treasury or Administration can post directly to a Treasury account');
+      }
+      if (kind === 'debit' && !manualCharge && !treasuryPosting && tillNow <= 0) return showToast('No cash in your Till to pay out — post a credit or receive a transfer first');
       if (isCustomerFrozen(customer) || customer.active === false) { freezeInactiveCustomer(customer); save(); return showToast(customer.closed ? 'Closed account cannot accept transactions' : 'Frozen account cannot accept transactions'); }
       const amount = Number(byId('txAmount').value || 0);
       if (!(amount > 0)) return showToast('Enter a valid amount');
-      if (kind === 'debit' && !manualCharge && amount > tillNow + 0.01) return showToast(`Debit exceeds your Till (${money(tillNow)})`);
+      if (kind === 'debit' && !manualCharge && !treasuryPosting && amount > tillNow + 0.01) return showToast(`Debit exceeds your Till (${money(tillNow)})`);
       // 2026-11-02 (client): an account with no money must not be debited.
       if (kind === 'debit' && !['expense','income','staff_operational'].includes(String(customer.accountType || 'customer')) && amount > Number(customer.balance || 0) + 0.01) {
         return showToast(`Insufficient funds — account balance is ${money(customer.balance || 0)}`);
       }
       if (manualCharge && (customer.accountType || 'customer') !== 'customer') return showToast('Choose a customer account.');
-      const bookOnly = manualCharge;
+      const bookOnly = manualCharge || treasuryPosting;
       const mode = bookOnly ? 'transfer' : selectedMode();
-      const chargeBreakdown = kind === 'credit' && customer.accountType !== 'income' ? collectChargeBreakdownFromUi('single', amount) : [];
+      const chargeBreakdown = kind === 'credit' && !treasuryPosting && customer.accountType !== 'income' ? collectChargeBreakdownFromUi('single', amount) : [];
       const totalChargeAmount = chargeBreakdown.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       const customerCreditAmount = kind === 'credit' ? Math.max(0, amount - totalChargeAmount) : amount;
       // Snapshot form values NOW before confirmAction closes the modal (blur events
